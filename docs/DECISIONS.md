@@ -185,3 +185,13 @@ Run: https://github.com/Ali-M1X/trade/actions/runs/36741131896 (throwaway local 
 | 111 | Cooldown | No new signal on a coin for 24 h after one of its signals closes at the stop (`sl`; breakevens don't count). | `lifecycle.cooldown_after_stop_h` |
 | 112 | Holdout | Each variant replays the whole year once. Trades are assigned to the tuning period (first 273 days) or the holdout (last 92 days) by their opening time. The choice is the best total net R in the tuning period (≥ 10 trades); its holdout result is reported, not optimised. | `backtest.holdout_days`, `backtest.min_trades_to_choose` |
 | 113 | Parallel run | The workflow fetches history once and uploads the database. Six jobs replay one variant each in parallel, and a final job builds the comparison. A test keeps the workflow's variant list equal to `backtest.variants`. | — |
+
+## Step 6: scheduling and README
+
+| # | Topic | Decision | Config key |
+|---|---|---|---|
+| 114 | One trigger, due-task logic | One workflow (`agent.yml`) with a single cron every 15 minutes, running `trade-agent run-scheduled`. That command runs what is due, comparing each task's last completed run (stored in the database) with the latest period boundary: run-15m every time, run-4h after each 4H close, run-1h after each 1H close, run-daily at 00:00 UTC, run-weekly on Monday 00:00 UTC. GitHub's cron is often late and sometimes skips runs; with this design a later run catches up instead of missing a 4H or daily run. The order within a run is manage → funnel → L6 → reports. | `schedule.trigger_check_minutes` |
+| 115 | Failure isolation | If one task raises, the others still run and the state is still pushed; the failed task isn't marked done, so it runs again next time. The job exits non-zero, so the failure shows in Actions. | — |
+| 116 | State on GitHub | `AGENT_STORAGE=git_branch` in the workflow: the database is pulled from and pushed to the `data` branch once per run (see #9). The workflow needs `contents: write`, and the `agent` concurrency group queues runs so two never push at once. | `storage.*` |
+| 117 | Schedules and the default branch | GitHub runs cron workflows only from the default branch, so the schedule starts after this branch is merged. The README covers it, along with Actions write permission, private-repo minutes (`*/30`) and the 60-day inactivity rule. | — |
+| 118 | VPS | The same `run-scheduled` from the system crontab, with `storage.backend: local` (the default in config.yaml). | `storage.backend` |

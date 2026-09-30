@@ -93,6 +93,43 @@ def cmd_run_weekly(args, cfg, secrets) -> int:
     return 0
 
 
+def cmd_run_scheduled(args, cfg, secrets) -> int:
+    """Run whatever is due (see scheduler.py) with one storage pull and push."""
+    import logging
+
+    from .notify.telegram import Notifier
+    from .runs import (daily, hold_new_entrants, manage, run_1h, run_4h, summarize_evaluations,
+                       summarize_funnel, weekly)
+    from .scheduler import due_tasks
+    storage, repo, market, cg, now = open_context(cfg, secrets)
+    notifier = Notifier(cfg, secrets)
+    last = repo.get_state("last_runs", {})
+    tasks = args.only.split(",") if args.only else due_tasks(now, last)
+    print(f"due: {', '.join(tasks)}")
+    failed = []
+    for task in tasks:
+        try:
+            if task == "run-15m":
+                print(f"run-15m: {len(manage(cfg, repo, market, notifier, now))} signal events")
+            elif task == "run-4h":
+                print(summarize_funnel(run_4h(cfg, repo, market, cg, now)))
+            elif task == "run-1h":
+                print(summarize_evaluations(run_1h(cfg, repo, market, now, notifier)))
+            elif task == "run-daily":
+                daily(cfg, repo, notifier, now)
+                hold_new_entrants(cfg, repo, market, cg, notifier, now)
+            elif task == "run-weekly":
+                print(f"run-weekly: {len(weekly(cfg, repo, market, cg, notifier, now))} HOLD ideas")
+            last[task] = now
+            repo.set_state("last_runs", last)
+        except Exception:                       # one failing task must not block the others
+            logging.getLogger(__name__).exception("%s failed", task)
+            failed.append(task)
+    repo.close()
+    storage.push("run-scheduled " + ",".join(tasks))
+    return 1 if failed else 0
+
+
 def cmd_backtest(args, cfg, secrets) -> int:
     import time
 
@@ -147,6 +184,7 @@ COMMANDS = {
     "run-15m": cmd_run_15m,
     "run-daily": cmd_run_daily,
     "run-weekly": cmd_run_weekly,
+    "run-scheduled": cmd_run_scheduled,
     "backtest": cmd_backtest,
     "backtest-compare": cmd_backtest_compare,
 }
@@ -171,6 +209,8 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--fetch-only", action="store_true", help="download history, don't replay")
             p.add_argument("--variant", help="replay one config variant (backtest.variants)")
             p.add_argument("--json", help="with --variant: where to save the raw results")
+        if name == "run-scheduled":
+            p.add_argument("--only", help="comma-separated tasks to force, e.g. run-4h,run-1h")
         if name == "backtest-compare":
             p.add_argument("inputs", nargs="+", help="variant result JSON files")
             p.add_argument("--out", default="docs/BACKTEST.md")
