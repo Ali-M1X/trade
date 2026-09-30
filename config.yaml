@@ -209,7 +209,12 @@ technical:
     climax_penalty: -5
   candles:
     max_points: 10
+    # pin bar: rejection wick >= 2x body and >= 60% of the range, body <= 1/3 of the range,
+    # opposite wick <= 20% of the range
     pinbar_wick_body: 2.0
+    pinbar_max_body_range: 0.3333333333
+    pinbar_min_wick_range: 0.6
+    pinbar_max_opposite_range: 0.2
     strong_close_pct: 25
     body_min_atr: 0.8
     body_max_atr: 2.0

@@ -31,11 +31,19 @@ def engulfing(prev, cur, side: int) -> bool:
     return min(cur["open"], cur["close"]) <= lo and max(cur["open"], cur["close"]) >= hi and body(cur) > body(prev)
 
 
-def pin_bar(c, side: int, wick_body: float) -> bool:
-    """Rejection wick (lower for long, upper for short) >= wick_body * body and longer
-    than the opposite wick. A zero-body candle counts when the wick dominates."""
+def pin_bar(c, side: int, t: dict) -> bool:
+    """Rejection wick (lower for long, upper for short) >= pinbar_wick_body x body and
+    >= pinbar_min_wick_range of the range; body <= pinbar_max_body_range of the range;
+    opposite wick <= pinbar_max_opposite_range of the range. `t` = technical.candles config."""
+    rng = c["high"] - c["low"]
+    if rng <= 0:
+        return False
     wick, other = (lower_wick(c), upper_wick(c)) if side == 1 else (upper_wick(c), lower_wick(c))
-    return wick > 0 and wick >= wick_body * body(c) and wick > other
+    eps = 1e-12 * rng
+    return bool(wick >= t["pinbar_wick_body"] * body(c) - eps
+            and wick >= t["pinbar_min_wick_range"] * rng - eps
+            and body(c) <= t["pinbar_max_body_range"] * rng + eps
+            and other <= t["pinbar_max_opposite_range"] * rng + eps)
 
 
 def strong_close(c, side: int, pct: float) -> bool:
@@ -69,7 +77,7 @@ def trigger_candle(df: pd.DataFrame, i: int, side: int, cfg: dict) -> str | None
     cur = df.iloc[i]
     if i > 0 and engulfing(df.iloc[i - 1], cur, side):
         return "engulfing"
-    if pin_bar(cur, side, t["pinbar_wick_body"]):
+    if pin_bar(cur, side, t):
         return "pin_bar"
     if color(cur) == side and strong_close(cur, side, t["strong_close_pct"]):
         return "strong_close"

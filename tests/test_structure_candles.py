@@ -55,13 +55,34 @@ def test_engulfing():
     assert not cd.engulfing(prev, small, 1)
 
 
-def test_pin_bar_and_strong_close():
+def test_pin_bar_and_strong_close(cfg):
+    t = cfg["technical"]["candles"]
     hammer = candles([(10, 10.3, 8, 10.2)]).iloc[0]      # lower wick 2, body 0.2
-    assert cd.pin_bar(hammer, 1, 2.0) and not cd.pin_bar(hammer, -1, 2.0)
+    assert cd.pin_bar(hammer, 1, t) and not cd.pin_bar(hammer, -1, t)
     assert cd.strong_close(hammer, 1, 25)                 # close at 96% of range
     marubozu = candles([(10, 11, 10, 11)]).iloc[0]
-    assert not cd.pin_bar(marubozu, 1, 2.0)
+    assert not cd.pin_bar(marubozu, 1, t)
     assert cd.strong_close(candles([(11, 11, 10, 10)]).iloc[0], -1, 25)
+
+
+@pytest.mark.parametrize("o, c, ok, why", [
+    (7.5, 8.5, True, "wick 75%, body 10%, opposite 15%"),
+    (6.5, 7.5, False, "opposite wick 25% of range"),
+    (5.8, 8.0, False, "wick 58% of range (< 60%) though >= 2x body"),
+    (8.0, 10.0, True, "wick 80%, body 20%, no opposite wick"),
+    (5.0, 5.2, False, "near-doji, wicks 50% / 48% (the old rule accepted it)"),
+    (6.0, 9.2, False, "body 32%, wick 60% but < 2x body"),
+])
+def test_pin_bar_strict_rules(cfg, o, c, ok, why):
+    """Range 0..10. Long pin bars: lower wick = min(o, c)."""
+    bar = candles([(o, 10, 0, c)]).iloc[0]
+    assert cd.pin_bar(bar, 1, cfg["technical"]["candles"]) is ok, why
+
+
+def test_pin_bar_short_mirror(cfg):
+    t = cfg["technical"]["candles"]
+    shooting_star = candles([(2.5, 10, 0, 1.5)]).iloc[0]   # upper wick 75%, lower 15%
+    assert cd.pin_bar(shooting_star, -1, t) and not cd.pin_bar(shooting_star, 1, t)
 
 
 def test_size_class():
