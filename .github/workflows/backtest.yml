@@ -1,0 +1,93 @@
+name: backtest
+
+# fetch history once -> replay every config variant in parallel -> one comparison report
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/agent/backtest/**"
+      - ".github/workflows/backtest.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backtest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - run: trade-agent -v backtest --fetch-only 2>&1 | tail -20
+      - run: gzip -k data/backtest.db
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-db
+          path: data/backtest.db.gz
+          retention-days: 30
+
+  replay:
+    needs: fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # must match backtest.variants in config.yaml (a test checks this)
+        variant: [baseline, swing_stop, min_stop, tp1_cap, cooldown, combined]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          path: data
+      - run: gunzip data/backtest.db.gz
+      - run: trade-agent -v backtest --variant ${{ matrix.variant }} --json ${{ matrix.variant }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: variant-${{ matrix.variant }}
+          path: ${{ matrix.variant }}.json
+
+  compare:
+    needs: replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: variant-*
+          path: results
+          merge-multiple: true
+      - run: trade-agent backtest-compare results/*.json --out BACKTEST.md > /dev/null
+      - name: Report
+        run: |
+          cat BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
+          echo "----- BACKTEST.md -----"
+          cat BACKTEST.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-report
+          path: |
+            BACKTEST.md
+            results/*.json

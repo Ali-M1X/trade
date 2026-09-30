@@ -1,0 +1,48 @@
+name: agent
+
+# One frequent trigger; `run-scheduled` decides what is due (15m management every time,
+# L1-L5 after each 4H close, L6 after each 1H close, daily and weekly reports), so late or
+# skipped cron runs catch up. Schedules only run from the default branch.
+on:
+  schedule:
+    - cron: "*/15 * * * *"        # public repo. Private repo: "*/30 * * * *" (free minutes)
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Force tasks, e.g. run-4h,run-1h (empty = whatever is due)"
+        required: false
+
+permissions:
+  contents: write                 # the SQLite state lives on the `data` branch
+
+concurrency:
+  group: agent                    # never two runs pushing the state at once
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+      AGENT_STORAGE: git_branch
+      GIT_AUTHOR_NAME: trade-signal-agent
+      GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+      GIT_COMMITTER_NAME: trade-signal-agent
+      GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - name: Run what is due
+        run: |
+          if [ -n "${{ inputs.only }}" ]; then
+            trade-agent run-scheduled --only "${{ inputs.only }}"
+          else
+            trade-agent run-scheduled
+          fi

@@ -1,0 +1,385 @@
+# trade-signal-agent configuration.
+# Every threshold, weight and period used by the engine lives here (docs/STRATEGY.md is the source).
+# Secrets are NOT stored here; they come from environment variables:
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, COINGECKO_API_KEY (optional)
+
+# ---------------------------------------------------------------- data sources
+exchange:
+  primary: okx
+  # Tried in order when the primary fails. GitHub runners are in the US where
+  # Binance/Bybit block requests. Names are ccxt ids ("gate" is Gate.io).
+  fallbacks: [gate, bitget, mexc, kucoinfutures, bitunix]
+  market_type: swap            # USDT-margined perpetuals
+  quote: USDT
+  timeout_ms: 20000
+  ohlcv_limit: 500             # candles per request
+  retries: 3
+  retry_backoff_s: 2
+
+coingecko:
+  base_url: https://api.coingecko.com/api/v3
+  demo_header: x-cg-demo-api-key
+  min_interval_s: 2.5          # free tier is ~30 calls/min; stay well under
+  retries: 4
+  retry_backoff_s: 15          # waited after a 429, doubled each retry
+  timeout_s: 30
+  cache_ttl_s:
+    markets: 3600
+    categories: 3600
+    global: 600
+    market_chart: 86400
+    coin_categories: 604800
+
+tvdatafeed:
+  enabled: false               # optional unofficial fallback for USDT.D/BTC.D/TOTAL2
+
+# ------------------------------------------------------------------ universe
+universe:
+  top_n: 100
+  min_volume_24h_usd: 10000000
+  # Pulled from CoinGecko categories and removed from the universe.
+  exclude_categories: [stablecoins, wrapped-tokens]
+  # Always excluded, in case a category lookup fails or misses one.
+  exclude_ids: [tether, usd-coin, dai, first-digital-usd, ethena-usde, usds, true-usd,
+                paypal-usd, frax, wrapped-bitcoin, weth, wrapped-steth, wrapped-eeth,
+                coinbase-wrapped-btc, binance-bridged-usdt-bnb-smart-chain, bridged-usdc-polygon-pos-bridge]
+  exclude_symbols: [usdt, usdc, dai, fdusd, usde, usds, tusd, pyusd, frax, busd, wbtc, weth,
+                    wsteth, weeth, cbbtc, steth]
+  add_exchange_trending: true
+  add_hot_category_coins: true # add coins of the hot categories (scanners.hot_sector)
+  hot_category_coins: 50       # coins fetched per hot category (by market cap)
+
+# --------------------------------------------------------------- timeframes
+timeframes:
+  macro: 1w
+  context: 1d
+  setup: 4h
+  trigger: 1h
+  fast_trigger: 15m
+
+# -------------------------------------------------------- shared indicators
+indicators:
+  ma_fast: 7
+  ma_mid: 25
+  ma_slow: 99
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  atr_period: 14
+  rvol_lookback: 20
+  bollinger_period: 20
+  bollinger_std: 2
+  obv_lookback: 20
+
+swings:
+  # Fractal pivot: N candles on each side.
+  pivot_lr:
+    4h: 3
+    1h: 3
+    15m: 3
+    1d: 5
+    1w: 5
+  level_cluster_atr: 0.5       # pivots closer than 0.5 * ATR form one level
+  level_min_touches: 2
+  round_number_levels: true
+  wave_history_swings: 5       # average wave length over the last 5 swings
+
+structure:
+  # direction = +1 when dow + sign(close-MA25) + sign(close-MA99) >= this, -1 when <= -this
+  direction_min_votes: 2
+  round_levels_each_side: 2
+
+# ------------------------------------------------------------------ Layer 1
+regime:
+  timeframes: [1d, 4h]
+  # direction per index: +1 up, 0 range, -1 down (Dow structure + MA25/MA99).
+  # bias: which sides may trade. risk: multiplier on the base risk.
+  regimes:
+    alt_season:   {bias: long,  risk: 1.0}
+    btc_led:      {bias: long,  risk: 1.0, other_alts_risk: 0.5}   # full risk: BTC + alts with COIN/BTC up on D
+    risk_off:     {bias: short, risk: 1.0}                         # alt longs forbidden
+    capitulation: {bias: short, risk: 1.0}                         # all longs forbidden
+    neutral:      {bias: both,  risk: 0.5, min_grade: A}
+  dominance_snapshot_every_h: 4
+  backfill_days: 365           # CoinGecko free/Demo history is limited to 365 days
+
+# ------------------------------------------------------------------ Layer 2
+majors:
+  symbols: [BTC/USDT, ETH/USDT, ETH/BTC]
+  weights: {1w: 3, 1d: 2, 4h: 1}
+  btc_weak_threshold: -3       # BTC <= -3: alt longs need technical score >= 80
+  btc_weak_min_score: 80
+  ethbtc_up_bonus: 5           # added to the L5 score of every alt when ETHBTC is up on D
+  divergence_risk_multiplier: 0.5   # BTC and TOTAL2 in opposite directions
+
+# ------------------------------------------------------------------ Layer 3
+scanners:
+  squeeze:
+    bb_width_percentile: 10
+    lookback: 120
+    atr_falling_bars: 5
+  early_trend:
+    min_range_bars: 30
+    min_rvol: 2.0
+  rs_leader:
+    periods_days: [7, 30]
+    top_percentile: 10
+    new_high_lookback: 30
+  pullback:
+    fib_min: 0.382
+    fib_max: 0.618
+    ma_touch_atr: 0.5
+    volume_falling_bars: 3
+  exhaustion:
+    ma_distance_atr: 3.0
+    rsi_high: 75
+    rsi_low: 25
+  oi_buildup:
+    days: 3
+    min_oi_change_pct: 15
+    max_price_change_pct: 3
+  funding_extreme:
+    high_pct: 0.05
+    low_pct: -0.03
+    consecutive: 3
+  volume_anomaly:
+    multiple: 3.0
+    avg_days: 30
+    max_price_change_pct: 5
+  hot_sector:
+    top_categories: 3
+    period_days: 7
+    min_coins: 2               # a category needs >= 2 universe coins to rank
+    ignore_categories: []      # CoinGecko category names to skip when ranking
+  # label quality used in the L5 score (0..1)
+  label_quality:
+    SQUEEZE: 0.7
+    EARLY_TREND: 1.0
+    RS_LEADER: 1.0
+    PULLBACK: 1.0
+    EXHAUSTION: 0.7
+    OI_BUILDUP: 0.8
+    FUNDING_EXTREME: 0.6
+    VOLUME_ANOMALY: 0.6
+    HOT_SECTOR: 0.6
+    BREAKOUT_WATCH: 0.8        # a recent EARLY_TREND/RS_LEADER coin waiting for its retest
+
+# ------------------------------------------------------------------ Layer 4
+pairs:
+  timeframes: [1d, 4h]
+  quotes: [USDT, BTC, ETH]
+  corr_days: 30
+  corr_high: 0.8
+  corr_low: 0.5
+  beta_high: 1.5
+  # pair strength = weighted alignment of COIN/USDT, COIN/BTC, COIN/ETH with the side
+  quote_weights: {USDT: 0.5, BTC: 0.35, ETH: 0.15}
+  timeframe_weights: {1d: 2, 4h: 1}
+  independent_bonus: 0.1         # corr <= corr_low and positive RS
+  independent_bonus_neutral: 0.2 # same, when the regime is neutral
+  rs_days: 30
+
+# ------------------------------------------------------------------ Layer 5
+shortlist:
+  weights:
+    regime_alignment: 30
+    pair_strength: 30
+    scanner_labels: 25
+    liquidity: 15
+  min_score: 60
+  max_coins: 8
+  labels_full_at: 2.0            # summed label quality that earns the full 25
+  liquidity_volume_points: 10    # of the 15 liquidity points
+  liquidity_spread_points: 5
+  volume_full_usd: 500000000     # 24h volume that earns the full volume points (log scale from min)
+  spread_full_pct: 0.05
+  spread_zero_pct: 0.30
+  near_level_atr: 1.5          # coins within this x ATR(4H) of a usable level rank first
+
+breakout_watch:
+  labels: [EARLY_TREND, RS_LEADER]
+  days: 5                      # the broken level stays a flip support this long
+  lookback_bars: 30            # D bars whose high the breakout cleared
+
+# ------------------------------------------------------------------ Layer 6
+technical:
+  phase:
+    points_both: 15
+    points_d_only: 10
+    points_range_no_event: 6
+    ma_slope_bars: 10
+    acc_min_bars: 20
+    acc_max_width_atr: 4
+    flat_ma_atr: 1.0           # |MA25 change over ma_slope_bars| below this x ATR = flat
+    spring_bars: 5             # a spring/upthrust must happen in the last N bars
+  dow:
+    points_both: 15
+    points_4h_only: 8          # 4H aligned, D ranging
+    points_d_only: 8           # D aligned, 4H ranging
+    points_choch_against: 0
+  levels:
+    points_strong: 15          # W/D level with >= 3 touches
+    points_weak: 8             # 4H level with 2 touches
+    strong_min_touches: 3
+    max_entry_above_support_atr: 1.0
+    min_rr: 2.0
+    timeframe_weight: {1w: 3, 1d: 2, 4h: 1}
+  volume:
+    max_points: 10
+    breakout_rvol: 1.5
+    pullback_rvol_max: 1.0
+    breakout_points: 5         # breakout or healthy pullback volume
+    obv_points: 5
+    event_lookback: 6          # a 4H break within N bars counts as a breakout setup
+    pullback_bars: 3
+    climax_rvol: 3.0
+    climax_penalty: -5
+  candles:
+    max_points: 10
+    # pin bar: rejection wick >= 2x body and >= 60% of the range, body <= 1/3 of the range,
+    # opposite wick <= 20% of the range
+    pinbar_wick_body: 2.0
+    pinbar_max_body_range: 0.3333333333
+    pinbar_min_wick_range: 0.6
+    pinbar_max_opposite_range: 0.2
+    strong_close_pct: 25
+    body_min_atr: 0.8
+    body_max_atr: 2.0
+    chase_atr: 2.5
+    weakness_bars: 3
+    trigger_points: 5
+    size_points: 5
+    weakness_penalty: -5
+  cycles:
+    points_all_aligned_fresh: 10
+    points_lower_correcting: 5
+    points_counter_trend: 3
+    points_higher_ranging: 5   # W ranging, D and 4H aligned with the trade
+    points_late: 0
+    counter_trend_risk_multiplier: 0.5
+    fresh_bars: 6              # 4H turn (new HL/LH or BOS) at most N bars ago
+  patterns:
+    max_points: 15
+    rsi_healthy_low: 40
+    rsi_healthy_high: 80
+    rsi_divergence_penalty: -5
+    rsi_points: 5
+    macd_points: 5
+    sma_points: 5
+    overextended_atr: 3.0
+    overextended_penalty: -5
+    pattern_points: 5
+    pattern_confirm_rvol: 1.5
+    reversal_signs_needed: 3
+    rsi_lookback: 20           # pullbacks in a healthy trend held above rsi_healthy_low
+    pattern_tolerance_atr: 0.5 # equal tops/bottoms/shoulders
+    pattern_recent_bars: 5     # neckline break must be this recent
+    flag_pole_atr: 3.0
+    flag_max_retrace: 0.5
+  confirmation:
+    min_confirmations: 2
+    points_per_extra: 2.5
+    max_points: 10
+    trigger_rvol: 1.5
+    rsi_mid: 50
+    lookback_bars: 6           # 1H bars searched for the retest / CHoCH / RSI cross
+
+grades:
+  A: 75
+  B: 65
+  watch: 55
+  a_plus: 85
+  risk_share: {A: 1.0, B: 0.5}
+
+analysis:
+  window_bars: 300             # bars per timeframe handed to the analysis (keeps backtests fast)
+
+# ------------------------------------------------------------ trade builder
+trade:
+  base_risk_pct: 1.0
+  entry_zone_atr: 0.2
+  sl_buffer_atr: 0.5
+  # stop_mode "level": the level's farthest pivot + sl_buffer_atr x ATR (STRATEGY.md).
+  # "swing_or_atr": the farther of the last 4H swing (+ swing_buffer_atr) and the level
+  # + swing_stop_atr x ATR (backtest variant 1).
+  stop_mode: level
+  swing_stop_atr: 1.0
+  swing_buffer_atr: 0.1
+  min_stop_pct: 0.0            # reject setups with a tighter stop (variant 2: 0.8)
+  tp1_max_r: null              # cap TP1 at this many R (variant 3: 3)
+  max_sl_atr: 3.0
+  tp1_min_r: 2.0
+  tp1_close_pct: 50
+  tp2_r: 3.0
+  tp2_close_pct: 30
+  leverage_cap: 10
+  liquidation_sl_multiple: 2.5
+  margin_mode: isolated
+  funding_crowded_pct: 0.05
+  funding_penalty: -5
+
+lifecycle:
+  expiry_bars_4h: 6
+  max_active: 5
+  max_correlated_same_side: 2
+  correlation_threshold: 0.8
+  loss_streak_pause: 3         # after 3 consecutive SLs pause until the next D close
+  cooldown_after_stop_h: 0     # no new signal on a coin this long after its stop-out (variant 4: 24)
+
+# --------------------------------------------------------- spot HOLD report
+hold:
+  min_conditions: 4
+  breakout_rvol: 1.5
+  rs_days: 90
+  rs_top_percentile: 20
+  top_categories: 3
+  category_period_days: 30
+  ath_drawdown_pct: 60
+  buy_steps: 3
+
+# ------------------------------------------------------------ messages
+daily:
+  btc_halvings: ["2012-11-28", "2016-07-09", "2020-05-11", "2024-04-20"]
+watch_alerts:
+  enabled: true
+  repeat_hours: 24             # the same coin/side is announced once per this window
+
+# --------------------------------------------------------------- runtime
+schedule:
+  trigger_check_minutes: 15    # 30 if the repo becomes private
+
+telegram:
+  api_base: https://api.telegram.org
+  timeout_s: 20
+  parse_mode: null
+
+storage:
+  backend: local               # local | git_branch
+  db_path: data/state.db
+  git_branch: data
+  git_remote: origin
+  warmup_bars: 120             # extra bars fetched before the analysis window (MA99 etc.)
+  keep_bars: 450               # candles kept per series in the runtime DB
+
+backtest:
+  days: 365                    # all layers, limited by the 365-day dominance history
+  db_path: data/backtest.db    # separate from the runtime DB (too big for the data branch)
+  timeframes: [1w, 1d, 4h, 1h] # 1H candles drive trade management (live uses 15m)
+  taker_fee_pct: 0.05          # OKX taker, per side, on notional
+  slippage_pct: 0.05           # per fill, against the trade
+  funding_interval_h: 8        # OKX funds every 8h (00/08/16 UTC)
+  default_funding_pct: 0.01    # per interval when the exchange has no history (longs pay)
+  max_coins: 0                 # 0 = the whole universe
+  holdout_days: 92             # the last ~3 months are reported apart and not used for choosing
+  min_trades_to_choose: 10     # a variant needs this many tuning trades to be chosen
+  # Each variant overrides config keys; `backtest-compare` puts them side by side.
+  variants:
+    baseline: {}
+    swing_stop: {trade: {stop_mode: swing_or_atr}}
+    min_stop: {trade: {min_stop_pct: 0.8}}
+    tp1_cap: {trade: {tp1_max_r: 3}}
+    cooldown: {lifecycle: {cooldown_after_stop_h: 24}}
+    combined:
+      trade: {stop_mode: swing_or_atr, min_stop_pct: 0.8, tp1_max_r: 3}
+      lifecycle: {cooldown_after_stop_h: 24}

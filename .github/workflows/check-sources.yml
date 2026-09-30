@@ -1,0 +1,74 @@
+name: check-sources
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/agent/**"
+      - "config.yaml"
+      - ".github/workflows/check-sources.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: pytest -q
+      - name: Probe data sources
+        env:
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          set +e
+          trade-agent check-sources --json check_sources.json | tee report.txt
+          status=${PIPESTATUS[0]}
+          { echo '```'; cat report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-sources
+          path: check_sources.json
+
+  # Runs the pipeline once on live data with a throwaway local database (nothing is sent
+  # or persisted). The first run backfills a year of dominance history, so it is slow.
+  smoke:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+      AGENT_STORAGE: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - name: run-4h
+        run: trade-agent -v run-4h 2>&1 | tee run4h.txt
+      - name: run-1h
+        run: trade-agent -v run-1h 2>&1 | tee run1h.txt
+      - name: run-15m
+        run: trade-agent -v run-15m 2>&1 | tee run15m.txt
+      - name: run-daily
+        run: trade-agent -v run-daily 2>&1 | tee rundaily.txt
+      - name: run-weekly
+        run: trade-agent -v run-weekly 2>&1 | tee runweekly.txt
+      - name: Summary
+        if: always()
+        run: |
+          for f in run4h run1h run15m rundaily runweekly; do
+            [ -f "$f.txt" ] || continue
+            { echo "### $f"; echo '```'; grep -v '^INFO\|^WARNING' "$f.txt" | tail -80; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          done
