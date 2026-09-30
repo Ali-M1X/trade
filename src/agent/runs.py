@@ -303,6 +303,10 @@ def weekly(cfg: dict, repo, market, cg, notifier, now_ms: int) -> list:
     ideas = hold_ideas(cfg, repo, market, cg)
     repo.set_state("hold", sorted(i.base for i in ideas))
     notifier.send(fmt.hold_message(ideas, now_ms))
+    try:
+        notifier.send(fmt.performance_message(repo.get_signals(), now_ms))
+    except Exception:                       # the HOLD report is already out; don't fail the task
+        logging.getLogger(__name__).exception("performance report failed")
     return ideas
 
 

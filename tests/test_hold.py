@@ -66,7 +66,7 @@ def test_weekly_and_new_entrants(cfg):
     repo = Repository()
     n = Notifier(cfg, load_secrets({}), out=io.StringIO())
     ideas = weekly(cfg, repo, FakeMarket(), FakeCG(), n, NOW)
-    assert n.sent[-1].startswith("💎 گزارش هفتگی HOLD")
+    assert n.sent[-2].startswith("💎 گزارش هفتگی HOLD") and n.sent[-1].startswith("📊 عملکرد")
     assert repo.get_state("hold") == sorted(i.base for i in ideas)
     n.sent.clear()
     assert hold_new_entrants(cfg, repo, FakeMarket(), FakeCG(), n, NOW) == [] and n.sent == []
