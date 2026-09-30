@@ -46,7 +46,8 @@ universe:
   exclude_symbols: [usdt, usdc, dai, fdusd, usde, usds, tusd, pyusd, frax, busd, wbtc, weth,
                     wsteth, weeth, cbbtc, steth]
   add_exchange_trending: true
-  hot_categories_top: 3        # add coins from the top-N 7d market-cap-growth categories
+  add_hot_category_coins: true # add coins of the hot categories (scanners.hot_sector)
+  hot_category_coins: 50       # coins fetched per hot category (by market cap)
 
 # --------------------------------------------------------------- timeframes
 timeframes:
@@ -101,7 +102,7 @@ regime:
     capitulation: {bias: short, risk: 1.0}                         # all longs forbidden
     neutral:      {bias: both,  risk: 0.5, min_grade: A}
   dominance_snapshot_every_h: 4
-  backfill_days: 730
+  backfill_days: 365           # CoinGecko free/Demo history is limited to 365 days
 
 # ------------------------------------------------------------------ Layer 2
 majors:
@@ -333,6 +334,8 @@ storage:
   db_path: data/state.db
   git_branch: data
   git_remote: origin
+  warmup_bars: 120             # extra bars fetched before the analysis window (MA99 etc.)
+  keep_bars: 450               # candles kept per series in the runtime DB
 
 backtest:
   years: 2

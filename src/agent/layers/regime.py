@@ -79,12 +79,17 @@ def index_candles(series: pd.DataFrame, column: str, tf: str) -> pd.DataFrame:
 
 
 def index_frames(series: pd.DataFrame, cfg: dict) -> dict[str, dict[str, Frame]]:
-    """series: ts, usdt_d, btc_d, total2 (see data.dominance.dominance_series)."""
+    """series: ts, usdt_d, btc_d, total2 (see data.dominance.dominance_series). If it has a
+    `source` column, the 4H candles use only real 4H snapshots ("global"), since the
+    reconstructed history is daily."""
     out: dict[str, dict[str, Frame]] = {}
     for col in INDICES:
         out[col] = {}
         for tf in cfg["regime"]["timeframes"]:
-            candles = index_candles(series, col, tf)
+            src = series
+            if tf == "4h" and "source" in series:
+                src = series[series["source"] == "global"]
+            candles = index_candles(src, col, tf)
             if len(candles) >= 2:
                 out[col][tf] = make_frame(candles, tf, cfg, with_indicators=True)
     return out

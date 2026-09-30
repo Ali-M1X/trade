@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "src/agent/data/**"
+      - "src/agent/**"
       - "config.yaml"
       - ".github/workflows/check-sources.yml"
 
@@ -38,3 +38,29 @@ jobs:
         with:
           name: check-sources
           path: check_sources.json
+
+  # Runs the pipeline once on live data with a throwaway local database (nothing is sent
+  # or persisted). The first run backfills a year of dominance history, so it is slow.
+  smoke:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+      AGENT_STORAGE: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - name: run-4h
+        run: trade-agent -v run-4h 2>&1 | tee run4h.txt
+      - name: run-1h
+        run: trade-agent -v run-1h 2>&1 | tee run1h.txt
+      - name: Summary
+        if: always()
+        run: |
+          { echo '### run-4h'; echo '```'; grep -v '^INFO\|^WARNING' run4h.txt | tail -40; echo '```';
+            echo '### run-1h'; echo '```'; grep -v '^INFO\|^WARNING' run1h.txt | tail -40; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

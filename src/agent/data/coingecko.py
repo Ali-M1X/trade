@@ -85,6 +85,28 @@ class CoinGecko:
                         {"vs_currency": "usd", "days": days, "interval": "daily"},
                         cache="market_chart")
 
+    def coin_categories(self, coin_id: str) -> list[str]:
+        data = self.get(f"/coins/{coin_id}", {"localization": "false", "tickers": "false",
+                                               "market_data": "false", "community_data": "false",
+                                               "developer_data": "false"},
+                        cache="coin_categories")
+        return [c for c in data.get("categories") or [] if c]
+
+    def categories_list(self) -> list[dict]:
+        """[{category_id, name}] to map category names to ids."""
+        return self.get("/coins/categories/list", cache="coin_categories")
+
+    def trending_ids(self) -> list[str]:
+        data = self.get("/search/trending", cache="markets")
+        return [c["item"]["id"] for c in data.get("coins", [])]
+
+    def markets_by_ids(self, ids: list[str]) -> list[dict]:
+        if not ids:
+            return []
+        params = {"vs_currency": "usd", "ids": ",".join(sorted(ids)),
+                  "price_change_percentage": "7d,30d"}
+        return self.get("/coins/markets", params, cache="markets")
+
     # ---- universe
     def excluded_ids(self) -> set[str]:
         ids = set(self.universe_cfg["exclude_ids"])

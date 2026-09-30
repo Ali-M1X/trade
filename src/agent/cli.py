@@ -20,6 +20,43 @@ def cmd_check_sources(args, cfg, secrets) -> int:
     return 0 if working_exchanges(probes) and cg_ok else 1
 
 
+def open_context(cfg, secrets):
+    import time
+
+    from .data.coingecko import CoinGecko
+    from .data.exchange import ExchangeClient
+    from .data.market import LiveMarket
+    from .store.repository import Repository
+    from .store.storage import make_storage
+
+    storage = make_storage(cfg)
+    storage.pull()
+    repo = Repository(cfg["storage"]["db_path"])
+    now = int(time.time() * 1000)
+    market = LiveMarket(cfg, repo, ExchangeClient(cfg), now)
+    cg = CoinGecko(cfg, repo=repo, api_key=secrets.coingecko_api_key)
+    return storage, repo, market, cg, now
+
+
+def cmd_run_4h(args, cfg, secrets) -> int:
+    from .runs import run_4h, summarize_funnel
+    storage, repo, market, cg, now = open_context(cfg, secrets)
+    result = run_4h(cfg, repo, market, cg, now)
+    print(summarize_funnel(result))
+    repo.close()
+    storage.push("run-4h")
+    return 0
+
+
+def cmd_run_1h(args, cfg, secrets) -> int:
+    from .runs import run_1h, summarize_evaluations
+    storage, repo, market, _, now = open_context(cfg, secrets)
+    print(summarize_evaluations(run_1h(cfg, repo, market, now)))
+    repo.close()
+    storage.push("run-1h")
+    return 0
+
+
 def not_yet(step: int):
     def run(args, cfg, secrets) -> int:
         print(f"{args.command}: not implemented yet (build step {step})", file=sys.stderr)
@@ -29,8 +66,8 @@ def not_yet(step: int):
 
 COMMANDS = {
     "check-sources": cmd_check_sources,
-    "run-4h": not_yet(3),
-    "run-1h": not_yet(3),
+    "run-4h": cmd_run_4h,
+    "run-1h": cmd_run_1h,
     "run-15m": not_yet(4),
     "run-daily": not_yet(4),
     "run-weekly": not_yet(4),

@@ -41,8 +41,9 @@ class FunnelResult:
 
 def run_funnel(dominance: pd.DataFrame, major_frames: dict[str, dict[str, Frame]],
                coins: list[CoinData], markets: list[dict], coin_categories: dict[str, list[str]],
-               cfg: dict) -> FunnelResult:
-    """dominance: ts, usdt_d, btc_d, total2 snapshots. major_frames: BTC/ETH/ETHBTC frames."""
+               cfg: dict, hot: set[str] | None = None) -> FunnelResult:
+    """dominance: ts, usdt_d, btc_d, total2 snapshots. major_frames: BTC/ETH/ETHBTC frames.
+    hot: precomputed hot categories (default: ranked from `markets`)."""
     regime = compute_regime(dominance, cfg)
     majors = compute_majors(major_frames, regime.total2, cfg)
     btc_d = major_frames["BTC"]["1d"]
@@ -50,7 +51,7 @@ def run_funnel(dominance: pd.DataFrame, major_frames: dict[str, dict[str, Frame]
     total2_d = (dominance.assign(close=dominance["total2"])[["ts", "close"]]
                 .pipe(_daily_close))
     rs_cut = rs_thresholds(coins, btc_d, cfg)
-    hot = hot_categories(markets, coin_categories, cfg)
+    hot = hot_categories(markets, coin_categories, cfg) if hot is None else hot
     out = FunnelResult(regime, majors, hot=hot)
     for coin in coins:
         if not liquid(coin.info, cfg):

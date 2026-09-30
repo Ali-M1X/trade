@@ -101,6 +101,17 @@ class ExchangeClient:
         dedup = {r[0]: r for r in out}
         return [dedup[k] for k in sorted(dedup)]
 
+    def fetch_history(self, symbol: str, timeframe: str, since: int, until: int | None = None):
+        """Paginated candles from the first exchange that answers: (name, rows)."""
+        errors = []
+        for name in self.names:
+            try:
+                return name, self.fetch_ohlcv_range(name, symbol, timeframe, since, until)
+            except (UnsupportedExchange, ccxt.BaseError) as e:
+                log.warning("%s history %s %s failed: %s", name, symbol, timeframe, e)
+                errors.append(f"{name}: {type(e).__name__}: {e}")
+        raise AllExchangesFailed(f"history {symbol} {timeframe}: " + " | ".join(errors))
+
     def fetch_funding_rate(self, symbol: str):
         return self.call("fetch_funding_rate", symbol)
 

@@ -74,6 +74,15 @@ class Repository:
         rows = self.conn.execute(q + " ORDER BY ts", args).fetchall()
         return pd.DataFrame(rows, columns=CANDLE_COLUMNS)
 
+    def prune_candles(self, exchange: str, symbol: str, timeframe: str, keep: int) -> None:
+        """Keep only the newest `keep` candles of a series (the runtime DB stays small)."""
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM candles WHERE exchange=? AND symbol=? AND timeframe=? AND ts < ("
+                " SELECT ts FROM candles WHERE exchange=? AND symbol=? AND timeframe=?"
+                " ORDER BY ts DESC LIMIT 1 OFFSET ?)",
+                (exchange, symbol, timeframe, exchange, symbol, timeframe, keep - 1))
+
     def last_candle_ts(self, exchange: str, symbol: str, timeframe: str) -> int | None:
         row = self.conn.execute(
             "SELECT MAX(ts) FROM candles WHERE exchange=? AND symbol=? AND timeframe=?",
