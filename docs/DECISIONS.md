@@ -122,3 +122,15 @@ Run: https://github.com/Ali-M1X/trade/actions/runs/36733290337. No CoinGecko key
 | 75 | Leverage | floor(1 ÷ (2.5 × stop %)), at least 1x, at most 10x. Stop 3.4% → 11 → 10x, matching the strategy example. | `trade.leverage_cap` |
 | 76 | Funding filter | −5 from the total when funding in the trade's direction exceeds 0.05% (longs paying more than +0.05%, shorts facing less than −0.05%). | `trade.funding_*` |
 | 77 | Analysis window | Each timeframe is analysed on its last 300 closed candles, plus 120 warm-up bars for the indicators. This keeps each run and the backtest fast and makes results depend only on stored candles. | `analysis.window_bars`, `storage.warmup_bars` |
+
+### Live smoke run on GitHub Actions, 2026-09-30 16:02 UTC
+
+Run: https://github.com/Ali-M1X/trade/actions/runs/36741131896 (throwaway local database; nothing sent).
+
+- `run-4h`: about 9 min. 4.5 min of that is the one-time 365-day dominance backfill; later runs reuse the stored history.
+  - Regime **neutral** (USDT.D ↓, BTC.D range, TOTAL2 ↑). BTC +3, ETH +2, ETHBTC +1.
+  - Watchlist 35 coins; shortlist 8, all longs: SOON, GRASS, 0G, NIGHT, ICP, UNI, PUMP, ARB.
+- `run-1h`: 10 s, all 8 evaluated.
+  - PUMP scored 65.5 (a B) and became **Watch** because a neutral regime allows A only.
+  - The others failed a gate: no level to lean on after a breakout (ICP), R:R < 2 (UNI, ARB, GRASS), phase (SOON), or no 1H confirmation yet (0G, NIGHT).
+- A first run found that new listings got no weekly candles: pagination started before the listing date and stopped at the first empty page. Fixed by falling back to the latest candles.
