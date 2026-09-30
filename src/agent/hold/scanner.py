@@ -65,16 +65,27 @@ def plan_levels(price: float, d: Frame, w: Frame, cfg: dict) -> tuple[list[float
     for f in (d, w):
         lv += cluster_levels(f.swings, f.atr, sw["level_cluster_atr"], sw["level_min_touches"], f.tf, weights)
         lv += previous_period_levels(f.df, f.tf, weights)
+    gap = sw["level_cluster_atr"] * d.atr                   # levels closer than this are one
     swing_lows = [s.price for f in (d, w) for s in f.swings if s.kind == "L"]
-    supports = sorted({round(l.price, 12) for l in lv if l.price < price} | {p for p in swing_lows if p < price},
-                      reverse=True)
+    supports = spaced(sorted({l.price for l in lv if l.price < price} |
+                             {p for p in swing_lows if p < price}, reverse=True), gap)
     steps = supports[:cfg["hold"]["buy_steps"]]
     res = sorted({l.price for l in lv if l.timeframe == "1w" and l.price > price} |
                  {s.price for s in w.swings if s.kind == "H" and s.price > price})
     if not res:
         res = sorted({l.price for l in lv if l.price > price} |
                      {s.price for s in d.swings if s.kind == "H" and s.price > price})
-    return steps, (steps[-1] if steps else None), res[:3]
+    targets = spaced(res, gap)[:3]
+    return steps, (steps[-1] if steps else None), targets
+
+
+def spaced(prices: list[float], gap: float) -> list[float]:
+    """Keep prices in the given order, skipping any within `gap` of the last kept one."""
+    out: list[float] = []
+    for p in prices:
+        if not out or abs(p - out[-1]) >= gap:
+            out.append(p)
+    return out
 
 
 def scan_hold(coins: list[dict], btc_d: Frame, hot30: set[str], cfg: dict) -> list[HoldIdea]:

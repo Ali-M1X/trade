@@ -28,6 +28,14 @@ def test_plan_levels_are_below_and_above_price(cfg):
     assert all(p < d.close for p in steps) and steps == sorted(steps, reverse=True)
     assert inval == steps[-1]
     assert targets and all(p > d.close for p in targets)
+    gap = cfg["swings"]["level_cluster_atr"] * d.atr
+    for group in (steps, targets):
+        assert all(abs(a - b) >= gap for a, b in zip(group, group[1:]))
+
+
+def test_spaced():
+    from agent.hold.scanner import spaced
+    assert spaced([2.598, 2.597, 2.596, 2.4, 2.39, 2.1], 0.05) == [2.598, 2.4, 2.1]
 
 
 def test_scan_hold_needs_four_of_six(cfg):
