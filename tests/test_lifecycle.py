@@ -144,3 +144,21 @@ def test_a_win_resets_the_streak(cfg):
     book.save(s[2], [Event("tp3", T0, 112, 1.5)], T0)
     book.save(s[3], [Event("sl", T0, 95, -1.0)], T0)
     assert book.pause() == {"count": 1, "paused_until": 0}
+
+
+def test_cooldown_after_stop(cfg):
+    import copy
+
+    from agent.signals.lifecycle import Event
+    c = copy.deepcopy(cfg)
+    c["lifecycle"]["cooldown_after_stop_h"] = 24
+    book = SignalBook(Repository(), c)
+    book.create(Ev("SOL"), T0, {})
+    [s] = book.open_signals()
+    s["payload"]["lifecycle"].update(status="sl", closed_at=T0 + 3_600_000)
+    book.save(s, [Event("sl", T0 + 3_600_000, 95, -1.0)], T0 + 3_600_000)
+    assert book.admit("SOL", 1, 90, T0 + 10 * 3_600_000).reason == "cooldown"
+    assert book.admit("ADA", 1, 90, T0 + 10 * 3_600_000).ok
+    assert book.admit("SOL", 1, 90, T0 + 26 * 3_600_000).ok
+    # without the switch, a stopped coin can be signalled again right away
+    assert SignalBook(book.repo, cfg).admit("SOL", 1, 90, T0 + 2 * 3_600_000).ok

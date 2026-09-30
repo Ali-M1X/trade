@@ -173,3 +173,15 @@ Run: https://github.com/Ali-M1X/trade/actions/runs/36741131896 (throwaway local 
 | 104 | Historical inputs | Universe = today's list (survivorship bias). The regime uses the D direction only (dominance history is daily). Liquidity and category growth come from CoinGecko daily history. OI_BUILDUP is inactive (no OI history). Spreads and trending coins are unknown. All of this is listed in BACKTEST.md. | — |
 | 105 | Speed | Indicators are computed once per series and sliced (they are causal). A frame is rebuilt only when that series has a new closed candle. The regime is recomputed only when a new dominance day arrives. `pivots()` is vectorised; a test checks it against the plain loop on random data with ties. About 30 minutes for 100 coins × 1 year. | — |
 | 106 | pandas 3 timestamps | Found while testing: `pd.to_datetime(ms, unit="ms")` now keeps millisecond resolution, so `astype(int64) // 10**6` shrank the dominance candle timestamps 1000×. The regime only reads directions, so live output wasn't affected. The conversion now names the unit explicitly, and a regression test covers it. | — |
+
+### Backtest variants (your request)
+
+| # | Topic | Decision | Config key |
+|---|---|---|---|
+| 107 | Variant switches | The four changes are config switches, all off by default, so live behaviour stays STRATEGY.md until you turn one on: `trade.stop_mode` (`level` / `swing_or_atr`), `trade.min_stop_pct`, `trade.tp1_max_r`, `lifecycle.cooldown_after_stop_h`. | see keys |
+| 108 | Swing stop | `swing_or_atr`: the farther of (a) the most recent confirmed 4H swing low below the entry (high above it, for shorts) minus 0.1×ATR, since "beyond" needs a small margin or a clean retest of the same low would already stop out, and (b) the level's farthest pivot minus 1.0×ATR(4H). The 3×ATR maximum still applies. | `trade.swing_stop_atr`, `trade.swing_buffer_atr` |
+| 109 | Minimum stop | Setups whose stop is closer than 0.8% of the entry are rejected (`sl_too_tight`). | `trade.min_stop_pct` |
+| 110 | TP1 cap | TP1 = min(first opposing level, 3R). The R:R ≥ 2 gate still uses the first opposing level. TP2 keeps its rule (always beyond TP1). | `trade.tp1_max_r` |
+| 111 | Cooldown | No new signal on a coin for 24 h after one of its signals closes at the stop (`sl`; breakevens don't count). | `lifecycle.cooldown_after_stop_h` |
+| 112 | Holdout | Each variant replays the whole year once. Trades are assigned to the tuning period (first 273 days) or the holdout (last 92 days) by their opening time. The choice is the best total net R in the tuning period (≥ 10 trades); its holdout result is reported, not optimised. | `backtest.holdout_days`, `backtest.min_trades_to_choose` |
+| 113 | Parallel run | The workflow fetches history once and uploads the database. Six jobs replay one variant each in parallel, and a final job builds the comparison. A test keeps the workflow's variant list equal to `backtest.variants`. | — |

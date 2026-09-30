@@ -9,7 +9,7 @@ from agent.layers.majors import compute_majors
 from agent.layers.regime import make_regime
 from agent.layers.technical import (confirmation_points, dow_section, evaluate, grade_for,
                                     levels_section)
-from agent.layers.trade import Rejected, build_trade, collect_levels, size_position
+from agent.layers.trade import Rejected, TradePlan, build_trade, collect_levels, size_position
 from builders import from_closes, trend, waypoints
 
 
@@ -247,3 +247,56 @@ def test_flip_level_is_a_usable_support(cfg):
     p = build_trade(1, fake_h4(101.0, 2.0), [flip_level(100.6, cfg), lvl(110.0)], cfg)
     assert p.support_kind == "flip" and p.support == 100.6 and p.order == "market"
     assert levels_section(p, cfg) == 8
+
+
+# ------------------------------------------------ backtest variant switches
+def with_trade(cfg, **kw):
+    import copy
+    c = copy.deepcopy(cfg)
+    c["trade"].update(kw)
+    return c
+
+
+def h4_with_swings(close, atr, swings):
+    from agent.indicators.swings import Swing
+    df = pd.DataFrame({"close": [close], "atr": [atr]})
+    return Frame("4h", df, [Swing(i, i, p, k) for i, (p, k) in enumerate(swings)], [], 0, 0)
+
+
+def test_swing_or_atr_stop_takes_the_farther(cfg):
+    c = with_trade(cfg, stop_mode="swing_or_atr")
+    levels = [lvl(142.7, members=[142.5, 142.9]), lvl(160.0)]
+    # swing low 139 is farther than level - 1 ATR (142.5 - 2 = 140.5): stop 139 - 0.1*2
+    p = build_trade(1, h4_with_swings(143.0, 2.0, [(139.0, "L"), (150.0, "H")]), levels, c)
+    assert p.sl == pytest.approx(138.8)
+    # a swing low close to the level: 1 ATR past the level wins
+    p = build_trade(1, h4_with_swings(143.0, 2.0, [(142.0, "L")]), levels, c)
+    assert p.sl == pytest.approx(140.5)
+    # no swing behind the entry
+    p = build_trade(1, h4_with_swings(143.0, 2.0, [(150.0, "L")]), levels, c)
+    assert p.sl == pytest.approx(140.5)
+    # short mirror: swing high 104 (+0.2) vs level 100.3 + 1 ATR = 102.3
+    p = build_trade(-1, h4_with_swings(99.5, 2.0, [(104.0, "H")]),
+                    [lvl(100.0, members=[99.8, 100.3]), lvl(80.0)], c)
+    assert p.sl == pytest.approx(104.2)
+    # a swing too far away still hits the 3 x ATR limit
+    assert build_trade(-1, h4_with_swings(99.5, 1.0, [(104.0, "H")]),
+                       [lvl(100.0, members=[99.8, 100.3]), lvl(80.0)], c) == Rejected("sl_too_wide")
+
+
+def test_min_stop_rejects_tight_setups(cfg):
+    levels = [lvl(100.0, members=[100.0]), lvl(110.0)]
+    h4 = fake_h4(100.1, 1.0)                               # stop 0.5 ATR -> 0.6% of price
+    assert isinstance(build_trade(1, h4, levels, cfg), TradePlan)
+    assert build_trade(1, h4, levels, with_trade(cfg, min_stop_pct=0.8)) == Rejected("sl_too_tight")
+
+
+def test_tp1_cap(cfg):
+    levels = [lvl(142.7, members=[142.5]), lvl(160.0), lvl(170.0, tf="1d")]
+    base = build_trade(1, fake_h4(143.0, 2.0), levels, cfg)
+    capped = build_trade(1, fake_h4(143.0, 2.0), levels, with_trade(cfg, tp1_max_r=3))
+    assert base.tp1 == 160.0 and base.tp1_r > 3
+    assert capped.tp1_r == pytest.approx(3) and capped.tp2 == 170.0
+    # the R:R gate still uses the first opposing level
+    assert build_trade(1, fake_h4(143.0, 2.0), [lvl(142.7), lvl(145.0)],
+                       with_trade(cfg, tp1_max_r=3)) == Rejected("rr")

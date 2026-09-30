@@ -113,3 +113,46 @@ def test_engine_trades_flow_through_book_lifecycle_and_costs(cfg, monkeypatch):
     for c, _, base in opened:
         live = [b for c2, e2, b in opened if c2 <= c < e2]
         assert len(live) <= cfg["lifecycle"]["max_active"] and live.count(base) == 1
+
+
+# ----------------------------------------------------------------- variants
+def test_variant_cfg_merges_overrides(cfg):
+    from agent.backtest.variants import variant_cfg
+    c = variant_cfg(cfg, "combined")
+    assert c["trade"]["stop_mode"] == "swing_or_atr" and c["trade"]["min_stop_pct"] == 0.8
+    assert c["trade"]["tp1_max_r"] == 3 and c["lifecycle"]["cooldown_after_stop_h"] == 24
+    assert c["trade"]["sl_buffer_atr"] == cfg["trade"]["sl_buffer_atr"]      # untouched keys kept
+    assert cfg["trade"]["stop_mode"] == "level"                              # original unchanged
+    assert variant_cfg(cfg, "baseline") == cfg
+
+
+def test_workflow_matrix_matches_config_variants(cfg):
+    import re
+    from pathlib import Path
+    wf = (Path(__file__).resolve().parents[1] / ".github/workflows/backtest.yml").read_text()
+    matrix = re.search(r"variant: \[(.*?)\]", wf).group(1)
+    assert [v.strip() for v in matrix.split(",")] == list(cfg["backtest"]["variants"])
+
+
+def test_comparison_splits_tuning_and_holdout(cfg, tmp_path):
+    import json
+
+    from agent.backtest.variants import comparison_report, run_variant
+    repo = build(days=150)
+    cfg["backtest"]["days"], cfg["backtest"]["holdout_days"] = 20, 7
+    results = []
+    for name in ("baseline", "combined"):
+        run_variant(cfg, repo, name, str(tmp_path / f"{name}.json"))
+        results.append(json.loads((tmp_path / f"{name}.json").read_text()))
+    md = comparison_report(results, cfg)
+    for needle in ("### Tuning period", "### Holdout", "| baseline | STRATEGY.md as built |",
+                   "trade.stop_mode = swing_or_atr", "## Details: `combined`", "## Assumptions and limits"):
+        assert needle in md, needle
+
+
+def test_split_by_opening_time():
+    from agent.backtest.variants import split
+    res = {"meta": {"end": 100 * 86_400_000},
+           "trades": [{"created": 50 * 86_400_000}, {"created": 95 * 86_400_000}]}
+    tune, hold, cut = split(res, 10)
+    assert len(tune) == 1 and len(hold) == 1 and cut == 90 * 86_400_000

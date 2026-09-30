@@ -300,6 +300,14 @@ trade:
   base_risk_pct: 1.0
   entry_zone_atr: 0.2
   sl_buffer_atr: 0.5
+  # stop_mode "level": the level's farthest pivot + sl_buffer_atr x ATR (STRATEGY.md).
+  # "swing_or_atr": the farther of the last 4H swing (+ swing_buffer_atr) and the level
+  # + swing_stop_atr x ATR (backtest variant 1).
+  stop_mode: level
+  swing_stop_atr: 1.0
+  swing_buffer_atr: 0.1
+  min_stop_pct: 0.0            # reject setups with a tighter stop (variant 2: 0.8)
+  tp1_max_r: null              # cap TP1 at this many R (variant 3: 3)
   max_sl_atr: 3.0
   tp1_min_r: 2.0
   tp1_close_pct: 50
@@ -317,6 +325,7 @@ lifecycle:
   max_correlated_same_side: 2
   correlation_threshold: 0.8
   loss_streak_pause: 3         # after 3 consecutive SLs pause until the next D close
+  cooldown_after_stop_h: 0     # no new signal on a coin this long after its stop-out (variant 4: 24)
 
 # --------------------------------------------------------- spot HOLD report
 hold:
@@ -362,3 +371,15 @@ backtest:
   funding_interval_h: 8        # OKX funds every 8h (00/08/16 UTC)
   default_funding_pct: 0.01    # per interval when the exchange has no history (longs pay)
   max_coins: 0                 # 0 = the whole universe
+  holdout_days: 92             # the last ~3 months are reported apart and not used for choosing
+  min_trades_to_choose: 10     # a variant needs this many tuning trades to be chosen
+  # Each variant overrides config keys; `backtest-compare` puts them side by side.
+  variants:
+    baseline: {}
+    swing_stop: {trade: {stop_mode: swing_or_atr}}
+    min_stop: {trade: {min_stop_pct: 0.8}}
+    tp1_cap: {trade: {tp1_max_r: 3}}
+    cooldown: {lifecycle: {cooldown_after_stop_h: 24}}
+    combined:
+      trade: {stop_mode: swing_or_atr, min_stop_pct: 0.8, tp1_max_r: 3}
+      lifecycle: {cooldown_after_stop_h: 24}

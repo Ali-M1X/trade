@@ -99,10 +99,15 @@ def build_trade(side: int, h4: Frame, levels: list[Level], cfg: dict,
         order, entry = "limit", s.price
     members = s.members or [s.price]
     invalid = min(members) if side == 1 else max(members)
-    sl = invalid - side * t["sl_buffer_atr"] * atr
+    if t["stop_mode"] == "swing_or_atr":
+        sl = swing_or_atr_stop(side, entry, invalid, h4, atr, t)
+    else:
+        sl = invalid - side * t["sl_buffer_atr"] * atr
     risk = (entry - sl) * side
     if risk > t["max_sl_atr"] * atr:
         return Rejected("sl_too_wide")
+    if risk / entry * 100 < t["min_stop_pct"]:
+        return Rejected("sl_too_tight")
     far_edge = high if side == 1 else low
     opposing = sorted((l for l in levels if (l.price - far_edge) * side > 0),
                       key=lambda l: l.price * side)
@@ -113,10 +118,26 @@ def build_trade(side: int, h4: Frame, levels: list[Level], cfg: dict,
         tp1 = first.price
     else:
         tp1 = entry + side * t["tp1_min_r"] * risk
+    if t["tp1_max_r"]:
+        cap = entry + side * t["tp1_max_r"] * risk
+        if (tp1 - cap) * side > 0:
+            tp1 = cap
     tp2, tp2_level = second_target(side, entry, risk, tp1, opposing, t["tp2_r"])
     return TradePlan(side, order, entry, low, high, sl, tp1, tp2,
                      (tp1 - entry) * side / risk, (tp2 - entry) * side / risk, tp2_level,
                      s.price, s.kind, s.timeframe, s.touches, atr)
+
+
+def swing_or_atr_stop(side: int, entry: float, invalid: float, h4: Frame, atr: float,
+                      t: dict) -> float:
+    """Whichever is farther from the entry: just beyond the last 4H swing behind the entry
+    (low for a long, high for a short), or swing_stop_atr x ATR past the level."""
+    candidates = [invalid - side * t["swing_stop_atr"] * atr]
+    kind = "L" if side == 1 else "H"
+    behind = [s for s in h4.swings if s.kind == kind and (entry - s.price) * side > 0]
+    if behind:
+        candidates.append(behind[-1].price - side * t["swing_buffer_atr"] * atr)
+    return min(candidates) if side == 1 else max(candidates)
 
 
 def second_target(side: int, entry: float, risk: float, tp1: float, opposing: list[Level],

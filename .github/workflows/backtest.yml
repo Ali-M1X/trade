@@ -1,14 +1,8 @@
 name: backtest
 
+# fetch history once -> replay every config variant in parallel -> one comparison report
 on:
   workflow_dispatch:
-    inputs:
-      days:
-        description: "Days to replay (default: backtest.days in config.yaml)"
-        required: false
-      max_coins:
-        description: "Limit the universe (0 = all)"
-        required: false
   push:
     paths:
       - "src/agent/backtest/**"
@@ -22,9 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backtest:
+  fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 90
     env:
       COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
     steps:
@@ -34,25 +28,66 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -e .
-      - name: Fetch history and replay
-        run: |
-          args=""
-          [ -n "${{ inputs.days }}" ] && args="$args --days ${{ inputs.days }}"
-          [ -n "${{ inputs.max_coins }}" ] && args="$args --max-coins ${{ inputs.max_coins }}"
-          trade-agent -v backtest --fetch $args --out BACKTEST.md --trades backtest_trades.csv 2>&1 | tee backtest.log
-      - name: Summary
-        if: always()
-        run: |
-          [ -f BACKTEST.md ] && cat BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
-          echo "----- BACKTEST.md -----"
-          [ -f BACKTEST.md ] && cat BACKTEST.md
-          gzip -kf data/backtest.db || true
+      - run: trade-agent -v backtest --fetch-only 2>&1 | tail -20
+      - run: gzip -k data/backtest.db
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: backtest
+          name: backtest-db
+          path: data/backtest.db.gz
+          retention-days: 30
+
+  replay:
+    needs: fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # must match backtest.variants in config.yaml (a test checks this)
+        variant: [baseline, swing_stop, min_stop, tp1_cap, cooldown, combined]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          path: data
+      - run: gunzip data/backtest.db.gz
+      - run: trade-agent -v backtest --variant ${{ matrix.variant }} --json ${{ matrix.variant }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: variant-${{ matrix.variant }}
+          path: ${{ matrix.variant }}.json
+
+  compare:
+    needs: replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: variant-*
+          path: results
+          merge-multiple: true
+      - run: trade-agent backtest-compare results/*.json --out BACKTEST.md > /dev/null
+      - name: Report
+        run: |
+          cat BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
+          echo "----- BACKTEST.md -----"
+          cat BACKTEST.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-report
           path: |
             BACKTEST.md
-            backtest_trades.csv
-            backtest.log
-            data/backtest.db.gz
+            results/*.json

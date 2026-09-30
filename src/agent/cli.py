@@ -103,7 +103,7 @@ def cmd_backtest(args, cfg, secrets) -> int:
     if args.max_coins is not None:
         cfg["backtest"]["max_coins"] = args.max_coins
     repo = Repository(args.db or cfg["backtest"]["db_path"])
-    if args.fetch:
+    if args.fetch or args.fetch_only:
         from .backtest.data import fetch_history
         from .data.coingecko import CoinGecko
         from .data.exchange import ExchangeClient
@@ -113,9 +113,30 @@ def cmd_backtest(args, cfg, secrets) -> int:
         stats = fetch_history(cfg, repo, client, LiveMarket(cfg, repo, client, now),
                               CoinGecko(cfg, repo=repo, api_key=secrets.coingecko_api_key), now)
         print(f"fetched: {stats}")
-    report, _ = run_backtest(cfg, repo, args.out, args.trades)
-    print(report)
+    if args.fetch_only:
+        repo.close()
+        return 0
+    if args.variant:
+        from .backtest.variants import run_variant
+        res = run_variant(cfg, repo, args.variant, args.json or f"{args.variant}.json")
+        print(f"{args.variant}: {len(res['trades'])} signals")
+    else:
+        report, _ = run_backtest(cfg, repo, args.out, args.trades)
+        print(report)
     repo.close()
+    return 0
+
+
+def cmd_backtest_compare(args, cfg, secrets) -> int:
+    import json
+    from pathlib import Path
+
+    from .backtest.variants import comparison_report
+    results = [json.loads(Path(p).read_text(encoding="utf-8")) for p in args.inputs]
+    text = comparison_report(results, cfg, args.detail)
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.out).write_text(text, encoding="utf-8")
+    print(text)
     return 0
 
 
@@ -127,6 +148,7 @@ COMMANDS = {
     "run-daily": cmd_run_daily,
     "run-weekly": cmd_run_weekly,
     "backtest": cmd_backtest,
+    "backtest-compare": cmd_backtest_compare,
 }
 
 
@@ -146,6 +168,13 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--max-coins", type=int, help="limit the universe (0 = all)")
             p.add_argument("--out", default="docs/BACKTEST.md", help="report path")
             p.add_argument("--trades", default="data/backtest_trades.csv", help="trade list CSV")
+            p.add_argument("--fetch-only", action="store_true", help="download history, don't replay")
+            p.add_argument("--variant", help="replay one config variant (backtest.variants)")
+            p.add_argument("--json", help="with --variant: where to save the raw results")
+        if name == "backtest-compare":
+            p.add_argument("inputs", nargs="+", help="variant result JSON files")
+            p.add_argument("--out", default="docs/BACKTEST.md")
+            p.add_argument("--detail", default="combined", help="variant shown in full")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(levelname)s %(name)s: %(message)s")

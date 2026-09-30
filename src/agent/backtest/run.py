@@ -26,8 +26,9 @@ LIMITS = """
 """
 
 
-def run_backtest(cfg: dict, repo, out_path: str | None = None, trades_csv: str | None = None,
-                 days: int | None = None) -> tuple[str, list[dict]]:
+def simulate(cfg: dict, repo, days: int | None = None) -> dict:
+    """Replay the stored history with this config. Returns trades (with costs), the
+    engine counters, hours per regime and the period."""
     meta = repo.get_state("bt_meta")
     if not meta:
         raise SystemExit("no backtest data: run `backtest --fetch` first")
@@ -39,10 +40,17 @@ def run_backtest(cfg: dict, repo, out_path: str | None = None, trades_csv: str |
     trades = bt.run()
     for t in trades:
         t.update(trade_costs(t, cfg, bt.h.funding_rate_at))
-    meta = {**meta, "start": start, "coins": len(bt.rows)}
-    cfg_days = {**cfg, "backtest": {**cfg["backtest"], "days": days}}
-    report = build_report(trades, dict(bt.stats), dict(bt.regime_hours), meta, cfg_days) + LIMITS
-    log.info("backtest finished in %.0fs: %d signals", time.time() - t0, len(trades))
+    log.info("replay finished in %.0fs: %d signals", time.time() - t0, len(trades))
+    return {"trades": trades, "stats": dict(bt.stats), "regime_hours": dict(bt.regime_hours),
+            "meta": {**meta, "start": start, "end": end, "days": days, "coins": len(bt.rows)}}
+
+
+def run_backtest(cfg: dict, repo, out_path: str | None = None, trades_csv: str | None = None,
+                 days: int | None = None) -> tuple[str, list[dict]]:
+    res = simulate(cfg, repo, days)
+    trades, meta = res["trades"], res["meta"]
+    cfg_days = {**cfg, "backtest": {**cfg["backtest"], "days": meta["days"]}}
+    report = build_report(trades, res["stats"], res["regime_hours"], meta, cfg_days) + LIMITS
     if out_path:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         Path(out_path).write_text(report, encoding="utf-8")

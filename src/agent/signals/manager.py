@@ -35,6 +35,12 @@ class SignalBook:
         open_ = self.open_signals()
         if any(s["symbol"] == base for s in open_):
             return Admission(False, "duplicate")
+        hours = lc["cooldown_after_stop_h"]
+        if hours:
+            recent = [s for s in self.repo.get_signals(["sl"]) if s["symbol"] == base
+                      and (s["payload"]["lifecycle"]["closed_at"] or 0) > now_ms - hours * 3_600_000]
+            if recent:
+                return Admission(False, "cooldown")
         if corr is not None:
             twins = [s for s in open_ if s["side"] == ("long" if side == 1 else "short")
                      and (corr(base, s["symbol"]) or 0) > lc["correlation_threshold"]]

@@ -122,6 +122,8 @@ class Backtest:
                           btc_pair_up=item["pairs"]["dirs"].get("BTC", {}).get("1d") == 1,
                           extra_levels=extra, labels=item["labels"])
             self.stats["evaluations"] += 1
+            if ev.rejected:
+                self.stats[f"rejected_{ev.rejected}"] += 1
             if ev.grade:
                 self.stats[f"grade_{ev.grade}"] += 1
             if not ev.is_signal:
