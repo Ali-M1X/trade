@@ -136,3 +136,25 @@ Run: https://github.com/Ali-M1X/trade/actions/runs/36741131896 (throwaway local 
   - PUMP scored 65.5 (a B) and became **Watch** because a neutral regime allows A only.
   - The others failed a gate: no level to lean on after a breakout (ICP), R:R < 2 (UNI, ARB, GRASS), phase (SOON), or no 1H confirmation yet (0G, NIGHT).
 - A first run found that new listings got no weekly candles: pagination started before the listing date and stopped at the first empty page. Fixed by falling back to the latest candles.
+
+## Step 4: signal lifecycle and Telegram messages
+
+| # | Topic | Decision | Config key |
+|---|---|---|---|
+| 80 | Market entry price | A market entry uses the close of the 1H trigger candle (the strategy's "market after the 1H trigger close"), not the 4H close. Distances still use ATR(4H). | — |
+| 81 | Lifecycle | pending → active (fill) → tp1 (50% closed, stop moved to entry) → tp2 (30% closed) → tp3 (the last 20% closes on a 4H close beyond MA25 or a 4H CHoCH against). Closed states: sl, breakeven (stop hit at entry after TP1), tp3, expired, cancelled. | `trade.tp*_close_pct` |
+| 82 | Fills | A limit order fills when a candle trades through the entry price, at the entry price. A market order is active from creation. | — |
+| 83 | Same-candle ambiguity | When one candle touches both the stop and a target, **the stop counts first** (conservative). A candle that fills the order is checked against the stop but not against the targets. | — |
+| 84 | Cancel and expiry | A pending signal is cancelled if price reaches TP1 before the entry, or if a 4H candle closes beyond the stop (the "ابطال" line in the message). It expires 6×4H = 24 h after creation if still unfilled. | `lifecycle.expiry_bars_4h` |
+| 85 | Candle feed | `run-15m` processes each new closed 15m candle and each new closed 4H candle in time order, exactly once per signal (markers are stored in the signal). The backtest will drive the same functions. | — |
+| 86 | Result in R | Each partial close adds (closed fraction × R at that price); the total is reported on the final message. | — |
+| 87 | Max 5 active | Pending and filled signals both count. When 5 are open, only a score ≥ 85 (A+) is still sent, labelled "خارج از سقف" (over the cap), and the header shows A+. | `lifecycle.max_active`, `grades.a_plus` |
+| 88 | Duplicates | No new signal for a coin that already has an open signal (either side). | — |
+| 89 | Correlation cap | At most 2 open signals on the same side among coins whose 30-day daily-return correlation with the new coin is > 0.8 (pairwise, computed from D candles). The A+ override does not lift this. | `lifecycle.max_correlated_same_side` |
+| 90 | Loss brake | 3 stop-outs in a row (`sl`) pause new signals until the next 00:00 UTC (the D close). A breakeven or a TP3 exit resets the count; expiries and cancellations don't count. A notice is sent when the brake engages. | `lifecycle.loss_streak_pause` |
+| 91 | Watch alerts | Watch-grade evaluations send a short "near setup" message listing what is missing, at most once per coin and side every 24 h. | `watch_alerts.*` |
+| 92 | Message template | The signal message is tested line for line against the template block in STRATEGY.md. The "reason" line is assembled from the checks that passed: entry level type, volume behaviour, 1H confirmations, patterns. The retest confirmation isn't repeated in the reason because the entry phrase already says it. | — |
+| 93 | Price format | Four significant digits, at least 2 decimals (142.30, 0.5312, 83712.50). | — |
+| 94 | Position cap | With a very tight stop, "risk ÷ stop distance" can exceed what 10x can carry (margin > 100% of balance). The position is then capped at leverage × balance and the message states the smaller real risk. | — |
+| 95 | Daily report | Regime with the three index directions, BTC/ETH/ETHBTC scores, BTC-weak and divergence warnings, the BTC 4-year cycle as "day N since the last halving" (context only), hot categories, the shortlist and the open signals. `run-daily` also announces coins that newly joined the HOLD list. | `daily.btc_halvings` |
+| 96 | HOLD report (`run-weekly`) | Not assigned to a build step, so added here. The 6 conditions from STRATEGY.md, at least 4 needed. (1) W direction up, or a W ACC range broken with RVOL ≥ 1.5. (2) COIN/BTC W swing lows rising. (3) D MA99 up over 10 bars with price above it. (4) 90-day return minus BTC's in the top 20% of the universe. (5) In a top-3 category by 30-day growth (same method as HOT_SECTOR). (6) ATH drawdown ≥ 60% and W in ACC. Output: up to 3 buy steps on D/W supports below price, invalidation = a weekly close below the deepest step, targets on W resistances (D if none). | `hold.*` |

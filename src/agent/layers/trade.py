@@ -79,9 +79,13 @@ class Rejected:
     reason: str                 # no_level | sl_too_wide | rr
 
 
-def build_trade(side: int, h4: Frame, levels: list[Level], cfg: dict) -> TradePlan | Rejected:
+def build_trade(side: int, h4: Frame, levels: list[Level], cfg: dict,
+                price: float | None = None) -> TradePlan | Rejected:
+    """price: the current price (the 1H trigger close); defaults to the 4H close.
+    Distances use ATR(4H)."""
     t, lv = cfg["trade"], cfg["technical"]["levels"]
-    atr, price = h4.atr, h4.close
+    atr = h4.atr
+    price = h4.close if price is None else price
     near = [l for l in levels
             if 0 <= (price - l.price) * side <= lv["max_entry_above_support_atr"] * atr]
     if not near:
@@ -140,5 +144,10 @@ def size_position(plan: TradePlan, risk_pct: float, cfg: dict) -> TradePlan:
     plan.size_pct = risk_pct / plan.sl_pct * 100 if plan.sl_pct else 0.0
     max_lev = 1 / (t["liquidation_sl_multiple"] * plan.sl_pct / 100) if plan.sl_pct else 1
     plan.leverage = max(1, min(t["leverage_cap"], math.floor(max_lev)))
+    if plan.size_pct > plan.leverage * 100:
+        # a very tight stop would need more than the whole balance as margin: cap the
+        # position at what the leverage allows and state the smaller risk
+        plan.size_pct = plan.leverage * 100.0
+        plan.risk_pct = plan.size_pct * plan.sl_pct / 100
     plan.margin_pct = plan.size_pct / plan.leverage
     return plan

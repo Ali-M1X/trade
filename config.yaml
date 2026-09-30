@@ -329,6 +329,13 @@ hold:
   ath_drawdown_pct: 60
   buy_steps: 3
 
+# ------------------------------------------------------------ messages
+daily:
+  btc_halvings: ["2012-11-28", "2016-07-09", "2020-05-11", "2024-04-20"]
+watch_alerts:
+  enabled: true
+  repeat_hours: 24             # the same coin/side is announced once per this window
+
 # --------------------------------------------------------------- runtime
 schedule:
   trigger_check_minutes: 15    # 30 if the repo becomes private

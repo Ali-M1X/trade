@@ -49,11 +49,47 @@ def cmd_run_4h(args, cfg, secrets) -> int:
 
 
 def cmd_run_1h(args, cfg, secrets) -> int:
+    from .notify.telegram import Notifier
     from .runs import run_1h, summarize_evaluations
     storage, repo, market, _, now = open_context(cfg, secrets)
-    print(summarize_evaluations(run_1h(cfg, repo, market, now)))
+    print(summarize_evaluations(run_1h(cfg, repo, market, now, Notifier(cfg, secrets))))
     repo.close()
     storage.push("run-1h")
+    return 0
+
+
+def cmd_run_15m(args, cfg, secrets) -> int:
+    from .notify.telegram import Notifier
+    from .runs import manage
+    storage, repo, market, _, now = open_context(cfg, secrets)
+    events = manage(cfg, repo, market, Notifier(cfg, secrets), now)
+    print(f"{len(events)} signal events")
+    repo.close()
+    storage.push("run-15m")
+    return 0
+
+
+def cmd_run_daily(args, cfg, secrets) -> int:
+    from .notify.telegram import Notifier
+    from .runs import daily, hold_new_entrants
+    storage, repo, market, cg, now = open_context(cfg, secrets)
+    notifier = Notifier(cfg, secrets)
+    if daily(cfg, repo, notifier, now) is None:
+        print("no funnel state yet: run-4h first")
+    hold_new_entrants(cfg, repo, market, cg, notifier, now)
+    repo.close()
+    storage.push("run-daily")
+    return 0
+
+
+def cmd_run_weekly(args, cfg, secrets) -> int:
+    from .notify.telegram import Notifier
+    from .runs import weekly
+    storage, repo, market, cg, now = open_context(cfg, secrets)
+    ideas = weekly(cfg, repo, market, cg, Notifier(cfg, secrets), now)
+    print(f"{len(ideas)} HOLD ideas")
+    repo.close()
+    storage.push("run-weekly")
     return 0
 
 
@@ -68,9 +104,9 @@ COMMANDS = {
     "check-sources": cmd_check_sources,
     "run-4h": cmd_run_4h,
     "run-1h": cmd_run_1h,
-    "run-15m": not_yet(4),
-    "run-daily": not_yet(4),
-    "run-weekly": not_yet(4),
+    "run-15m": cmd_run_15m,
+    "run-daily": cmd_run_daily,
+    "run-weekly": cmd_run_weekly,
     "backtest": not_yet(5),
 }
 

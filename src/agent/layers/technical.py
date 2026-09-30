@@ -69,23 +69,27 @@ def levels_section(plan: TradePlan, cfg: dict) -> float:
 
 
 # ------------------------------------------------------------- 4. volume
-def volume_section(h4: Frame, side: int, cfg: dict) -> float:
+def volume_section(h4: Frame, side: int, cfg: dict) -> tuple[float, list[str]]:
     v = cfg["technical"]["volume"]
     rvol = h4.col("rvol")
-    pts = 0.0
+    pts, notes = 0.0, []
     ev = h4.last_event
     if ev and ev.direction == side and h4.bars_since(ev.idx) <= v["event_lookback"]:
         if rvol.iloc[ev.idx] >= v["breakout_rvol"]:
             pts += v["breakout_points"]
+            notes.append("breakout_volume")
     elif rvol.iloc[-v["pullback_bars"]:].mean() < v["pullback_rvol_max"]:
         pts += v["breakout_points"]
+        notes.append("pullback_volume")
     n = cfg["indicators"]["obv_lookback"]
     obv = h4.col("obv")
     if len(obv) > n and np.sign(obv.iloc[-1] - obv.iloc[-1 - n]) == side:
         pts += v["obv_points"]
+        notes.append("obv")
     if climax(h4, side, cfg):
         pts += v["climax_penalty"]
-    return clamp(pts, v["max_points"])
+        notes.append("climax")
+    return clamp(pts, v["max_points"]), notes
 
 
 # ------------------------------------------------------------ 5. candles
@@ -167,8 +171,10 @@ def confirmations(h1: Frame, side: int, plan: TradePlan, cfg: dict) -> list[str]
     mid = c["rsi_mid"]
     rsi_cross = (rsi.iloc[-1] - mid) * side > 0 and ((rsi.iloc[-n:-1] - mid) * side <= 0).any()
     macd_flip = hist.iloc[-1] * side > 0 and ((hist.iloc[-3:-1]) * side <= 0).any()
-    if rsi_cross or macd_flip:
-        out.append("rsi_macd")
+    if rsi_cross:
+        out.append("rsi")
+    elif macd_flip:
+        out.append("macd")
     if h1.last["rvol"] >= c["trigger_rvol"]:
         out.append("rvol")
     return out
@@ -206,6 +212,10 @@ class Evaluation:
     phase_d: str = ""
     phase_4h: str = ""
     cycle: str = ""
+    cycle_w: int = 0
+    cycle_d: int = 0
+    labels: list[str] = field(default_factory=list)
+    price: float | None = None
     trigger: str | None = None
     plan: TradePlan | None = None
     rejected: str | None = None
@@ -223,11 +233,12 @@ class Evaluation:
 
 def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, majors: Majors,
              cfg: dict, funding: float | None = None, btc_pair_up: bool = False,
-             extra_levels: list | None = None) -> Evaluation:
+             extra_levels: list | None = None, labels: list[str] | None = None) -> Evaluation:
     """frames: 1w, 1d, 4h, 1h for COIN/USDT. funding: latest rate as a fraction.
     extra_levels: e.g. the flip level of a coin on the breakout watch."""
     w, d, h4, h1 = frames["1w"], frames["1d"], frames["4h"], frames["1h"]
-    ev = Evaluation(base, side)
+    ev = Evaluation(base, side, labels=list(labels or []), price=h1.close,
+                    cycle_w=w.direction, cycle_d=d.direction)
     ev.gates["regime"] = regime.allows(side)
 
     pts, ok, pd_, p4 = phase_section(d, h4, side, cfg)
@@ -237,7 +248,7 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
     ev.sections["dow"] = dow_section(d, h4, side, cfg)
 
     levels = collect_levels(frames, h4.close, cfg) + list(extra_levels or [])
-    plan = build_trade(side, h4, levels, cfg)
+    plan = build_trade(side, h4, levels, cfg, price=h1.close)
     if isinstance(plan, Rejected):
         ev.rejected = plan.reason
         ev.gates["rr"] = False
@@ -246,11 +257,12 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
     ev.plan = plan
     ev.gates["rr"] = True
     ev.sections["levels"] = levels_section(plan, cfg)
-    ev.sections["volume"] = volume_section(h4, side, cfg)
+    ev.sections["volume"], vol_notes = volume_section(h4, side, cfg)
     ev.sections["candles"], chase, ev.trigger = candles_section(h4, side, plan, cfg)
     cyc: CycleScore = score_cycles(w, d, h4, side, cfg)
     ev.sections["cycles"], ev.cycle = float(cyc.points), cyc.note
-    ev.sections["patterns"], ev.notes = health_section(h4, side, cfg)
+    ev.sections["patterns"], health = health_section(h4, side, cfg)
+    ev.notes = vol_notes + health
     ev.confirmations = confirmations(h1, side, plan, cfg)
     ev.sections["confirmation"] = confirmation_points(len(ev.confirmations), cfg)
     ev.gates["confirmation"] = len(ev.confirmations) >= cfg["technical"]["confirmation"]["min_confirmations"]

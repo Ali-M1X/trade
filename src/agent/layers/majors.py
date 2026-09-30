@@ -19,6 +19,7 @@ class Majors:
     eth: int
     ethbtc: int
     ethbtc_up_d: bool
+    ethbtc_d: int           # ETHBTC structure direction on D (for messages)
     btc_weak: bool          # alt longs then need a technical score >= btc_weak_min_score
     divergence: bool        # BTC and TOTAL2 pointing opposite ways: risk x0.5
     risk_multiplier: float
@@ -38,6 +39,7 @@ def compute_majors(frames: dict[str, dict[str, Frame]], total2_dir: int, cfg: di
     return Majors(
         btc=btc, eth=eth, ethbtc=ethbtc,
         ethbtc_up_d=frames["ETHBTC"]["1d"].direction == 1 if "1d" in frames["ETHBTC"] else False,
+        ethbtc_d=frames["ETHBTC"]["1d"].direction if "1d" in frames["ETHBTC"] else 0,
         btc_weak=btc <= m["btc_weak_threshold"],
         divergence=divergence,
         risk_multiplier=m["divergence_risk_multiplier"] if divergence else 1.0,

@@ -59,8 +59,16 @@ jobs:
         run: trade-agent -v run-4h 2>&1 | tee run4h.txt
       - name: run-1h
         run: trade-agent -v run-1h 2>&1 | tee run1h.txt
+      - name: run-15m
+        run: trade-agent -v run-15m 2>&1 | tee run15m.txt
+      - name: run-daily
+        run: trade-agent -v run-daily 2>&1 | tee rundaily.txt
+      - name: run-weekly
+        run: trade-agent -v run-weekly 2>&1 | tee runweekly.txt
       - name: Summary
         if: always()
         run: |
-          { echo '### run-4h'; echo '```'; grep -v '^INFO\|^WARNING' run4h.txt | tail -40; echo '```';
-            echo '### run-1h'; echo '```'; grep -v '^INFO\|^WARNING' run1h.txt | tail -40; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          for f in run4h run1h run15m rundaily runweekly; do
+            [ -f "$f.txt" ] || continue
+            { echo "### $f"; echo '```'; grep -v '^INFO\|^WARNING' "$f.txt" | tail -80; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          done

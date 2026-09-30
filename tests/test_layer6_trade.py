@@ -86,6 +86,14 @@ def test_size_and_leverage(sl_pct, size, lev):
     assert 100 / p.leverage >= 2.5 * sl_pct or p.leverage == 1
 
 
+def test_position_never_needs_more_than_the_balance_as_margin():
+    p = build_trade(1, fake_h4(100.0, 100.0), [lvl(100.0)], _cfg())
+    p.entry, p.sl = 100.0, 99.95                                  # 0.05% stop
+    size_position(p, 1.0, _cfg())
+    assert p.leverage == 10 and p.size_pct == 1000 and p.margin_pct == 100
+    assert p.risk_pct == pytest.approx(0.5)                       # what is actually at risk
+
+
 def test_strategy_example_numbers():
     """STRATEGY.md: risk 1%, stop 3.4% -> position ~29%, max 11x -> 10x, margin ~2.9%."""
     p = build_trade(1, fake_h4(100.0, 100.0), [lvl(100.0)], _cfg())

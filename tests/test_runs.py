@@ -197,3 +197,71 @@ def test_run_4h_then_1h(cfg):
 
 def test_run_1h_without_state(cfg):
     assert run_1h(cfg, Repository(), FakeMarket(), NOW) == []
+
+
+# ------------------------------------------------------------ step 4 wiring
+def test_run_1h_publishes_signals_and_respects_correlation(cfg):
+    import io
+
+    from agent.config import load_secrets
+    from agent.notify.telegram import Notifier
+    from agent.signals.manager import SignalBook
+    repo = Repository()
+    run_4h(cfg, repo, FakeMarket(), FakeCG(), NOW)
+    out = io.StringIO()
+    notifier = Notifier(cfg, load_secrets({}), out=out)
+    evs = run_1h(cfg, repo, FakeMarket(), NOW, notifier)
+    signals = [e for e in evs if e.is_signal]
+    opened = SignalBook(repo, cfg).open_signals()
+    # BTC, ETH and DOGE move identically in the fake data (correlation 1): only 2 per side
+    assert len(signals) == 3 and len(opened) == cfg["lifecycle"]["max_correlated_same_side"]
+    assert all(m.startswith("🟢 LONG") for m in notifier.sent)
+    assert "dry-run" in out.getvalue()
+    # the same setups an hour later are duplicates, nothing new is sent
+    notifier.sent.clear()
+    run_1h(cfg, repo, FakeMarket(), NOW, notifier)
+    assert notifier.sent == [] and len(SignalBook(repo, cfg).open_signals()) == 2
+
+
+class ScriptedMarket:
+    """15m and 4H candles after a signal's creation, for run-15m."""
+
+    def __init__(self, m15, h4):
+        self.data = {"15m": m15, "4h": h4}
+
+    def candles(self, base, tf):
+        return self.data[tf]
+
+
+def test_manage_fills_hits_targets_and_reports(cfg):
+    from agent.config import load_secrets
+    from agent.layers.trade import TradePlan
+    from agent.notify.telegram import Notifier
+    from agent.runs import daily, manage
+    from agent.signals.manager import SignalBook
+    repo = Repository()
+    book = SignalBook(repo, cfg)
+
+    class Ev:
+        base, side, score, grade = "SOL", 1, 80, "A"
+        plan = TradePlan(1, "limit", 100.0, 99.8, 100.2, 95.0, 110.0, 115.0, 2, 3, False,
+                         100.0, "cluster", "4h", 2, 1.0)
+    book.create(Ev(), NOW, {})
+    q = 900_000
+    m15 = pd.DataFrame({"ts": [NOW - q, NOW + q, NOW + 2 * q, NOW + 3 * q],
+                        "open": 0.0, "high": [120, 101, 111, 104], "low": [90, 99.9, 103, 101],
+                        "close": 0.0, "volume": 1.0})
+    h4 = from_closes(np.full(150, 100.0), tf="4h", t0=NOW - 150 * TF_MS["4h"])
+    notifier = Notifier(cfg, load_secrets({}), out=open("/dev/null", "w"))
+    events = manage(cfg, repo, ScriptedMarket(m15, h4), notifier, NOW + 4 * q)
+    # the candle before creation is ignored; then fill, then TP1
+    assert [e.kind for e in events] == ["filled", "tp1"]
+    [sig] = book.open_signals()
+    assert sig["status"] == "tp1" and sig["payload"]["lifecycle"]["sl_now"] == 100.0
+    assert notifier.sent[0].startswith("✅ ورود فعال شد") and notifier.sent[1].startswith("🎯 TP1")
+    # re-running with the same candles changes nothing
+    assert manage(cfg, repo, ScriptedMarket(m15, h4), notifier, NOW + 4 * q) == []
+    # expiry does not apply once filled; the daily report lists the open signal
+    repo.set_state("funnel", {"regime": {"name": "neutral", "usdt_d": 0, "btc_d": 0, "total2": 0},
+                              "majors": {"btc": 0, "eth": 0, "ethbtc": 0}, "shortlist": []})
+    assert "SOLUSDT LONG – tp1" in daily(cfg, repo, notifier, NOW + 4 * q)

@@ -9,9 +9,14 @@ from .data.market import LiveMarket
 from .layers.funnel import FunnelResult, run_funnel
 from .layers.majors import Majors
 from .layers.regime import Regime
-from .layers.scanners import CoinData, hot_categories
+from .hold.scanner import scan_hold
+from .layers.scanners import CoinData, category_growth, hot_categories
 from .layers.technical import Evaluation, evaluate
+from .layers.pairs import returns_corr_beta
 from .layers.trade import flip_level
+from .notify import formatter as fmt
+from .signals.lifecycle import H4, on_4h_close, on_candle, on_time
+from .signals.manager import SignalBook
 
 log = logging.getLogger(__name__)
 DAY = 86_400_000
@@ -130,7 +135,7 @@ def run_4h(cfg: dict, repo, market: LiveMarket, cg, now_ms: int) -> FunnelResult
     return result
 
 
-def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int) -> list[Evaluation]:
+def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None) -> list[Evaluation]:
     state = repo.get_state("funnel")
     if not state:
         log.warning("no funnel state yet: run-4h first")
@@ -149,10 +154,12 @@ def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int) -> list[Evaluation]
         btc_pair_up = item["pairs"]["dirs"].get("BTC", {}).get("1d") == 1
         extra = [flip_level(item["flip_level"], cfg)] if item.get("flip_level") else []
         ev = evaluate(base, side, frames, regime, majors, cfg,
-                      funding=market.funding_now(base), btc_pair_up=btc_pair_up, extra_levels=extra)
-        ev.notes = item["labels"] + ev.notes
+                      funding=market.funding_now(base), btc_pair_up=btc_pair_up, extra_levels=extra,
+                      labels=item["labels"])
         out.append(ev)
     repo.set_state("evaluations", {"ts": now_ms, "items": [e.to_dict() for e in out]})
+    if notifier is not None:
+        publish(cfg, repo, market, notifier, out, now_ms)
     return out
 
 
@@ -179,3 +186,132 @@ def summarize_evaluations(evs: list[Evaluation]) -> str:
                      f"{' rejected:' + e.rejected if e.rejected else ''}"
                      f"{' flags:' + ','.join(e.flags) if e.flags else ''}")
     return "\n".join(lines) or "no shortlist coins evaluated"
+
+
+# ------------------------------------------------------------------ signals
+def publish(cfg: dict, repo, market, notifier, evs: list[Evaluation], now_ms: int) -> list[int]:
+    """Turn A/B evaluations into signals (subject to the book's rules) and send Watch
+    alerts. Returns the new signal ids."""
+    state = repo.get_state("funnel")
+    book = SignalBook(repo, cfg)
+
+    def corr(a: str, b: str):
+        return returns_corr_beta(market.candles(a, "1d"), market.candles(b, "1d"),
+                                 cfg["pairs"]["corr_days"])[0]
+
+    created = []
+    watch_sent = repo.get_state("watch_sent", {})
+    for ev in sorted(evs, key=lambda e: -e.score):
+        if ev.is_signal:
+            adm = book.admit(ev.base, ev.side, ev.score, now_ms, corr)
+            if not adm.ok:
+                log.info("%s %s not sent: %s", ev.base, ev.grade, adm.reason)
+                continue
+            meta = {"regime": state["regime"], "majors": state["majors"],
+                    "evaluation": ev.to_dict(), "out_of_cap": adm.out_of_cap}
+            sid, _ = book.create(ev, now_ms, meta)
+            created.append(sid)
+            notifier.send(fmt.signal_message(ev, state["regime"], state["majors"],
+                                             len(book.open_signals()), cfg, adm.out_of_cap))
+        elif ev.grade == "Watch" and cfg["watch_alerts"]["enabled"]:
+            key = f"{ev.base}:{ev.side}"
+            if now_ms - watch_sent.get(key, 0) >= cfg["watch_alerts"]["repeat_hours"] * 3_600_000:
+                watch_sent[key] = now_ms
+                notifier.send(fmt.watch_message(ev))
+    repo.set_state("watch_sent", watch_sent)
+    return created
+
+
+def manage(cfg: dict, repo, market, notifier, now_ms: int) -> list:
+    """run-15m: feed new closed 15m candles and 4H closes to every open signal, in time
+    order, then check expiry. Sends a message per event."""
+    book = SignalBook(repo, cfg)
+    ma = f"ma{cfg['indicators']['ma_mid']}"
+    all_events = []
+    for sig in book.open_signals():
+        lc = sig["payload"]["lifecycle"]
+        base, side = sig["symbol"], lc["side"]
+        steps = []
+        m15 = market.candles(base, cfg["timeframes"]["fast_trigger"])
+        for r in m15[m15["ts"] > lc["last_candle_ts"]].itertuples():
+            steps.append((r.ts, 0, r))
+        h4 = market.candles(base, "4h")
+        if len(h4) >= 2:
+            f = make_frame(h4, "4h", cfg, with_indicators=True)
+            offset = len(h4) - f.n                   # frame keeps the last window only
+            chochs = {e.idx + offset for e in f.events if e.kind == "CHoCH" and e.direction == -side}
+            ma_values = f.df[ma].to_numpy()
+            for i, r in enumerate(h4.itertuples()):
+                if r.ts > lc["last_4h_ts"] and i >= offset:
+                    steps.append((r.ts + H4, 1, (r, ma_values[i - offset], i in chochs)))
+        events = []
+        for _, kind, item in sorted(steps, key=lambda x: (x[0], x[1])):
+            if kind == 0:
+                events += on_candle(lc, int(item.ts), float(item.high), float(item.low), cfg)
+            else:
+                r, ma_v, choch = item
+                events += on_4h_close(lc, int(r.ts), float(r.close), float(ma_v), choch)
+        events += on_time(lc, now_ms)
+        if not events:
+            repo.update_signal(sig["id"], lc["status"], sig["payload"], sig["updated_at"])
+            continue
+        notice = book.save(sig, events, now_ms)
+        for e in events:
+            notifier.send(fmt.event_message(sig, e, cfg))
+        if notice:
+            notifier.send(fmt.pause_message(book.pause()["paused_until"]))
+        all_events += events
+    return all_events
+
+
+def daily(cfg: dict, repo, notifier, now_ms: int) -> str | None:
+    state = repo.get_state("funnel")
+    if not state:
+        return None
+    text = fmt.daily_message(state, SignalBook(repo, cfg).open_signals(), now_ms, cfg)
+    notifier.send(text)
+    return text
+
+
+# --------------------------------------------------------------------- HOLD
+def hold_ideas(cfg: dict, repo, market, cg) -> list:
+    """Spot HOLD scan over the tradable universe (W and D candles, COIN/BTC on W)."""
+    bases, _ = market.perp_bases_and_spreads()
+    _, rows = load_universe(cg, bases, cfg)
+    categories = load_categories(cg, rows)
+    h = cfg["hold"]
+    ranked = category_growth(rows, categories, f"price_change_percentage_{h['category_period_days']}d_in_currency",
+                             cfg["scanners"]["hot_sector"]["min_coins"],
+                             cfg["scanners"]["hot_sector"]["ignore_categories"])
+    hot30 = {c for c, _ in ranked[:h["top_categories"]]}
+    btc = frames_for(market, "BTC", ["1d"], cfg)
+    if "1d" not in btc:
+        return []
+    coins = []
+    for r in rows:
+        base = r["symbol"].upper()
+        f = frames_for(market, base, ["1d", "1w"], cfg)
+        if len(f) < 2:
+            continue
+        w_btc = frames_for(market, base, ["1w"], cfg, "BTC").get("1w") if base != "BTC" else None
+        coins.append({"base": base, "info": r, "d": f["1d"], "w": f["1w"], "w_btc": w_btc,
+                      "categories": categories.get(r["id"], [])})
+    return scan_hold(coins, btc["1d"], hot30, cfg)
+
+
+def weekly(cfg: dict, repo, market, cg, notifier, now_ms: int) -> list:
+    ideas = hold_ideas(cfg, repo, market, cg)
+    repo.set_state("hold", sorted(i.base for i in ideas))
+    notifier.send(fmt.hold_message(ideas, now_ms))
+    return ideas
+
+
+def hold_new_entrants(cfg: dict, repo, market, cg, notifier, now_ms: int) -> list:
+    """Daily: announce coins that joined the HOLD list since the last scan."""
+    ideas = hold_ideas(cfg, repo, market, cg)
+    known = set(repo.get_state("hold", []))
+    new = [i for i in ideas if i.base not in known]
+    repo.set_state("hold", sorted(i.base for i in ideas))
+    if new and known:            # the first scan is the weekly report's job
+        notifier.send(fmt.hold_message(new, now_ms, new_only=True))
+    return new
