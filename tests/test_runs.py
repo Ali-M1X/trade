@@ -174,8 +174,15 @@ def test_run_4h_then_1h(cfg):
     assert res.watchlist["SOL"] == ["EARLY_TREND", "RS_LEADER", "HOT_SECTOR"]
     assert "AI" in res.hot
     assert res.watchlist["DOGE"] == ["HOT_SECTOR"]              # joined via the hot category
-    assert res.shortlist[0].base == "SOL" and res.shortlist[0].score >= 90
+    sol = next(c for c in res.shortlist if c.base == "SOL")
+    assert sol.score >= 90 and sol.score == max(c.score for c in res.shortlist)
+    # SOL broke out far above its flip level, so coins sitting near a level rank first
+    assert res.shortlist[-1].base == "SOL" and sol.level_atr > cfg["shortlist"]["near_level_atr"]
+    assert all(c.near_level(cfg) for c in res.shortlist[:-1])
     assert all(c.side == 1 for c in res.shortlist)              # alt season: longs only
+    watch = repo.get_state("breakout_watch")
+    assert watch["SOL"]["labels"] == ["EARLY_TREND", "RS_LEADER"]
+    assert watch["SOL"]["level"] == pytest.approx(sol.flip_level) and sol.flip_level < 104
     assert len(repo.get_dominance("recon")) == cfg["regime"]["backfill_days"]
     assert "regime:" in summarize_funnel(res)
 

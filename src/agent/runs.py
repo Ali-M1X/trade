@@ -11,6 +11,7 @@ from .layers.majors import Majors
 from .layers.regime import Regime
 from .layers.scanners import CoinData, hot_categories
 from .layers.technical import Evaluation, evaluate
+from .layers.trade import flip_level
 
 log = logging.getLogger(__name__)
 DAY = 86_400_000
@@ -122,8 +123,10 @@ def run_4h(cfg: dict, repo, market: LiveMarket, cg, now_ms: int) -> FunnelResult
             oi=market.open_interest(base),
             categories=categories.get(r["id"], []),
             spread_pct=spreads.get(base)))
-    result = run_funnel(dom, majors, coins, rows, categories, cfg, hot=hot)
+    result = run_funnel(dom, majors, coins, rows, categories, cfg, hot=hot,
+                        breakout_watch=repo.get_state("breakout_watch", {}), now_ms=now_ms)
     repo.set_state("funnel", {**result.to_dict(), "ts": now_ms})
+    repo.set_state("breakout_watch", result.breakout_watch)
     return result
 
 
@@ -144,8 +147,9 @@ def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int) -> list[Evaluation]
                         ", ".join(tf for tf in tfs if tf not in frames))
             continue
         btc_pair_up = item["pairs"]["dirs"].get("BTC", {}).get("1d") == 1
+        extra = [flip_level(item["flip_level"], cfg)] if item.get("flip_level") else []
         ev = evaluate(base, side, frames, regime, majors, cfg,
-                      funding=market.funding_now(base), btc_pair_up=btc_pair_up)
+                      funding=market.funding_now(base), btc_pair_up=btc_pair_up, extra_levels=extra)
         ev.notes = item["labels"] + ev.notes
         out.append(ev)
     repo.set_state("evaluations", {"ts": now_ms, "items": [e.to_dict() for e in out]})
@@ -160,7 +164,9 @@ def summarize_funnel(r: FunnelResult) -> str:
              f"hot categories: {', '.join(sorted(r.hot)) or '-'}",
              f"watchlist: {len(r.watchlist)} coins, shortlist:"]
     for c in r.shortlist:
-        lines.append(f"  {c.base:<8} {'LONG ' if c.side == 1 else 'SHORT'} {c.score:5.1f}  {'+'.join(c.labels)}")
+        lvl = "-" if c.level_atr is None else f"{c.level_atr:.1f} ATR"
+        lines.append(f"  {c.base:<8} {'LONG ' if c.side == 1 else 'SHORT'} {c.score:5.1f}  "
+                     f"level {lvl:<8} {'+'.join(c.labels)}")
     return "\n".join(lines)
 
 

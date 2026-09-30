@@ -51,6 +51,15 @@ def squeeze(d: Frame, s: dict) -> bool:
     return bool(len(atr) > n and pr <= s["bb_width_percentile"] and atr.iloc[-1] < atr.iloc[-1 - n])
 
 
+def breakout_level(d: Frame, lookback: int) -> float | None:
+    """The high of the previous `lookback` D bars, if the last close is above it (the
+    level a breakout just cleared, which becomes the flip support)."""
+    if d.n <= lookback:
+        return None
+    level = float(d.df["high"].iloc[-lookback - 1:-1].max())
+    return level if d.close > level else None
+
+
 def early_trend(d: Frame, s: dict) -> bool:
     n = s["min_range_bars"]
     if d.n <= n:

@@ -12,6 +12,18 @@ from ..analysis.frame import Frame
 from ..indicators.levels import Level, cluster_levels, previous_period_levels, round_levels
 
 
+def flip_level(price: float, cfg: dict) -> Level:
+    """A broken D level kept as support while the coin is on the breakout watch."""
+    w = cfg["technical"]["levels"]["timeframe_weight"]["1d"]
+    return Level(price, 1, "1d", "flip", 1 + w, [price])
+
+
+def nearest_level_atr(side: int, price: float, atr: float, levels: list[Level]) -> float | None:
+    """Distance (in ATR) from price back to the closest level behind it, if any."""
+    behind = [(price - l.price) * side for l in levels if (price - l.price) * side >= 0]
+    return min(behind) / atr if behind and atr and atr == atr else None
+
+
 def collect_levels(frames: dict[str, Frame], price: float, cfg: dict) -> list[Level]:
     """Pivot clusters on 4H/D/W, the previous D and W high/low, and round numbers."""
     sw, lv = cfg["swings"], cfg["technical"]["levels"]

@@ -72,4 +72,8 @@ def score_cycles(w: Frame, d: Frame, h4: Frame, side: int, cfg: dict) -> CycleSc
         if lw.leg == -side:
             return CycleScore(c["points_lower_correcting"], 1.0, True, "lower_correcting")
         return CycleScore(0, 1.0, False, "lower_impulse")
+    if hw.major == 0 and mw.major == side and lw.leg == side and lw.major != -side:
+        if lw.late:
+            return CycleScore(c["points_late"], 1.0, False, "late")
+        return CycleScore(c["points_higher_ranging"], 1.0, False, "higher_ranging")
     return CycleScore(0, 1.0, False, "not_aligned")

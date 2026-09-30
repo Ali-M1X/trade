@@ -52,6 +52,8 @@ def dow_section(d: Frame, h4: Frame, side: int, cfg: dict) -> float:
         return float(p["points_both"])
     if h4.dow == side and d.dow == 0:
         return float(p["points_4h_only"])
+    if d.dow == side and h4.dow == 0:
+        return float(p["points_d_only"])
     return 0.0
 
 
@@ -61,7 +63,7 @@ def levels_section(plan: TradePlan, cfg: dict) -> float:
     if plan.support_kind == "cluster" and plan.support_tf in ("1d", "1w") and \
             plan.support_touches >= p["strong_min_touches"]:
         return float(p["points_strong"])
-    if plan.support_kind in ("cluster", "prev_high", "prev_low"):
+    if plan.support_kind in ("cluster", "prev_high", "prev_low", "flip"):
         return float(p["points_weak"])
     return 0.0                                            # round number only
 
@@ -220,8 +222,10 @@ class Evaluation:
 
 
 def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, majors: Majors,
-             cfg: dict, funding: float | None = None, btc_pair_up: bool = False) -> Evaluation:
-    """frames: 1w, 1d, 4h, 1h for COIN/USDT. funding: latest rate as a fraction."""
+             cfg: dict, funding: float | None = None, btc_pair_up: bool = False,
+             extra_levels: list | None = None) -> Evaluation:
+    """frames: 1w, 1d, 4h, 1h for COIN/USDT. funding: latest rate as a fraction.
+    extra_levels: e.g. the flip level of a coin on the breakout watch."""
     w, d, h4, h1 = frames["1w"], frames["1d"], frames["4h"], frames["1h"]
     ev = Evaluation(base, side)
     ev.gates["regime"] = regime.allows(side)
@@ -232,7 +236,8 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
     ev.phase_4h = p4.name + (f":{p4.event}" if p4.event else "")
     ev.sections["dow"] = dow_section(d, h4, side, cfg)
 
-    plan = build_trade(side, h4, collect_levels(frames, h4.close, cfg), cfg)
+    levels = collect_levels(frames, h4.close, cfg) + list(extra_levels or [])
+    plan = build_trade(side, h4, levels, cfg)
     if isinstance(plan, Rejected):
         ev.rejected = plan.reason
         ev.gates["rr"] = False

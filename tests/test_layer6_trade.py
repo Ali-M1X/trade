@@ -121,7 +121,8 @@ def frame_with(dow, events=()):
 def test_dow_section(cfg):
     assert dow_section(frame_with(1), frame_with(1), 1, cfg) == 15
     assert dow_section(frame_with(0), frame_with(1), 1, cfg) == 8
-    assert dow_section(frame_with(1), frame_with(0), 1, cfg) == 0
+    assert dow_section(frame_with(1), frame_with(0), 1, cfg) == 8     # D aligned, 4H ranging
+    assert dow_section(frame_with(1), frame_with(-1), 1, cfg) == 0
     choch = frame_with(1, [StructureEvent(9, "CHoCH", -1, 1.0)])
     assert dow_section(frame_with(1), choch, 1, cfg) == 0
     assert dow_section(frame_with(-1), frame_with(-1), -1, cfg) == 15
@@ -231,3 +232,10 @@ def test_btc_weak_blocks_alt_longs_under_80(cfg, setup):
     assert e.score < 80 and "btc_weak" in e.flags and e.grade == "Watch"
     # BTC itself is not an alt
     assert "btc_weak" not in evaluate("BTC", 1, frames, regime, weak, cfg).flags
+
+
+def test_flip_level_is_a_usable_support(cfg):
+    from agent.layers.trade import flip_level
+    p = build_trade(1, fake_h4(101.0, 2.0), [flip_level(100.6, cfg), lvl(110.0)], cfg)
+    assert p.support_kind == "flip" and p.support == 100.6 and p.order == "market"
+    assert levels_section(p, cfg) == 8

@@ -9,6 +9,7 @@ from agent.layers.majors import compute_majors, weighted_score
 from agent.layers.pairs import PairsResult, returns_corr_beta
 from agent.layers.regime import classify, combine, compute_regime, make_regime
 from agent.layers.scanners import CoinData, Label
+from agent.layers.trade import flip_level, nearest_level_atr
 from agent.layers.shortlist import (Candidate, label_points, label_sides, liquidity_points,
                                     regime_points, select)
 from builders import from_closes, trend, waypoints
@@ -256,3 +257,51 @@ def test_funnel_end_to_end(cfg, up_frames, down_frames):
     assert c.base == "SOL" and c.side == 1 and c.score >= 60
     assert c.parts["ethbtc"] == 5 and c.parts["regime"] == 30
     assert res.to_dict()["shortlist"][0]["base"] == "SOL"
+
+
+def test_select_ranks_near_level_first(cfg):
+    far = Candidate("FAR", 1, 95, [], level_atr=4.0)
+    near = Candidate("NEAR", 1, 70, [], level_atr=1.2)
+    none = Candidate("NONE", 1, 99, [], level_atr=None)
+    assert [c.base for c in select([far, near, none], cfg)] == ["NEAR", "NONE", "FAR"]
+
+
+def test_nearest_level_atr():
+    levels = [flip_level(100.0, _cfg()), flip_level(96.0, _cfg()), flip_level(110.0, _cfg())]
+    assert nearest_level_atr(1, 103.0, 2.0, levels) == 1.5
+    assert nearest_level_atr(-1, 103.0, 2.0, levels) == 3.5
+    assert nearest_level_atr(1, 90.0, 2.0, levels) is None
+
+
+def _cfg():
+    from agent.config import load_config
+    return load_config()
+
+
+def test_breakout_watch_keeps_coin_for_five_days(cfg, up_frames):
+    dom = dominance_series(-1, -1, 1)
+    majors = {"BTC": up_frames, "ETH": up_frames, "ETHBTC": up_frames}
+    base = np.r_[100 + 0.5 * np.sin(np.arange(199)), 104]
+    vols = np.r_[np.full(199, 1000.0), 3000]
+
+    def coin(closes, v=None):
+        return CoinData("SOL", {"id": "solana", "total_volume": 400e6},
+                        {"1d": frame(cfg, closes, volumes=v), "4h": frame(cfg, closes, "4h", v)})
+
+    t0 = 1_760_000_000_000
+    r1 = run_funnel(dom, majors, [coin(base, vols)], [], {}, cfg, now_ms=t0)
+    entry = r1.breakout_watch["SOL"]
+    assert entry["since"] == t0 and 100 < entry["level"] < 104
+    # two days later the breakout candle is no longer the last one: no EARLY_TREND,
+    # but the coin stays on the watch with its flip level
+    retest = np.r_[base, 102.5, 101.2]
+    r2 = run_funnel(dom, majors, [coin(retest)], [], {}, cfg, breakout_watch=r1.breakout_watch,
+                    now_ms=t0 + 2 * DAY)
+    assert r2.watchlist["SOL"] == ["BREAKOUT_WATCH"]
+    assert r2.breakout_watch["SOL"] == entry
+    [c] = [c for c in r2.candidates if c.base == "SOL"]
+    assert c.flip_level == entry["level"] and c.level_atr is not None
+    # after 5 days it is dropped
+    r3 = run_funnel(dom, majors, [coin(retest)], [], {}, cfg, breakout_watch=r2.breakout_watch,
+                    now_ms=t0 + 6 * DAY)
+    assert "SOL" not in r3.breakout_watch and "SOL" not in r3.watchlist

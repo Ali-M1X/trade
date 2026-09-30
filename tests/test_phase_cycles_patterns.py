@@ -72,6 +72,16 @@ def test_counter_trend_cycle_halves_risk(cfg, up_wd):
     assert (s.points, s.risk_multiplier) == (3, 0.5)
 
 
+def test_higher_ranging_with_medium_and_lower_aligned(cfg, up_wd):
+    from dataclasses import replace
+    w, d = up_wd
+    w_range = replace(w, direction=0)                     # weekly structure ranging
+    s = score_cycles(w_range, d, frame(cfg, waypoints(FRESH)), 1, cfg)
+    assert (s.points, s.note) == (5, "higher_ranging")
+    s = score_cycles(w_range, d, frame(cfg, waypoints(CORRECTING)), 1, cfg)
+    assert s.points == 0                                  # 4H not aligned
+
+
 def test_cycles_not_aligned_with_side(cfg, up_wd):
     w, d = up_wd
     assert score_cycles(w, d, frame(cfg, waypoints(FRESH)), -1, cfg).points == 0

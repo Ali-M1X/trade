@@ -163,6 +163,7 @@ scanners:
     FUNDING_EXTREME: 0.6
     VOLUME_ANOMALY: 0.6
     HOT_SECTOR: 0.6
+    BREAKOUT_WATCH: 0.8        # a recent EARLY_TREND/RS_LEADER coin waiting for its retest
 
 # ------------------------------------------------------------------ Layer 4
 pairs:
@@ -194,6 +195,12 @@ shortlist:
   volume_full_usd: 500000000     # 24h volume that earns the full volume points (log scale from min)
   spread_full_pct: 0.05
   spread_zero_pct: 0.30
+  near_level_atr: 1.5          # coins within this x ATR(4H) of a usable level rank first
+
+breakout_watch:
+  labels: [EARLY_TREND, RS_LEADER]
+  days: 5                      # the broken level stays a flip support this long
+  lookback_bars: 30            # D bars whose high the breakout cleared
 
 # ------------------------------------------------------------------ Layer 6
 technical:
@@ -208,7 +215,8 @@ technical:
     spring_bars: 5             # a spring/upthrust must happen in the last N bars
   dow:
     points_both: 15
-    points_4h_only: 8
+    points_4h_only: 8          # 4H aligned, D ranging
+    points_d_only: 8           # D aligned, 4H ranging
     points_choch_against: 0
   levels:
     points_strong: 15          # W/D level with >= 3 touches
@@ -247,6 +255,7 @@ technical:
     points_all_aligned_fresh: 10
     points_lower_correcting: 5
     points_counter_trend: 3
+    points_higher_ranging: 5   # W ranging, D and 4H aligned with the trade
     points_late: 0
     counter_trend_risk_multiplier: 0.5
     fresh_bars: 6              # 4H turn (new HL/LH or BOS) at most N bars ago
@@ -338,5 +347,5 @@ storage:
   keep_bars: 450               # candles kept per series in the runtime DB
 
 backtest:
-  years: 2
+  years: 1                     # all layers, limited by the 365-day dominance history
   timeframes: [4h, 1h]

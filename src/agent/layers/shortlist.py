@@ -50,6 +50,11 @@ class Candidate:
     score: float
     labels: list[str]
     parts: dict = field(default_factory=dict)
+    level_atr: float | None = None      # distance to the nearest usable level, in ATR(4H)
+    flip_level: float | None = None
+
+    def near_level(self, cfg: dict) -> bool:
+        return self.level_atr is not None and self.level_atr <= cfg["shortlist"]["near_level_atr"]
 
 
 def score_candidate(base: str, side: int, is_btc: bool, labels: list[Label], pairs: PairsResult,
@@ -67,12 +72,13 @@ def score_candidate(base: str, side: int, is_btc: bool, labels: list[Label], pai
 
 
 def select(candidates: list[Candidate], cfg: dict) -> list[Candidate]:
-    """Best side per coin, score >= min_score, highest first, at most max_coins."""
+    """Best side per coin, score >= min_score, at most max_coins. Coins within
+    near_level_atr of a usable level rank ahead of the rest, then by score."""
     s = cfg["shortlist"]
     best: dict[str, Candidate] = {}
     for c in candidates:
         if c.base not in best or c.score > best[c.base].score:
             best[c.base] = c
     ok = [c for c in best.values() if c.score >= s["min_score"]]
-    ok.sort(key=lambda c: (-c.score, c.base))
+    ok.sort(key=lambda c: (not c.near_level(cfg), -c.score, c.base))
     return ok[:s["max_coins"]]
