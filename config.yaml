@@ -84,6 +84,11 @@ swings:
   round_number_levels: true
   wave_history_swings: 5       # average wave length over the last 5 swings
 
+structure:
+  # direction = +1 when dow + sign(close-MA25) + sign(close-MA99) >= this, -1 when <= -this
+  direction_min_votes: 2
+  round_levels_each_side: 2
+
 # ------------------------------------------------------------------ Layer 1
 regime:
   timeframes: [1d, 4h]
