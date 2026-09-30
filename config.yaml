@@ -92,15 +92,14 @@ structure:
 # ------------------------------------------------------------------ Layer 1
 regime:
   timeframes: [1d, 4h]
-  # direction per index: +1 up, 0 range, -1 down (Dow structure + MA25/MA99)
-  risk_multiplier:
-    alt_season: 1.0
-    btc_led: 1.0
-    btc_led_other_alts: 0.5
-    risk_off: 0.0
-    capitulation: 0.0
-    neutral: 0.5
-  neutral_min_grade: A
+  # direction per index: +1 up, 0 range, -1 down (Dow structure + MA25/MA99).
+  # bias: which sides may trade. risk: multiplier on the base risk.
+  regimes:
+    alt_season:   {bias: long,  risk: 1.0}
+    btc_led:      {bias: long,  risk: 1.0, other_alts_risk: 0.5}   # full risk: BTC + alts with COIN/BTC up on D
+    risk_off:     {bias: short, risk: 1.0}                         # alt longs forbidden
+    capitulation: {bias: short, risk: 1.0}                         # all longs forbidden
+    neutral:      {bias: both,  risk: 0.5, min_grade: A}
   dominance_snapshot_every_h: 4
   backfill_days: 730
 
@@ -110,7 +109,7 @@ majors:
   weights: {1w: 3, 1d: 2, 4h: 1}
   btc_weak_threshold: -3       # BTC <= -3: alt longs need technical score >= 80
   btc_weak_min_score: 80
-  ethbtc_up_bonus: 5           # added to the L5 score when ETHBTC is up on D
+  ethbtc_up_bonus: 5           # added to the L5 score of every alt when ETHBTC is up on D
   divergence_risk_multiplier: 0.5   # BTC and TOTAL2 in opposite directions
 
 # ------------------------------------------------------------------ Layer 3
@@ -150,6 +149,8 @@ scanners:
   hot_sector:
     top_categories: 3
     period_days: 7
+    min_coins: 2               # a category needs >= 2 universe coins to rank
+    ignore_categories: []      # CoinGecko category names to skip when ranking
   # label quality used in the L5 score (0..1)
   label_quality:
     SQUEEZE: 0.7
@@ -170,6 +171,12 @@ pairs:
   corr_high: 0.8
   corr_low: 0.5
   beta_high: 1.5
+  # pair strength = weighted alignment of COIN/USDT, COIN/BTC, COIN/ETH with the side
+  quote_weights: {USDT: 0.5, BTC: 0.35, ETH: 0.15}
+  timeframe_weights: {1d: 2, 4h: 1}
+  independent_bonus: 0.1         # corr <= corr_low and positive RS
+  independent_bonus_neutral: 0.2 # same, when the regime is neutral
+  rs_days: 30
 
 # ------------------------------------------------------------------ Layer 5
 shortlist:
@@ -180,6 +187,12 @@ shortlist:
     liquidity: 15
   min_score: 60
   max_coins: 8
+  labels_full_at: 2.0            # summed label quality that earns the full 25
+  liquidity_volume_points: 10    # of the 15 liquidity points
+  liquidity_spread_points: 5
+  volume_full_usd: 500000000     # 24h volume that earns the full volume points (log scale from min)
+  spread_full_pct: 0.05
+  spread_zero_pct: 0.30
 
 # ------------------------------------------------------------------ Layer 6
 technical:
@@ -190,6 +203,8 @@ technical:
     ma_slope_bars: 10
     acc_min_bars: 20
     acc_max_width_atr: 4
+    flat_ma_atr: 1.0           # |MA25 change over ma_slope_bars| below this x ATR = flat
+    spring_bars: 5             # a spring/upthrust must happen in the last N bars
   dow:
     points_both: 15
     points_4h_only: 8
@@ -205,6 +220,10 @@ technical:
     max_points: 10
     breakout_rvol: 1.5
     pullback_rvol_max: 1.0
+    breakout_points: 5         # breakout or healthy pullback volume
+    obv_points: 5
+    event_lookback: 6          # a 4H break within N bars counts as a breakout setup
+    pullback_bars: 3
     climax_rvol: 3.0
     climax_penalty: -5
   candles:
@@ -220,12 +239,16 @@ technical:
     body_max_atr: 2.0
     chase_atr: 2.5
     weakness_bars: 3
+    trigger_points: 5
+    size_points: 5
+    weakness_penalty: -5
   cycles:
     points_all_aligned_fresh: 10
     points_lower_correcting: 5
     points_counter_trend: 3
     points_late: 0
     counter_trend_risk_multiplier: 0.5
+    fresh_bars: 6              # 4H turn (new HL/LH or BOS) at most N bars ago
   patterns:
     max_points: 15
     rsi_healthy_low: 40
@@ -239,12 +262,18 @@ technical:
     pattern_points: 5
     pattern_confirm_rvol: 1.5
     reversal_signs_needed: 3
+    rsi_lookback: 20           # pullbacks in a healthy trend held above rsi_healthy_low
+    pattern_tolerance_atr: 0.5 # equal tops/bottoms/shoulders
+    pattern_recent_bars: 5     # neckline break must be this recent
+    flag_pole_atr: 3.0
+    flag_max_retrace: 0.5
   confirmation:
     min_confirmations: 2
     points_per_extra: 2.5
     max_points: 10
     trigger_rvol: 1.5
     rsi_mid: 50
+    lookback_bars: 6           # 1H bars searched for the retest / CHoCH / RSI cross
 
 grades:
   A: 75
@@ -252,6 +281,9 @@ grades:
   watch: 55
   a_plus: 85
   risk_share: {A: 1.0, B: 0.5}
+
+analysis:
+  window_bars: 300             # bars per timeframe handed to the analysis (keeps backtests fast)
 
 # ------------------------------------------------------------ trade builder
 trade:
