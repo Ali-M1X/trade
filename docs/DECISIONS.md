@@ -18,3 +18,20 @@ Interpretations made where `docs/STRATEGY.md` or `docs/BUILD_PROMPT.md` leave ro
 | 10 | Runtime DB vs backtest data | The runtime database should keep only recent candles. Two years of 4H+1H candles for 100 coins would exceed GitHub's 100 MB file limit, so the backtest will use its own local database file (step 5). | `storage.db_path` |
 | 11 | Daily summary | Added as a `run-daily` command next to the ones listed in the build prompt, because the build prompt asks for a daily summary message. | — |
 | 12 | Values not given in STRATEGY.md | These are my defaults, to be tuned by the backtest: scanner label quality weights (L5), `squeeze.atr_falling_bars`, `pullback.ma_touch_atr`, `pullback.volume_falling_bars`, `funding_extreme.consecutive`, `rs_leader.new_high_lookback`, level timeframe weights, and `hold.buy_steps` (the strategy says 2–3). | see keys |
+
+### check-sources on GitHub Actions (ubuntu-latest, US), 2026-09-30
+
+Run: https://github.com/Ali-M1X/trade/actions/runs/36733290337. No CoinGecko key and no Telegram secrets were set.
+
+| Source | Load markets | 4H perp candles | ETH/BTC spot | Funding | Open interest |
+|---|---|---|---|---|---|
+| okx | ✅ | ✅ | ✅ | ✅ | ✅ history |
+| bitget | ✅ | ✅ | ✅ | ✅ | ⚠️ current only |
+| gate | ✅ (slow load, 12.8 s) | ✅ | ✅ | ✅ | ✅ history |
+| mexc | ✅ | ✅ | ✅ | ✅ | ❌ none in ccxt |
+| kucoinfutures | ✅ | ✅ | ❌ futures only | ✅ | ✅ history |
+| bitunix | ❌ not in ccxt | | | | |
+
+- **Candle source:** OKX stays primary because it answers every probe, including open-interest history, which OI_BUILDUP needs. Gate is the best fallback for the same reason. Bitget, MEXC and KuCoin Futures cover candles only.
+- **CoinGecko** (no key): ping, `/global` and the top-100 universe all worked. `/coins/categories` worked but took 62 s because of 429 retries. Setting the free Demo key (`COINGECKO_API_KEY`) is recommended, and the 1-hour categories cache keeps the call count low.
+- **Telegram:** not configured yet, so it runs in dry-run mode.
