@@ -173,6 +173,7 @@ class Backtest:
                 "grade": s["grade"], "score": s["score"], "created": s["created_at"],
                 "regime": p["regime"]["name"], "status": s["status"],
                 "order": p["plan"]["order"], "entry": p["plan"]["entry"], "sl": p["plan"]["sl"],
+                "tp1_r": p["plan"]["tp1_r"],
                 "risk_pct": p["plan"]["risk_pct"], "out_of_cap": p.get("out_of_cap", False),
                 "gross_r": p["lifecycle"]["realized_r"],
                 "filled_at": p["lifecycle"]["filled_at"], "closed_at": p["lifecycle"]["closed_at"],

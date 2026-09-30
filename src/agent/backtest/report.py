@@ -59,6 +59,38 @@ HEADER = ("| Group | Trades | Win rate | Avg R (net) | Total R (net) | Avg R (gr
           "Max DD (R) | Return | Max DD |\n|---|---|---|---|---|---|---|---|---|---|")
 
 
+def diagnostics(closed: list[dict]) -> list[str]:
+    n = len(closed)
+    sl = [t for t in closed if t["status"] == "sl"]
+    fast = [t for t in sl if (t["closed_at"] - t["filled_at"]) <= 4 * 3_600_000]
+    stop_pct = [abs(t["entry"] - t["sl"]) / t["entry"] * 100 for t in closed]
+    market = sum(1 for t in closed if t["order"] == "market")
+    return [
+        "",
+        "### Diagnostics",
+        "",
+        f"- Stops: {len(sl)} of {n} closed trades; {len(fast)} of those within 4 hours of the fill.",
+        f"- Average stop distance {sum(stop_pct) / n:.2f}% (median {sorted(stop_pct)[n // 2]:.2f}%).",
+        f"- Average TP1 distance {sum(t.get('tp1_r', 0) for t in closed) / n:.1f}R.",
+        f"- Entries: {market} market, {n - market} limit.",
+    ]
+
+
+def trade_list(trades: list[dict]) -> list[str]:
+    rows = ["", "### Trades", "",
+            "| Opened | Coin | Side | Grade | Score | Regime | Order | Stop % | TP1 R | Outcome | Gross R | Net R | Hours |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for t in sorted(trades, key=lambda t: t["created"]):
+        hours = ((t["closed_at"] - t["filled_at"]) / 3_600_000) if t.get("filled_at") and t.get("closed_at") else None
+        stop = abs(t["entry"] - t["sl"]) / t["entry"] * 100
+        rows.append(
+            f"| {_date(t['created'])} | {t['base']} | {'L' if t['side'] == 1 else 'S'} | {t['grade']} | "
+            f"{t['score']:.0f} | {t['regime']} | {t['order']} | {stop:.2f} | {t.get('tp1_r', 0):.1f} | "
+            f"{t['status']} | {t.get('gross_r', 0):+.2f} | {t.get('net_r', 0):+.2f} | "
+            f"{'-' if hours is None else f'{hours:.0f}'} |")
+    return rows
+
+
 def build_report(trades: list[dict], engine_stats: dict, regime_hours: dict, meta: dict,
                  cfg: dict) -> str:
     b = cfg["backtest"]
@@ -123,6 +155,9 @@ def build_report(trades: list[dict], engine_stats: dict, regime_hours: dict, met
     if by_month:
         lines += ["", "### Net R by month", "", "| Month | Net R |", "|---|---|"]
         lines += [f"| {m} | {r:+.1f} |" for m, r in sorted(by_month.items())]
+    if costs:
+        lines += diagnostics(costs)
+        lines += trade_list(trades)
     st = engine_stats
     lines += [
         "",

@@ -14,6 +14,7 @@ T0 = 1_760_000_000_000 // (8 * HOUR) * (8 * HOUR)       # on a funding time
 
 def trade(**kw):
     t = {"base": "SOL", "side": 1, "entry": 100.0, "sl": 98.0, "gross_r": 0.0, "status": "tp3",
+         "order": "limit", "tp1_r": 2.0, "created": T0, "score": 80,
          "filled_at": T0, "closed_at": T0 + 20 * HOUR, "risk_pct": 1.0, "grade": "A",
          "regime": "alt_season",
          "events": [("filled", T0, 100.0), ("tp1", T0 + 2 * HOUR, 104.0),
@@ -71,7 +72,8 @@ def test_report_has_grade_and_regime_sections(cfg):
     md = build_report(ts, {"signals": 2}, {"alt_season": 10, "neutral": 30},
                       {"start": T0, "end": T0 + 30 * 24 * HOUR}, cfg)
     for needle in ("| Grade A | 1 |", "| Grade B | 1 |", "| alt_season | 1 |", "| neutral – B | 1 |",
-                   "alt_season 25%", "neutral 75%", "| tp3 | 1 |", "| sl | 1 |", "Fees 0.075"):
+                   "alt_season 25%", "neutral 75%", "| tp3 | 1 |", "| sl | 1 |", "Fees 0.075",
+                   "Stops: 1 of 2 closed trades", "| SOL | L | B | 80 | neutral | limit | 2.00 | 2.0 | sl |"):
         assert needle in md, needle
 
 
