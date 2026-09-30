@@ -8,7 +8,7 @@ exchange:
   primary: okx
   # Tried in order when the primary fails. GitHub runners are in the US where
   # Binance/Bybit block requests. Names are ccxt ids ("gate" is Gate.io).
-  fallbacks: [bitget, gate, mexc, kucoinfutures, bitunix]
+  fallbacks: [gate, bitget, mexc, kucoinfutures, bitunix]
   market_type: swap            # USDT-margined perpetuals
   quote: USDT
   timeout_ms: 20000
