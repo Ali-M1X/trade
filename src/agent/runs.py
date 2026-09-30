@@ -137,8 +137,11 @@ def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int) -> list[Evaluation]
     out = []
     for item in state["shortlist"]:
         base, side = item["base"], item["side"]
-        frames = frames_for(market, base, ["1w", "1d", "4h", "1h"], cfg)
-        if len(frames) < 4:
+        tfs = ["1w", "1d", "4h", "1h"]
+        frames = frames_for(market, base, tfs, cfg)
+        if len(frames) < len(tfs):
+            log.warning("%s skipped: not enough candles for %s", base,
+                        ", ".join(tf for tf in tfs if tf not in frames))
             continue
         btc_pair_up = item["pairs"]["dirs"].get("BTC", {}).get("1d") == 1
         ev = evaluate(base, side, frames, regime, majors, cfg,

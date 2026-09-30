@@ -92,6 +92,11 @@ class ExchangeClient:
         while cursor < until:
             batch = self._call_one(name, "fetch_ohlcv", symbol, timeframe, cursor, self.limit)
             if not batch:
+                if not out:
+                    # `since` is before the listing and the exchange returned nothing:
+                    # take the most recent candles instead
+                    batch = self._call_one(name, "fetch_ohlcv", symbol, timeframe, None, self.limit)
+                    out.extend(r for r in batch or [] if r[0] <= until)
                 break
             out.extend(r for r in batch if r[0] <= until)
             nxt = batch[-1][0] + step

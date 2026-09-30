@@ -145,3 +145,18 @@ def test_check_sources_report(cfg):
     cats = next(p for p in probes if p.check == "categories")
     assert not cats.ok and "429" in cats.detail
     assert any(p.source == "telegram" and not p.ok for p in probes)
+
+
+def test_history_falls_back_to_latest_when_since_predates_listing(cfg):
+    cfg["exchange"].update(primary="okx", fallbacks=[])
+    ex = FakeExchange("okx")
+    calls = []
+
+    def fetch(symbol, tf, since=None, limit=None):
+        calls.append(since)
+        return [] if since is not None else [[4000, 1, 1, 1, 1, 1], [4001, 1, 1, 1, 2, 1]]
+    ex.fetch_ohlcv = fetch
+    client = ExchangeClient(cfg, factory=lambda n, c: ex, sleep=lambda s: None)
+    name, rows = client.fetch_history("NEW/USDT:USDT", "1w", since=0, until=5000)
+    assert name == "okx" and [r[0] for r in rows] == [4000, 4001]
+    assert calls == [0, None]
