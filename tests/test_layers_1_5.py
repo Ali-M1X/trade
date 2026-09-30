@@ -305,3 +305,11 @@ def test_breakout_watch_keeps_coin_for_five_days(cfg, up_frames):
     r3 = run_funnel(dom, majors, [coin(retest)], [], {}, cfg, breakout_watch=r2.breakout_watch,
                     now_ms=t0 + 6 * DAY)
     assert "SOL" not in r3.breakout_watch and "SOL" not in r3.watchlist
+
+
+def test_index_candles_keep_millisecond_timestamps():
+    from agent.layers.regime import index_candles
+    ts = 1_759_968_000_000 + np.arange(12) * 4 * 3600 * 1000       # two days of 4H snapshots
+    c = index_candles(pd.DataFrame({"ts": ts, "btc_d": np.arange(12.0)}), "btc_d", "1d")
+    assert c["ts"].tolist() == [1_759_968_000_000, 1_759_968_000_000 + DAY]
+    assert c["open"].tolist() == [0, 6] and c["close"].tolist() == [5, 11]

@@ -75,3 +75,26 @@ def test_divergence():
     sw += [Swing(8, 9, 90, "L")]
     assert divergence(sw, osc) == 1                  # the most recent pair wins
     assert divergence(sw[:1], osc) == 0
+
+
+def test_vectorised_pivots_match_the_plain_definition():
+    """pivots() is vectorised; compare it with a direct loop over random data with ties."""
+    import numpy as np
+
+    def plain(df, left, right):
+        high, low = df["high"].to_numpy(), df["low"].to_numpy()
+        out = []
+        for i in range(left, len(df) - right):
+            if high[i] > high[i - left:i].max() and high[i] >= high[i + 1:i + right + 1].max():
+                out.append(Swing(i, i + right, float(high[i]), "H"))
+            if low[i] < low[i - left:i].min() and low[i] <= low[i + 1:i + right + 1].min():
+                out.append(Swing(i, i + right, float(low[i]), "L"))
+        return sorted(out, key=lambda s: (s.idx, s.kind))
+
+    rng = np.random.default_rng(0)
+    for _ in range(200):
+        n = int(rng.integers(1, 60))
+        h = np.round(rng.normal(0, 1, n).cumsum(), 1)          # rounding creates ties
+        df = pd.DataFrame({"high": h, "low": h - np.round(rng.random(n), 1)})
+        for lr in ((2, 2), (3, 3), (5, 5), (3, 2)):
+            assert pivots(df, *lr) == plain(df, *lr)

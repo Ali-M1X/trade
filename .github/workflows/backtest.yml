@@ -1,0 +1,58 @@
+name: backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days to replay (default: backtest.days in config.yaml)"
+        required: false
+      max_coins:
+        description: "Limit the universe (0 = all)"
+        required: false
+  push:
+    paths:
+      - "src/agent/backtest/**"
+      - ".github/workflows/backtest.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backtest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - name: Fetch history and replay
+        run: |
+          args=""
+          [ -n "${{ inputs.days }}" ] && args="$args --days ${{ inputs.days }}"
+          [ -n "${{ inputs.max_coins }}" ] && args="$args --max-coins ${{ inputs.max_coins }}"
+          trade-agent -v backtest --fetch $args --out BACKTEST.md --trades backtest_trades.csv 2>&1 | tee backtest.log
+      - name: Summary
+        if: always()
+        run: |
+          [ -f BACKTEST.md ] && cat BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
+          echo "----- BACKTEST.md -----"
+          [ -f BACKTEST.md ] && cat BACKTEST.md
+          gzip -kf data/backtest.db || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backtest
+          path: |
+            BACKTEST.md
+            backtest_trades.csv
+            backtest.log
+            data/backtest.db.gz

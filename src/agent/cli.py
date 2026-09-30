@@ -93,11 +93,30 @@ def cmd_run_weekly(args, cfg, secrets) -> int:
     return 0
 
 
-def not_yet(step: int):
-    def run(args, cfg, secrets) -> int:
-        print(f"{args.command}: not implemented yet (build step {step})", file=sys.stderr)
-        return 2
-    return run
+def cmd_backtest(args, cfg, secrets) -> int:
+    import time
+
+    from .backtest.run import run_backtest
+    from .store.repository import Repository
+    if args.days:
+        cfg["backtest"]["days"] = args.days
+    if args.max_coins is not None:
+        cfg["backtest"]["max_coins"] = args.max_coins
+    repo = Repository(args.db or cfg["backtest"]["db_path"])
+    if args.fetch:
+        from .backtest.data import fetch_history
+        from .data.coingecko import CoinGecko
+        from .data.exchange import ExchangeClient
+        from .data.market import LiveMarket
+        now = int(time.time() * 1000)
+        client = ExchangeClient(cfg)
+        stats = fetch_history(cfg, repo, client, LiveMarket(cfg, repo, client, now),
+                              CoinGecko(cfg, repo=repo, api_key=secrets.coingecko_api_key), now)
+        print(f"fetched: {stats}")
+    report, _ = run_backtest(cfg, repo, args.out, args.trades)
+    print(report)
+    repo.close()
+    return 0
 
 
 COMMANDS = {
@@ -107,7 +126,7 @@ COMMANDS = {
     "run-15m": cmd_run_15m,
     "run-daily": cmd_run_daily,
     "run-weekly": cmd_run_weekly,
-    "backtest": not_yet(5),
+    "backtest": cmd_backtest,
 }
 
 
@@ -120,6 +139,13 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(name)
         if name == "check-sources":
             p.add_argument("--json", help="also write the probe results to this file")
+        if name == "backtest":
+            p.add_argument("--fetch", action="store_true", help="download history first")
+            p.add_argument("--db", help="backtest database (default: backtest.db_path)")
+            p.add_argument("--days", type=int, help="replay the last N days (default: backtest.days)")
+            p.add_argument("--max-coins", type=int, help="limit the universe (0 = all)")
+            p.add_argument("--out", default="docs/BACKTEST.md", help="report path")
+            p.add_argument("--trades", default="data/backtest_trades.csv", help="trade list CSV")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(levelname)s %(name)s: %(message)s")

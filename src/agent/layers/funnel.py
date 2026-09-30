@@ -49,11 +49,11 @@ class FunnelResult:
 def run_funnel(dominance: pd.DataFrame, major_frames: dict[str, dict[str, Frame]],
                coins: list[CoinData], markets: list[dict], coin_categories: dict[str, list[str]],
                cfg: dict, hot: set[str] | None = None, breakout_watch: dict | None = None,
-               now_ms: int | None = None) -> FunnelResult:
+               now_ms: int | None = None, regime: Regime | None = None) -> FunnelResult:
     """dominance: ts, usdt_d, btc_d, total2 snapshots. major_frames: BTC/ETH/ETHBTC frames.
     hot: precomputed hot categories (default: ranked from `markets`).
     breakout_watch: the previous run's watch; coins stay on it for breakout_watch.days."""
-    regime = compute_regime(dominance, cfg)
+    regime = compute_regime(dominance, cfg) if regime is None else regime
     majors = compute_majors(major_frames, regime.total2, cfg)
     btc_d = major_frames["BTC"]["1d"]
     btc_dir = btc_d.direction

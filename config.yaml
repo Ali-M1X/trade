@@ -354,5 +354,11 @@ storage:
   keep_bars: 450               # candles kept per series in the runtime DB
 
 backtest:
-  years: 1                     # all layers, limited by the 365-day dominance history
-  timeframes: [4h, 1h]
+  days: 365                    # all layers, limited by the 365-day dominance history
+  db_path: data/backtest.db    # separate from the runtime DB (too big for the data branch)
+  timeframes: [1w, 1d, 4h, 1h] # 1H candles drive trade management (live uses 15m)
+  taker_fee_pct: 0.05          # OKX taker, per side, on notional
+  slippage_pct: 0.05           # per fill, against the trade
+  funding_interval_h: 8        # OKX funds every 8h (00/08/16 UTC)
+  default_funding_pct: 0.01    # per interval when the exchange has no history (longs pay)
+  max_coins: 0                 # 0 = the whole universe

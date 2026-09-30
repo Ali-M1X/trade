@@ -23,13 +23,21 @@ class Swing:
 def pivots(df: pd.DataFrame, left: int, right: int) -> list[Swing]:
     """Pivot high: high strictly above the `left` previous highs and >= the `right` next
     highs (so an equal-high plateau yields one pivot, the first bar). Lows mirror it."""
-    high, low = df["high"].to_numpy(), df["low"].to_numpy()
-    out: list[Swing] = []
-    for i in range(left, len(df) - right):
-        if high[i] > high[i - left:i].max() and high[i] >= high[i + 1:i + right + 1].max():
-            out.append(Swing(i, i + right, float(high[i]), "H"))
-        if low[i] < low[i - left:i].min() and low[i] <= low[i + 1:i + right + 1].min():
-            out.append(Swing(i, i + right, float(low[i]), "L"))
+    high, low = df["high"].to_numpy(dtype=float), df["low"].to_numpy(dtype=float)
+    n = len(high)
+    if n < left + right + 1:
+        return []
+    win = np.lib.stride_tricks.sliding_window_view
+    idx = np.arange(left, n - right)
+    center_h, center_l = high[idx], low[idx]
+    left_h = win(high[:n - right - 1], left).max(axis=1)          # bars i-left .. i-1
+    right_h = win(high[left + 1:], right).max(axis=1)             # bars i+1 .. i+right
+    left_l = win(low[:n - right - 1], left).min(axis=1)
+    right_l = win(low[left + 1:], right).min(axis=1)
+    is_h = (center_h > left_h) & (center_h >= right_h)
+    is_l = (center_l < left_l) & (center_l <= right_l)
+    out = [Swing(int(i), int(i) + right, float(high[i]), "H") for i in idx[is_h]]
+    out += [Swing(int(i), int(i) + right, float(low[i]), "L") for i in idx[is_l]]
     out.sort(key=lambda s: (s.idx, s.kind))
     return out
 

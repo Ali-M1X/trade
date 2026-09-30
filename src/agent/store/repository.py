@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS events (
     ts INTEGER NOT NULL, signal_id INTEGER, kind TEXT NOT NULL, payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);
+CREATE TABLE IF NOT EXISTS funding (
+    exchange TEXT NOT NULL, symbol TEXT NOT NULL, ts INTEGER NOT NULL, rate REAL,
+    PRIMARY KEY (exchange, symbol, ts)
+);
+CREATE TABLE IF NOT EXISTS coin_history (
+    id TEXT NOT NULL, ts INTEGER NOT NULL, mcap REAL, volume REAL,
+    PRIMARY KEY (id, ts)
+);
 """
 
 CANDLE_COLUMNS = ["ts", "open", "high", "low", "close", "volume"]
@@ -88,6 +96,34 @@ class Repository:
             "SELECT MAX(ts) FROM candles WHERE exchange=? AND symbol=? AND timeframe=?",
             (exchange, symbol, timeframe)).fetchone()
         return row[0]
+
+    def candle_series(self, timeframe: str) -> list[tuple[str, str]]:
+        """(exchange, symbol) pairs that have candles of this timeframe."""
+        return self.conn.execute("SELECT DISTINCT exchange, symbol FROM candles WHERE timeframe=?",
+                                 (timeframe,)).fetchall()
+
+    # ---- funding and coin history (backtest data)
+    def upsert_funding(self, exchange: str, symbol: str, rows) -> None:
+        """rows: iterable of (ts_ms, rate)."""
+        with self.conn:
+            self.conn.executemany("INSERT OR REPLACE INTO funding VALUES (?,?,?,?)",
+                                  [(exchange, symbol, int(t), float(r)) for t, r in rows])
+
+    def get_funding(self, symbol: str) -> pd.DataFrame:
+        rows = self.conn.execute("SELECT ts, rate FROM funding WHERE symbol=? ORDER BY ts",
+                                 (symbol,)).fetchall()
+        return pd.DataFrame(rows, columns=["ts", "rate"])
+
+    def upsert_coin_history(self, coin_id: str, rows) -> None:
+        """rows: iterable of (ts_ms, market_cap, volume_usd)."""
+        with self.conn:
+            self.conn.executemany("INSERT OR REPLACE INTO coin_history VALUES (?,?,?,?)",
+                                  [(coin_id, int(t), m, v) for t, m, v in rows])
+
+    def get_coin_history(self, coin_id: str) -> pd.DataFrame:
+        rows = self.conn.execute("SELECT ts, mcap, volume FROM coin_history WHERE id=? ORDER BY ts",
+                                 (coin_id,)).fetchall()
+        return pd.DataFrame(rows, columns=["ts", "mcap", "volume"])
 
     # ---- dominance
     def add_dominance(self, ts: int, source: str, total_mcap: float, btc_mcap: float,

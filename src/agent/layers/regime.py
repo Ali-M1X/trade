@@ -73,7 +73,8 @@ def index_candles(series: pd.DataFrame, column: str, tf: str) -> pd.DataFrame:
     rule = {"4h": "4h", "1d": "1D"}[tf]
     o = s.resample(rule, label="left", closed="left").ohlc().dropna()
     out = o.reset_index(names="dt")
-    out.insert(0, "ts", out.pop("dt").astype("int64") // 10**6)
+    # explicit unit: pandas may hold these as datetime64[ms] or [ns]
+    out.insert(0, "ts", out.pop("dt").astype("datetime64[ms]").astype("int64"))
     out["volume"] = 0.0
     return out[["ts", "open", "high", "low", "close", "volume"]]
 
