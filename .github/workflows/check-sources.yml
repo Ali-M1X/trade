@@ -1,0 +1,40 @@
+name: check-sources
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/agent/data/**"
+      - "config.yaml"
+      - ".github/workflows/check-sources.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: pytest -q
+      - name: Probe data sources
+        env:
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          set +e
+          trade-agent check-sources --json check_sources.json | tee report.txt
+          status=${PIPESTATUS[0]}
+          { echo '```'; cat report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-sources
+          path: check_sources.json
