@@ -6,7 +6,7 @@ def test_live_config_applies_the_live_variant_on_top(cfg):
     assert name in cfg["backtest"]["variants"]
     live = live_config(cfg)
     assert live["trade"]["stop_mode"] == "atr" and live["trade"]["tp1_mode"] == "fixed_r"
-    assert live["grades"]["min_signal"] == "A"
+    assert live["grades"].get("min_signal", "B") == "B"     # grade B is a signal again (#135)
     # the base config (backtest baseline, tests) is untouched
     assert cfg["trade"]["stop_mode"] == "level" and "min_signal" not in cfg["grades"]
 
