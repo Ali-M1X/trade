@@ -404,6 +404,6 @@ backtest:
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest
 # and tests use the settings above unchanged. Empty = exactly STRATEGY.md.
-# 2026-10-01: Ali chose atr_2r_a_only for paper trading (DECISIONS.md #133).
+# 2026-10-01: Ali chose atr_2r for paper trading (DECISIONS.md #133, #135).
 live:
-  variant: atr_2r_a_only
+  variant: atr_2r
