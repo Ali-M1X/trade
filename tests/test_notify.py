@@ -90,7 +90,7 @@ def test_reason_is_short_persian_and_without_codes(cfg):
 def test_every_flag_and_label_has_a_phrase(cfg):
     labels = set(cfg["scanners"]["label_quality"])
     flags = {"not_confirmed", "lower_cycle_correcting", "chase", "btc_weak",
-             "neutral_regime_needs_A", "funding_crowded"}
+             "neutral_regime_needs_A", "funding_crowded", "grade_b_off"}
     kinds = {f"level:{k}" for k in ("cluster", "flip", "prev_high", "prev_low", "round")}
     assert labels | flags | kinds <= set(fmt.REASON_FA)
 
@@ -114,6 +114,14 @@ def test_score_explanation_follows_config_changes(cfg):
     text = fmt.score_explanation(c)
     assert "۸۰ به بالا رده A" in text and "۷۰ تا ۷۹ رده B" in text and "۶۰ تا ۶۹ فقط Watch" in text
     assert "فاز بازار ۱۲" in text
+
+
+def test_score_explanation_when_grade_b_is_off(cfg):
+    import copy
+    c = copy.deepcopy(cfg)
+    c["grades"]["min_signal"] = "A"
+    text = fmt.score_explanation(c)
+    assert "رده B که فعلاً خاموش است" in text and "با نصف ریسک" not in text
 
 
 def test_score_explanation_weights_add_up_to_the_l6_maximum(cfg):

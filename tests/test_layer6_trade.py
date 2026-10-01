@@ -230,6 +230,18 @@ def test_neutral_regime_turns_b_into_watch(cfg, setup):
     assert e.grade == "Watch" and "neutral_regime_needs_A" in e.flags  # ...is only a watch
 
 
+def test_min_signal_a_turns_b_into_watch(cfg, setup):
+    import copy
+    frames, majors, regime = setup
+    base = evaluate("SOL", 1, frames, regime, majors, cfg, funding=0.0001)
+    c = copy.deepcopy(cfg)
+    c["grades"]["min_signal"] = "A"
+    e = evaluate("SOL", 1, frames, regime, majors, c, funding=0.0001)
+    if base.grade == "B":
+        assert e.grade == "Watch" and "grade_b_off" in e.flags
+    assert e.score == base.score and (base.grade != "A" or e.grade == "A")
+
+
 def test_btc_weak_blocks_alt_longs_under_80(cfg, setup):
     frames, _, regime = setup
     down = fr(cfg, trend(drift=-0.5, start=250), "1d")

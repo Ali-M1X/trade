@@ -69,6 +69,7 @@ REASON_FA = {
     "chase": "منتظر پولبک",
     "btc_weak": "BTC ضعیف",
     "neutral_regime_needs_A": "رژیم خنثی فقط A",
+    "grade_b_off": "فعلاً فقط رده A",
     "funding_crowded": "فاندینگ شلوغ",
     "out_of_cap": "خارج از سقف",
     "not_issued": "صادر نشد",          # A/B setup the signal book held back (cap, correlation, ...)
@@ -153,7 +154,9 @@ def score_explanation(cfg: dict) -> str:
         f"برقرار باشد (هم‌جهت با رژیم بازار، فاز مجاز، ریسک به ریوارد حداقل ۱ به {rr} و "
         f"حداقل {conf_word} تأیید ورود)؛ اگر شرطی هنوز کامل نیست، ستاپ با هر امتیازی فقط Watch است. "
         f"بازه‌ها: {fa(a)} به بالا رده A با {_risk_words(share['A'])}، "
-        f"{fa(b)} تا {fa(a - 1)} رده B با {_risk_words(share['B'])}، "
+        + (f"{fa(b)} تا {fa(a - 1)} رده B که فعلاً خاموش است و فقط Watch می‌آید، "
+           if g.get("min_signal", "B") == "A" else
+           f"{fa(b)} تا {fa(a - 1)} رده B با {_risk_words(share['B'])}، ") +
         f"{fa(w)} تا {fa(b - 1)} فقط Watch (هشدار نزدیک ستاپ، بدون ورود) "
         f"و زیر {fa(w)} چیزی ارسال نمی‌شود."
     )

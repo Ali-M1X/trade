@@ -226,3 +226,12 @@ An analysis of one year of L6 setups (branch `claude/score-weight-analysis`, `sc
 | 130 | Defaults | All three default to today's behaviour. A test (`tests/test_entry_stop_modes.py`) replays synthetic history and compares every plan, trade and engine counter with a snapshot written by the previous code. Backtest variants `atr_2r`, `confirm_level_atr` and `confirm_atr_2r` compare them on the real year; the result is in BACKTEST.md. | `backtest.variants` |
 | 131 | Messages | A `confirm_4h` signal stays one line: «ورود پس از تأیید 4H حوالی <level>», SL/TP from the level price, and «(نهایی پس از فعال شدن)» after TP2. The fill update shows the actual entry, SL and TP1: «✅ SOLUSDT \| ورود فعال شد (تأیید 4H) \| 153.10 \| SL 150.10 \| TP1 159.10». Default-mode messages are unchanged. | — |
 | 132 | Live order of events | In `run-15m`, a 4H close is processed before the 15m candle that opens at the same moment for `confirm_4h` signals only, so a fill at that close sees the next candle. Other signals keep the original order. | — |
+
+## Live settings for paper trading (2026-10-01)
+
+The full engine backtest (BACKTEST.md) did not confirm `confirm_atr_2r`: positive in tuning (+1.7 R, 27 trades) but −11.4 R in the holdout (30 trades). `atr_2r` (current entry, 1.5 ATR stop, fixed 2R) was the only variant positive in the holdout (+2.4 R, 33 trades), and its grade A trades were positive in both periods (+3.1 R over 13, +5.3 R over 20). Its grade B trades were negative in both. Small samples; not proof.
+
+| # | Topic | Decision | Config key |
+|---|---|---|---|
+| 133 | Live variant | Ali chose, for paper trading, `atr_2r` with grade B switched off. Live runs (`run-*`) apply `live.variant` (a name from `backtest.variants`) on top of the base settings; the backtest and tests keep using the base settings, so the backtest baseline and the snapshot test are unchanged. Empty `live.variant` = exactly STRATEGY.md. | `live.variant` |
+| 134 | Grade B off | `grades.min_signal: A` turns a grade B setup into Watch (flag `grade_b_off`, «فعلاً فقط رده A»), the same way a neutral regime already does. The ℹ️ score paragraph says B is currently off. Unset = B is a signal. | `grades.min_signal` |

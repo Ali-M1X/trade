@@ -16,6 +16,19 @@ def load_config(path: str | Path | None = None) -> dict:
         return yaml.safe_load(f)
 
 
+def live_config(cfg: dict) -> dict:
+    """The config the live runs use: the base config with `live.variant` (one of
+    backtest.variants) applied on top. The backtest and tests use the base config."""
+    from .backtest.variants import merge
+    name = (cfg.get("live") or {}).get("variant")
+    if not name:
+        return cfg
+    variants = cfg["backtest"]["variants"]
+    if name not in variants:
+        raise SystemExit(f"live.variant {name!r} is not in backtest.variants")
+    return merge(cfg, variants[name])
+
+
 @dataclass(frozen=True)
 class Secrets:
     telegram_bot_token: str | None

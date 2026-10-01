@@ -286,6 +286,7 @@ technical:
     lookback_bars: 6           # 1H bars searched for the retest / CHoCH / RSI cross
 
 grades:
+  # min_signal: A switches grade B off (sent as Watch). Unset = B is a signal (STRATEGY.md).
   A: 75
   B: 65
   watch: 55
@@ -395,3 +396,14 @@ backtest:
     atr_2r: {trade: {stop_mode: atr, tp1_mode: fixed_r}}
     confirm_level_atr: {trade: {entry_mode: confirm_4h, stop_mode: atr}}
     confirm_atr_2r: {trade: {entry_mode: confirm_4h, stop_mode: atr, tp1_mode: fixed_r}}
+    # atr_2r with grade B switched off (B setups are sent as Watch only)
+    atr_2r_a_only:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      grades: {min_signal: A}
+
+# ------------------------------------------------------------- live settings
+# Live runs (run-*) apply this backtest variant on top of the settings above; the backtest
+# and tests use the settings above unchanged. Empty = exactly STRATEGY.md.
+# 2026-10-01: Ali chose atr_2r_a_only for paper trading (DECISIONS.md #133).
+live:
+  variant: atr_2r_a_only
