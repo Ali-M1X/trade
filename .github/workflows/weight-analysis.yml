@@ -1,0 +1,58 @@
+name: weight-analysis
+
+# One-off analysis: how much each L6 score section predicts trade outcomes (BTC, ETH, alts)
+# and how candidate weight sets compare. Changes nothing in the project.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/score-weight-analysis]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: weight-analysis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e . scipy
+      - name: Reuse the backtest history DB from run 36762973452
+        id: reuse
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          path: data
+          run-id: 36762973452
+          repository: Ali-M1X/trade
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Unpack or fetch history
+        run: |
+          if [ -f data/backtest.db.gz ]; then
+            echo "reusing backtest-db artifact"
+            gunzip -f data/backtest.db.gz
+          else
+            echo "artifact not available: fetching history"
+            trade-agent -v backtest --fetch-only 2>&1 | tail -20
+          fi
+          ls -la data
+      - name: Analyse
+        run: python scripts/weight_analysis.py -v --db data/backtest.db --out-dir weight_analysis
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: weight-analysis
+          path: weight_analysis/
+          retention-days: 30
