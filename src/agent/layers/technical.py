@@ -217,6 +217,7 @@ class Evaluation:
     labels: list[str] = field(default_factory=list)
     price: float | None = None
     trigger: str | None = None
+    trigger_1h: str | None = None    # name of the 1H trigger candle (for the message only)
     plan: TradePlan | None = None
     rejected: str | None = None
     funding_pct: float | None = None
@@ -266,6 +267,8 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
     ev.confirmations = confirmations(h1, side, plan, cfg)
     ev.sections["confirmation"] = confirmation_points(len(ev.confirmations), cfg)
     ev.gates["confirmation"] = len(ev.confirmations) >= cfg["technical"]["confirmation"]["min_confirmations"]
+    if "trigger_candle" in ev.confirmations:
+        ev.trigger_1h = cd.trigger_candle(h1.df, h1.n - 1, side, cfg)
 
     score = sum(ev.sections.values())
     t = cfg["trade"]

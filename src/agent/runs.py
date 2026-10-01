@@ -171,8 +171,9 @@ def summarize_funnel(r: FunnelResult) -> str:
              f"hot categories: {', '.join(sorted(r.hot)) or '-'}",
              f"watchlist: {len(r.watchlist)} coins, shortlist:"]
     for c in r.shortlist:
+        # no funnel score here: the only score users see is the L6 score (DECISIONS #120)
         lvl = "-" if c.level_atr is None else f"{c.level_atr:.1f} ATR"
-        lines.append(f"  {c.base:<8} {'LONG ' if c.side == 1 else 'SHORT'} {c.score:5.1f}  "
+        lines.append(f"  {c.base:<8} {'LONG ' if c.side == 1 else 'SHORT'} "
                      f"level {lvl:<8} {'+'.join(c.labels)}")
     return "\n".join(lines)
 
@@ -211,13 +212,12 @@ def publish(cfg: dict, repo, market, notifier, evs: list[Evaluation], now_ms: in
                     "evaluation": ev.to_dict(), "out_of_cap": adm.out_of_cap}
             sid, _ = book.create(ev, now_ms, meta)
             created.append(sid)
-            notifier.send(fmt.signal_message(ev, state["regime"], state["majors"],
-                                             len(book.open_signals()), cfg, adm.out_of_cap))
-        elif ev.grade == "Watch" and cfg["watch_alerts"]["enabled"]:
+            notifier.send(fmt.signal_message(ev, cfg, adm.out_of_cap))
+        elif ev.grade == "Watch" and ev.plan is not None and cfg["watch_alerts"]["enabled"]:
             key = f"{ev.base}:{ev.side}"
             if now_ms - watch_sent.get(key, 0) >= cfg["watch_alerts"]["repeat_hours"] * 3_600_000:
                 watch_sent[key] = now_ms
-                notifier.send(fmt.watch_message(ev))
+                notifier.send(fmt.watch_message(ev, cfg))
     repo.set_state("watch_sent", watch_sent)
     return created
 
@@ -268,7 +268,8 @@ def daily(cfg: dict, repo, notifier, now_ms: int) -> str | None:
     state = repo.get_state("funnel")
     if not state:
         return None
-    text = fmt.daily_message(state, SignalBook(repo, cfg).open_signals(), now_ms, cfg)
+    evaluations = repo.get_state("evaluations", {}).get("items", [])
+    text = fmt.daily_message(state, SignalBook(repo, cfg).open_signals(), evaluations, now_ms, cfg)
     notifier.send(text)
     return text
 

@@ -1,54 +1,130 @@
 import io
+import math
 import re
 from pathlib import Path
 
 import pytest
 
 from agent.config import load_secrets
-from agent.layers.technical import Evaluation
-from agent.layers.trade import TradePlan
 from agent.notify import formatter as fmt
 from agent.notify.telegram import Notifier, split
 from agent.signals.lifecycle import Event
+from message_examples import NOW, funnel, open_signal, short_eval, signal_eval, watch_eval
 
 STRATEGY = Path(__file__).resolve().parents[1] / "docs" / "STRATEGY.md"
+FIELDS = ["side", "score", "entry", "sl", "tp1", "tp2", "reason"]
+LINE = re.compile(r"^(🟢|🟡) ([A-Z0-9]+USDT) \| (LONG|SHORT) \| امتیاز (\d+) \| ورود ([\d.]+) \| "
+                  r"SL ([\d.]+) \| TP1 ([\d.]+) \| TP2 ([\d.]+) \| ([^|\n]+)$")
 
 
-def template() -> str:
+def strategy_signal_example() -> str:
     text = STRATEGY.read_text(encoding="utf-8")
     section = text[text.index("## لایه ۷"):]
-    return re.search(r"```\n(.*?)\n```", section, re.S).group(1)
+    return re.findall(r"```\n(.*?)\n```", section, re.S)[1]
 
 
-def example_eval() -> Evaluation:
-    plan = TradePlan(1, "limit", 142.7, 142.30, 143.10, 137.80, 152.00, 158.50, 2.1, 3.4, True,
-                     142.0, "flip", "1d", 1, 2.0, risk_pct=1.0, sl_pct=3.4, size_pct=29.4,
-                     leverage=10, margin_pct=2.94)
-    sections = {k: 5.0 for k in ("phase", "dow", "levels", "volume", "candles", "cycles",
-                                 "patterns", "confirmation")}
-    return Evaluation("SOL", 1, score=81, grade="A", sections=sections,
-                      gates={"regime": True, "phase": True, "rr": True, "confirmation": True},
-                      confirmations=["retest", "choch", "rsi"], notes=["pullback_volume"],
-                      phase_d="TREND_UP", phase_4h="TREND_UP", cycle="fresh_turn",
-                      cycle_w=1, cycle_d=1, labels=["PULLBACK", "RS_LEADER"], plan=plan,
-                      funding_pct=0.01)
+def parse(line: str) -> dict:
+    m = LINE.match(line)
+    assert m, f"not a coin line: {line!r}"
+    icon, coin, side, score, entry, sl, tp1, tp2, why = m.groups()
+    return {"icon": icon, "coin": coin, "side": side, "score": int(score), "entry": entry,
+            "sl": sl, "tp1": tp1, "tp2": tp2, "reason": why}
 
 
-def test_signal_message_matches_strategy_template(cfg):
-    msg = fmt.signal_message(example_eval(), {"name": "alt_season"}, {"btc": 4, "ethbtc_d": 1}, 3, cfg)
-    assert msg == template()
+# ---------------------------------------------------------------- coin line
+def test_signal_message_matches_strategy_md(cfg):
+    assert fmt.signal_message(signal_eval(), cfg) == strategy_signal_example()
 
 
-def test_short_and_out_of_cap_variants(cfg):
-    ev = example_eval()
-    ev.side, ev.plan.side, ev.a_plus = -1, -1, True
-    msg = fmt.signal_message(ev, {"name": "risk_off"}, {"btc": -4, "ethbtc_d": -1}, 6, cfg,
-                             out_of_cap=True)
-    lines = msg.split("\n")
-    assert lines[0].startswith("🔴 SHORT | SOLUSDT") and "رده A+" in lines[0]
-    assert lines[1].startswith("⚠️ خارج از سقف")
-    assert "(+3.4%)" in msg and "کلوز 4H بالای 137.80" in msg and "CHoCH نزولی" in msg
-    assert "سیگنال‌های فعال: 6 از 5" in msg
+def test_signal_message_layout(cfg):
+    lines = fmt.signal_message(signal_eval(), cfg).split("\n")
+    row = parse(lines[0])
+    assert row == {"icon": "🟢", "coin": "SOLUSDT", "side": "LONG", "score": 82, "entry": "152.30",
+                   "sl": "148.90", "tp1": "158.10", "tp2": "163.20",
+                   "reason": "پولبک به حمایت 4H + انگالف 1H"}
+    assert lines[1] == "ریسک 1٪ | حجم 45٪ موجودی | لوریج 10x"
+    assert lines[2] == "" and lines[3] == fmt.score_explanation(cfg) and len(lines) == 4
+
+
+def test_every_coin_line_has_the_same_fields_in_order(cfg):
+    for ev in (signal_eval(), watch_eval(), short_eval()):
+        line = fmt.coin_line(ev.to_dict())
+        assert "\n" not in line
+        row = parse(line)
+        assert row["score"] == math.floor(ev.score)
+        assert row["entry"] == fmt.fmt_price(ev.plan.entry)
+        assert row["sl"] == fmt.fmt_price(ev.plan.sl)
+        assert line.count(" | ") == len(FIELDS)
+
+
+def test_icons_by_grade(cfg):
+    assert fmt.coin_line(signal_eval().to_dict()).startswith("🟢 ")
+    assert fmt.coin_line(short_eval().to_dict()).startswith("🟢 APTUSDT | SHORT")
+    assert fmt.coin_line(watch_eval().to_dict()).startswith("🟡 ")
+
+
+def test_score_is_rounded_down_so_it_never_crosses_a_grade(cfg):
+    ev = signal_eval()
+    ev.score, ev.grade = 74.9, "B"
+    assert parse(fmt.coin_line(ev.to_dict()))["score"] == 74
+    ev.score = 75.0
+    assert fmt.shown_score(ev.score) == 75
+
+
+def test_reason_is_short_persian_and_without_codes(cfg):
+    ev = short_eval()
+    ev.labels = ["EARLY_TREND", "RS_LEADER", "HOT_SECTOR", "BREAKOUT_WATCH"]
+    ev.notes = ["pullback_volume", "pattern:double_top", "pattern:bear_flag"]
+    ev.confirmations = ["choch", "rsi", "macd", "trigger_candle", "rvol"]
+    ev.trigger_1h = "pin_bar"
+    for out_of_cap in (False, True):
+        why = parse(fmt.coin_line(ev.to_dict(), out_of_cap))["reason"]
+        assert len(why) <= fmt.REASON_MAX
+        assert not re.search(r"[A-Z]{2,}_[A-Z]+|pattern:|pullback_volume", why)
+    assert parse(fmt.coin_line(ev.to_dict(), True))["reason"].startswith("خارج از سقف")
+    watch = parse(fmt.coin_line(watch_eval().to_dict()))["reason"]
+    assert "منتظر تأیید 1H" in watch
+
+
+def test_every_flag_and_label_has_a_phrase(cfg):
+    labels = set(cfg["scanners"]["label_quality"])
+    flags = {"not_confirmed", "lower_cycle_correcting", "chase", "btc_weak",
+             "neutral_regime_needs_A", "funding_crowded"}
+    kinds = {f"level:{k}" for k in ("cluster", "flip", "prev_high", "prev_low", "round")}
+    assert labels | flags | kinds <= set(fmt.REASON_FA)
+
+
+# -------------------------------------------------------- score explanation
+def test_score_explanation_thresholds_come_from_config(cfg):
+    text = fmt.score_explanation(cfg)
+    g = cfg["grades"]
+    to_fa = fmt.fa
+    assert f"{to_fa(g['A'])} به بالا رده A" in text
+    assert f"{to_fa(g['B'])} تا {to_fa(g['A'] - 1)} رده B" in text
+    assert f"{to_fa(g['watch'])} تا {to_fa(g['B'] - 1)} فقط Watch" in text
+    assert f"زیر {to_fa(g['watch'])} چیزی ارسال نمی‌شود" in text
+
+
+def test_score_explanation_follows_config_changes(cfg):
+    import copy
+    c = copy.deepcopy(cfg)
+    c["grades"].update(A=80, B=70, watch=60)
+    c["technical"]["phase"]["points_both"] = 12
+    text = fmt.score_explanation(c)
+    assert "۸۰ به بالا رده A" in text and "۷۰ تا ۷۹ رده B" in text and "۶۰ تا ۶۹ فقط Watch" in text
+    assert "فاز بازار ۱۲" in text
+
+
+def test_score_explanation_weights_add_up_to_the_l6_maximum(cfg):
+    t = cfg["technical"]
+    weights = [t["phase"]["points_both"], t["dow"]["points_both"], t["levels"]["points_strong"],
+               t["volume"]["max_points"], t["candles"]["max_points"],
+               t["cycles"]["points_all_aligned_fresh"], t["patterns"]["max_points"],
+               t["confirmation"]["max_points"]]
+    assert sum(weights) == 100
+    text = fmt.score_explanation(cfg)
+    for w in weights:
+        assert fmt.fa(w) in text
 
 
 @pytest.mark.parametrize("p, s", [(142.3, "142.30"), (83712.5, "83712.50"), (0.53124, "0.5312"),
@@ -57,30 +133,71 @@ def test_fmt_price(p, s):
     assert fmt.fmt_price(p) == s
 
 
-def test_event_messages(cfg):
+# ---------------------------------------------------------------- messages
+def test_watch_message(cfg):
+    msg = fmt.watch_message(watch_eval(), cfg)
+    first, blank, expl = msg.split("\n")
+    assert parse(first)["icon"] == "🟡" and blank == "" and expl == fmt.score_explanation(cfg)
+    no_plan = watch_eval()
+    no_plan.plan = None
+    assert fmt.watch_message(no_plan, cfg) is None
+
+
+def test_daily_table_uses_l6_scores_only(cfg):
+    evals = [watch_eval().to_dict(), short_eval().to_dict()]
+    msg = fmt.daily_message(funnel(), [open_signal(signal_eval())], evals, NOW, cfg)
+    lines = msg.split("\n")
+    assert lines[0] == "📊 گزارش روزانه 2025-10-01 | رژیم: خنثی/رنج"
+    assert lines[1] == "سیگنال باز: 1 از 5"
+    rows = [parse(l) for l in lines[2:5]]
+    assert [r["coin"] for r in rows] == ["SOLUSDT", "APTUSDT", "ARBUSDT"]   # L6 score, high first
+    assert [r["score"] for r in rows] == [82, 71, 66]
+    assert [r["icon"] for r in rows] == ["🟢", "🟡", "🟡"]       # APT: B but not sent
+    # shortlisted without an L6 plan: names only, no score (their funnel scores were 96, 91, 74)
+    assert lines[5] == "در گلچین بدون ستاپ: SOON, GRASS, PUMP"
+    assert not any(s in msg for s in ("96", "91", " 80", "78"))
+    assert lines[6] == "" and lines[7] == fmt.score_explanation(cfg) and len(lines) == 8
+
+
+def test_daily_marks_ab_setups_that_were_not_sent(cfg):
+    # APT is grade B in the latest L6 run but has no open signal (e.g. the cap held it back)
+    msg = fmt.daily_message(funnel(), [], [short_eval().to_dict()], NOW, cfg)
+    row = parse(msg.split("\n")[2])
+    assert row["icon"] == "🟡" and row["score"] == 71 and row["reason"].startswith("صادر نشد")
+
+
+def test_daily_without_setups_shows_no_score(cfg):
+    msg = fmt.daily_message(funnel(), [], [], NOW, cfg)
+    assert msg.split("\n")[2] == "ستاپ فعالی نیست."
+    assert "امتیاز" not in msg and "SOON, GRASS, ARB, SOL, PUMP" in msg
+
+
+def test_updates_are_one_line_without_score(cfg):
     sig = {"symbol": "SOL", "side": "long"}
-    assert fmt.event_message(sig, Event("filled", 0, 142.5), cfg).startswith("✅ ورود فعال شد | SOLUSDT LONG")
-    assert "+2.1R" in fmt.event_message(sig, Event("tp1", 0, 152.0, 2.1), cfg)
-    assert "-1.00R" in fmt.event_message(sig, Event("sl", 0, 137.8, -1.0), cfg)
-    assert "TP1" in fmt.event_message(sig, Event("cancelled", 0, 152.0, 0, "tp1_before_entry"), cfg)
-    assert "24 ساعت" in fmt.event_message(sig, Event("expired", 0), cfg)
-    assert "MA25" in fmt.event_message(sig, Event("tp3", 0, 150.0, 2.3, "ma25"), cfg)
+    cases = {
+        Event("filled", 0, 152.30): "✅ SOLUSDT | ورود فعال شد | 152.30",
+        Event("tp1", 0, 158.10, 2.1): "🎯 SOLUSDT | TP1 | +2.1R | SL به ورود",
+        Event("tp2", 0, 163.20, 3.2): "🎯 SOLUSDT | TP2 | +3.2R | تریل روی MA25 4H",
+        Event("sl", 0, 148.90, -1.0): "🛑 SOLUSDT | SL | -1.0R",
+        Event("breakeven", 0, 152.3, 1.05): "⚪️ SOLUSDT | SL در ورود | +1.1R",
+        Event("tp3", 0, 160.0, 2.3, "ma25"): "🏁 SOLUSDT | خروج نهایی (MA25 4H) | +2.3R",
+        Event("expired", 0): "⌛️ SOLUSDT | منقضی شد | ورود در 24 ساعت فعال نشد",
+        Event("cancelled", 0, 158.1, 0, "tp1_before_entry"): "❌ SOLUSDT | لغو شد | TP1 قبل از ورود",
+    }
+    for e, expected in cases.items():
+        msg = fmt.event_message(sig, e, cfg)
+        assert msg == expected and "\n" not in msg and "امتیاز" not in msg
+    short = {"symbol": "APT", "side": "short"}
+    assert fmt.event_message(short, Event("cancelled", 0, 2.5, 0, "closed_beyond_sl"), cfg) == \
+        "❌ APTUSDT | لغو شد | کلوز 4H بالای SL"
 
 
-def test_watch_and_daily(cfg):
-    ev = example_eval()
-    ev.grade, ev.flags = "Watch", ["not_confirmed"]
-    assert "منتظر تایید ورود در 1H" in fmt.watch_message(ev)
-    funnel = {"regime": {"name": "neutral", "usdt_d": -1, "btc_d": 0, "total2": 1},
-              "majors": {"btc": 3, "eth": 2, "ethbtc": 1, "ethbtc_d": 1, "btc_weak": False,
-                         "divergence": True},
-              "hot_categories": ["AI"],
-              "shortlist": [{"base": "PUMP", "side": 1, "score": 80.7, "labels": ["EARLY_TREND"]}]}
-    sigs = [{"symbol": "UNI", "side": "long", "status": "active", "grade": "B", "score": 70}]
-    msg = fmt.daily_message(funnel, sigs, 1_759_276_800_000, cfg)          # 2025-10-01
-    assert "خنثی/رنج" in msg and "واگرایی BTC و TOTAL2" in msg
-    assert "PUMPUSDT LONG" in msg and "UNIUSDT LONG – active" in msg
-    assert "روز 529 پس از هاوینگ 2024-04-20" in msg
+def test_dry_run_prints_exactly_what_is_sent(cfg):
+    out = io.StringIO()
+    n = Notifier(cfg, load_secrets({}), out=out)
+    msg = fmt.signal_message(signal_eval(), cfg)
+    n.send(msg)
+    assert out.getvalue() == f"----- telegram (dry-run) -----\n{msg}\n\n" and n.sent == [msg]
 
 
 def test_split_respects_limit():
