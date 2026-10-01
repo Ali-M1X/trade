@@ -257,17 +257,25 @@ def section_table(d: pd.DataFrame) -> list[str]:
         cells = []
         try:
             bins = pd.qcut(col, 3, duplicates="drop")
+            ok = len(bins.cat.categories) == 3
         except ValueError:
-            bins = pd.Series(["all"] * len(col), index=col.index)
-        cats = list(bins.cat.categories) if hasattr(bins, "cat") else ["all"]
-        for c in cats:
-            sub = d[bins == c]
+            ok = False
+        if ok:
+            masks = [bins == c for c in bins.cat.categories]
+        else:   # heavily tied scores: low = the minimum, high = the maximum, mid = between
+            lo_v, hi_v = col.min(), col.max()
+            masks = [col == lo_v, (col > lo_v) & (col < hi_v), col == hi_v] if lo_v < hi_v else [col == lo_v]
+        for m in masks:
+            sub = d[m]
+            if not len(sub):
+                cells.append("(none)")
+                continue
             lo, hi = sub[f"s_{s}"].min(), sub[f"s_{s}"].max()
             rng = f"{lo:g}" if lo == hi else f"{lo:g}–{hi:g}"
             cells.append(f"{rng} · {len(sub)} · {100 * (sub['net_r'] > 0).mean():.0f}% · "
                          f"{sub['net_r'].mean():+.3f}")
         while len(cells) < 3:
-            cells.insert(1 if len(cells) == 2 else len(cells), "(tied)")
+            cells.append("(single value)")
         out.append(f"| {s} ({MAXP[s]}) | {fmt(spearman(col, d['net_r']))} | " + " | ".join(cells) + " |")
     return out
 
@@ -321,6 +329,7 @@ def build_report(samples: pd.DataFrame, raw_n: int, raw_counts: dict, meta: dict
           f"{samples['grade'].replace('', 'none').value_counts().to_dict()}.", ""]
 
     used = samples[samples["filled"] & samples["resolved"]].copy()
+    used["stop_pct"] = (used["entry"] - used["sl"]).abs() / used["entry"] * 100
 
     L += ["## Overall outcome by group (filled & resolved)", "",
           "| Group | n | Win rate | Mean net R | Total net R | Engine A/B only: n · win · mean R |",
@@ -332,6 +341,23 @@ def build_report(samples: pd.DataFrame, raw_n: int, raw_counts: dict, meta: dict
         L.append(f"| {g} | {basic(d)} | {tot} | {basic(ab).replace(' | ', ' · ')} |")
     L.append("")
 
+    L += ["## Exit status and plan shape (filled & resolved)", "",
+          "| Group | sl | breakeven | tp3 | other | Median stop % | Median TP1 R | Market orders |",
+          "|---|---|---|---|---|---|---|---|"]
+    for g in GROUPS:
+        d = used if g == "ALL" else used[used["group"] == g]
+        if not len(d):
+            continue
+        st = d["status"].value_counts()
+        other = len(d) - st.get("sl", 0) - st.get("breakeven", 0) - st.get("tp3", 0)
+        L.append(f"| {g} | {st.get('sl', 0)} | {st.get('breakeven', 0)} | {st.get('tp3', 0)} | {other} | "
+                 f"{d['stop_pct'].median():.2f}% | {d['tp1_r'].median():.2f} | {100 * (d['order'] == 'market').mean():.0f}% |")
+    L += ["", "Levels section by value (ALL groups): n · win · mean R · median stop % · median TP1 R · exits", ""]
+    for v, d in used.groupby("s_levels"):
+        L.append(f"- levels = {v:g}: {len(d)} · {100 * (d['net_r'] > 0).mean():.0f}% · {d['net_r'].mean():+.3f} · "
+                 f"{d['stop_pct'].median():.2f}% · {d['tp1_r'].median():.2f} · {d['status'].value_counts().to_dict()}")
+    L.append("")
+
     for g in GROUPS:
         d = used if g == "ALL" else used[used["group"] == g]
         L += [f"## {g}: sections and gates", "", f"n = {len(d)} filled & resolved samples, "
@@ -339,8 +365,9 @@ def build_report(samples: pd.DataFrame, raw_n: int, raw_counts: dict, meta: dict
               if len(d) else "no samples", ""]
         if len(d) < 5:
             continue
-        L += ["Terciles split the section's score at its 33rd/67th percentiles; with few distinct "
-              "values, ties collapse terciles (shown as the actual score range).", ""]
+        L += ["Terciles split the section's score at its 33rd/67th percentiles. When ties make that "
+              "impossible (scores take few distinct values), low = samples at the minimum score, "
+              "high = at the maximum, mid = everything between. Each cell: score range · n · win · mean R.", ""]
         L += section_table(d) + [""] + gate_table(d) + [""]
 
     # ------------------------------------------------------------------ weights
