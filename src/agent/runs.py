@@ -245,12 +245,16 @@ def manage(cfg: dict, repo, market, notifier, now_ms: int) -> list:
                 if r.ts > lc["last_4h_ts"] and i >= offset:
                     steps.append((r.ts + H4, 1, (r, ma_values[i - offset], i in chochs)))
         events = []
-        for _, kind, item in sorted(steps, key=lambda x: (x[0], x[1])):
+        # a confirm_4h signal can fill at a 4H close: that close comes before the 15m candle
+        # opening at the same time (other signals keep the original order)
+        first = 1 if "confirm" in lc else 0
+        for _, kind, item in sorted(steps, key=lambda x: (x[0], x[1] != first)):
             if kind == 0:
                 events += on_candle(lc, int(item.ts), float(item.high), float(item.low), cfg)
             else:
                 r, ma_v, choch = item
-                events += on_4h_close(lc, int(r.ts), float(r.close), float(ma_v), choch)
+                events += on_4h_close(lc, int(r.ts), float(r.close), float(ma_v), choch,
+                                      float(r.open))
         events += on_time(lc, now_ms)
         if not events:
             repo.update_signal(sig["id"], lc["status"], sig["payload"], sig["updated_at"])

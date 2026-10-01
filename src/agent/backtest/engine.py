@@ -158,7 +158,8 @@ class Backtest:
                 if f is not None and int(f.df["ts"].iloc[-1]) == t - H4:
                     choch = any(e.idx == f.n - 1 and e.kind == "CHoCH" and e.direction == -lc["side"]
                                 for e in f.events)
-                    events += on_4h_close(lc, t - H4, f.close, float(f.last[ma]), choch)
+                    events += on_4h_close(lc, t - H4, f.close, float(f.last[ma]), choch,
+                                          float(f.last["open"]))
             events += on_time(lc, t)
             if events:
                 self.book.save(sig, events, t)
@@ -174,8 +175,9 @@ class Backtest:
                 "id": s["id"], "base": s["symbol"], "side": p["lifecycle"]["side"],
                 "grade": s["grade"], "score": s["score"], "created": s["created_at"],
                 "regime": p["regime"]["name"], "status": s["status"],
-                "order": p["plan"]["order"], "entry": p["plan"]["entry"], "sl": p["plan"]["sl"],
-                "tp1_r": p["plan"]["tp1_r"],
+                # the lifecycle's entry/stop: the plan's, or rebuilt at a confirm_4h fill
+                "order": p["plan"]["order"], "entry": p["lifecycle"]["entry"],
+                "sl": p["lifecycle"]["sl"], "tp1_r": _tp1_r(p),
                 "risk_pct": p["plan"]["risk_pct"], "out_of_cap": p.get("out_of_cap", False),
                 "gross_r": p["lifecycle"]["realized_r"],
                 "filled_at": p["lifecycle"]["filled_at"], "closed_at": p["lifecycle"]["closed_at"],
@@ -183,6 +185,13 @@ class Backtest:
                            for e in self.book_repo.get_events(s["id"]) if e["kind"] != "created"],
             })
         return out
+
+
+def _tp1_r(payload: dict) -> float:
+    lc = payload["lifecycle"]
+    if "confirm" not in lc or not lc["filled_at"]:
+        return payload["plan"]["tp1_r"]
+    return (lc["tp1"] - lc["entry"]) * lc["side"] / lc["risk"]
 
 
 def _date(ms: int) -> str:

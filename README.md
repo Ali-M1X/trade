@@ -93,6 +93,9 @@ workflow **agent** هر ۱۵ دقیقه دستور `run-scheduled` را اجرا
 | `trade.base_risk_pct`, `trade.leverage_cap` | ریسک پایه‌ی هر معامله و سقف لوریج |
 | `lifecycle.max_active` | سقف سیگنال‌های فعال هم‌زمان |
 | `trade.stop_mode`, `trade.min_stop_pct`, `trade.tp1_max_r`, `lifecycle.cooldown_after_stop_h` | چهار تغییر آزمایشی بک‌تست؛ به‌طور پیش‌فرض **خاموش** هستند و رفتار همان STRATEGY.md است |
+| `trade.entry_mode` (`level` / `confirm_4h`) | ورود روی سطح (پیش‌فرض) یا ورود فقط بعد از کلوز تأییدی 4H پس از لمس منطقه‌ی ورود؛ SL و TP از قیمت واقعی ورود دوباره حساب می‌شوند |
+| `trade.stop_mode: atr`, `trade.atr_stop_mult` | حد ضرر = ورود ∓ ۱.۵×ATR(4H)؛ پیش‌فرض همان `level` است |
+| `trade.tp1_mode` (`level` / `fixed_r`), `trade.tp1_fixed_r` | TP1 روی اولین سطح مخالف (پیش‌فرض) یا ثابت 2R و TP2 در 3R بدون رد شدن به‌خاطر R:R سطح |
 
 تصمیم‌هایی که در جاهای مبهم استراتژی گرفته شده، همه در `docs/DECISIONS.md` آمده است.
 
