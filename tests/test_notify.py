@@ -241,3 +241,24 @@ def test_notifier_posts_and_retries_429(cfg):
     assert url.endswith("/botT/sendMessage") and body["chat_id"] == "42" and body["text"] == "hi"
     assert not Notifier(cfg, load_secrets({"TELEGRAM_BOT_TOKEN": "T", "TELEGRAM_CHAT_ID": "42"}),
                         session=FakeSession([FakeResp(400)])).send("x")
+
+
+def _sig(grade, status, r, closed_at):
+    return {"grade": grade, "status": status,
+            "payload": {"lifecycle": {"realized_r": r, "closed_at": closed_at}}}
+
+
+def test_performance_message_counts_only_filled_trades():
+    from agent.notify.formatter import performance_message, performance_stats
+    now = 100 * 86_400_000
+    sigs = [_sig("A", "tp3", 2.0, now - 86_400_000), _sig("A", "sl", -1.0, now - 30 * 86_400_000),
+            _sig("B", "breakeven", 0.3, now - 2 * 86_400_000), _sig("B", "expired", 0.0, now - 1),
+            _sig("B", "tp1", 0.5, None)]
+    total = performance_stats(sigs)
+    assert (total["n"], total["wins"], total["unfilled"], total["open"]) == (3, 2, 1, 1)
+    assert round(total["r"], 2) == 1.3 and total["by_grade"]["A"]["n"] == 2
+    week = performance_stats(sigs, now - 7 * 86_400_000)
+    assert (week["n"], week["unfilled"], week["open"]) == (2, 1, 0)
+    text = performance_message(sigs, now)
+    assert "از ابتدا: 3 معامله" in text and "فقط 3 معامله" in text
+    assert performance_message([], now).count("معامله‌ی بسته‌شده‌ای نبود") == 2

@@ -326,3 +326,51 @@ def hold_message(ideas, now_ms: int, new_only: bool = False) -> str:
         if i.targets:
             lines.append("  اهداف: " + " / ".join(fmt_price(p) for p in i.targets))
     return "\n".join(lines)
+
+
+def performance_stats(signals: list[dict], since_ms: int | None = None) -> dict:
+    """Results of signals that reached a fill, from their stored lifecycle. R is the
+    signal's own plan (before fees, slippage and funding). With `since_ms`, only trades
+    closed at or after it. Expired and cancelled signals never filled and count apart."""
+    closed = ("sl", "breakeven", "tp3")
+    out = {"n": 0, "wins": 0, "r": 0.0, "by_grade": {}, "unfilled": 0, "open": 0}
+    for s in signals:
+        lc = s["payload"]["lifecycle"]
+        status = s["status"]
+        if status in ("expired", "cancelled"):
+            if since_ms is None or (lc.get("closed_at") or 0) >= since_ms:
+                out["unfilled"] += 1
+        elif status in closed:
+            if since_ms is not None and (lc.get("closed_at") or 0) < since_ms:
+                continue
+            r = lc["realized_r"]
+            g = out["by_grade"].setdefault(s["grade"], {"n": 0, "wins": 0, "r": 0.0})
+            for d in (out, g):
+                d["n"] += 1
+                d["wins"] += r > 0
+                d["r"] += r
+        elif since_ms is None:
+            out["open"] += 1
+    return out
+
+
+def _perf_line(label: str, d: dict) -> str:
+    if not d["n"]:
+        return f"{label}: معامله‌ی بسته‌شده‌ای نبود"
+    return (f"{label}: {d['n']} معامله، نرخ برد {d['wins'] / d['n'] * 100:.0f}٪، "
+            f"مجموع {d['r']:+.2f}R، میانگین {d['r'] / d['n']:+.2f}R")
+
+
+def performance_message(signals: list[dict], now_ms: int) -> str:
+    date = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+    week, total = performance_stats(signals, now_ms - 7 * 86_400_000), performance_stats(signals)
+    lines = [f"📊 عملکرد واقعی سیگنال‌ها {date}", "", _perf_line("۷ روز اخیر", week),
+             _perf_line("از ابتدا", total)]
+    for g in sorted(total["by_grade"]):
+        lines.append(_perf_line(f"  رده‌ی {g}", total["by_grade"][g]))
+    lines.append(f"بدون ورود (منقضی/لغو): {total['unfilled']} | هنوز باز: {total['open']}")
+    lines.append("R طبق پلن خود سیگنال است و کارمزد، اسلیپیج و فاندینگ را شامل نمی‌شود "
+                 "(در بک‌تست حدود ۰.۱۷R از هر معامله کم می‌کرد).")
+    if total["n"] < 30:
+        lines.append(f"⚠️ فقط {total['n']} معامله؛ برای قضاوت کم است.")
+    return "\n".join(lines)
