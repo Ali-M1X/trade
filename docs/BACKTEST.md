@@ -1,8 +1,100 @@
 # Backtest
 
+Generated on GitHub Actions. **Latest:** [run 36872260579](https://github.com/Ali-M1X/trade/actions/runs/36872260579) (branch `claude/entry-stop-switches`): history fetched again, nine variants replayed in parallel, comparison built by `trade-agent backtest-compare`. The raw per-variant results are in that run's `backtest-report` artifact. Earlier runs are kept below.
+
+## Summary: optional entry, stop and target modes (2026-10-01)
+
+Three new switches, all off by default (DECISIONS.md #126–#132): `trade.entry_mode: confirm_4h` (enter at the close of a 4H confirmation candle after the zone is touched, SL/TP rebuilt from the fill), `trade.stop_mode: atr` (entry ∓ 1.5 ATR(4H)) and `trade.tp1_mode: fixed_r` (TP1 2R, TP2 3R, no level R:R rejection). History: 2025-10-01 → 2026-10-01, 70 coins; tuning = first 273 days, holdout = last 92 days. All R figures are net of fees, slippage and funding; Max DD is the drawdown of the compounded return.
+
+| Variant | Changes | Tuning: trades | Win | Avg R | Total R | Max DD | Holdout: trades | Win | Avg R | Total R | Max DD |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| baseline | STRATEGY.md | 27 | 26% | −0.26 | −6.9 | 4.5% | 26 | 15% | −0.66 | −17.2 | 7.7% |
+| atr_2r | stop atr + TP1 2R | 37 | 32% | −0.15 | −5.6 | 6.1% | 33 | 39% | **+0.07** | **+2.4** | 2.7% |
+| confirm_level_atr | confirm_4h + stop atr | 9 | 11% | −0.78 | −7.1 | 3.8% | 7 | 14% | −0.56 | −3.9 | 3.2% |
+| confirm_atr_2r | all three | 27 | 41% | **+0.06** | **+1.7** | 3.6% | 30 | 23% | −0.38 | −11.4 | 8.7% |
+| tp1_cap | (earlier variant) | 30 | 33% | −0.15 | −4.4 | 2.0% | 29 | 17% | −0.63 | −18.2 | 8.7% |
+
+- **Choice on the tuning period: `confirm_atr_2r`** (the only variant positive there, +1.7R, 41% wins). **It did not hold in the holdout:** −11.4R over 30 trades (−0.38R per trade), better than the baseline's −17.2R but still clearly negative, with the same drawdown (8.7%).
+- **`atr_2r` was the only variant positive in the holdout** (+2.4R over 33 trades, 39% wins, drawdown 2.7%), but it was negative in the tuning period (−5.6R), so by the rule we use (choose on tuning, report the holdout) it is not the pick. Its A-grade trades were positive in both periods (+3.1R / 13 trades, +5.3R / 20 trades) and its B-grade trades negative in both; that is worth watching, not a basis for a switch.
+- **The level-based TP1 with a wide stop (`confirm_level_atr`) leaves few trades** (16 in a year): the 2R gate again rejects most setups when the stop is wider, as in the earlier `swing_stop` result.
+- **Both fixed-2R variants roughly double the number of trades** (the level R:R gate no longer rejects) and convert more stops into breakeven/trailing exits: `atr_2r` had 13 trailing exits (tp3) against the baseline's 3.
+- The per-trade analysis that motivated these modes (analysis branch, 1,689 setups without the signal book) found the same direction: smaller losses, no robust edge. The engine results above, with the signal book's caps and only A/B grades, are the ones that count.
+
+**What I'd conclude:** the switches work as designed and the baseline is unchanged (a test compares every plan and trade with the previous code; the baseline here matches the previous run's tuning numbers exactly). None of the variants gives a robust edge on this year: the tuning winner fails the holdout, and the holdout winner failed tuning. All three switches stay **off**. If you want to experiment live, `atr_2r` is the least risky combination by drawdown, but 33 holdout trades are too few to call it an edge.
+
+### Variant comparison (run 36872260579)
+
+| Variant | Changes |
+|---|---|
+| baseline | STRATEGY.md as built |
+| swing_stop | trade.stop_mode = swing_or_atr |
+| min_stop | trade.min_stop_pct = 0.8 |
+| tp1_cap | trade.tp1_max_r = 3 |
+| cooldown | lifecycle.cooldown_after_stop_h = 24 |
+| combined | trade.stop_mode = swing_or_atr; trade.min_stop_pct = 0.8; trade.tp1_max_r = 3; lifecycle.cooldown_after_stop_h = 24 |
+| atr_2r | trade.stop_mode = atr; trade.tp1_mode = fixed_r |
+| confirm_level_atr | trade.entry_mode = confirm_4h; trade.stop_mode = atr |
+| confirm_atr_2r | trade.entry_mode = confirm_4h; trade.stop_mode = atr; trade.tp1_mode = fixed_r |
+
+#### Tuning period (first 273 days: 2025-10-01 → 2026-07-01)
+
+| Variant | Trades | Win rate | Avg R | Total R | Profit factor | Return | Max DD |
+|---|---|---|---|---|---|---|---|
+| baseline | 27 | 26% | -0.26 | -6.9 | 0.70 | -1.3% | 4.5% |
+| swing_stop | 4 | 0% | -1.09 | -4.4 | 0.00 | -2.4% | 2.4% |
+| min_stop | 25 | 20% | -0.53 | -13.2 | 0.41 | -4.2% | 5.6% |
+| tp1_cap | 30 | 33% | -0.15 | -4.4 | 0.80 | +1.8% | 2.0% |
+| cooldown | 27 | 26% | -0.26 | -6.9 | 0.70 | -1.5% | 5.3% |
+| combined | 4 | 0% | -1.09 | -4.4 | 0.00 | -2.4% | 2.4% |
+| atr_2r | 37 | 32% | -0.15 | -5.6 | 0.79 | -2.9% | 6.1% |
+| confirm_level_atr | 9 | 11% | -0.78 | -7.1 | 0.19 | -3.1% | 3.8% |
+| confirm_atr_2r | 27 | 41% | +0.06 | +1.7 | 1.10 | -1.1% | 3.6% |
+
+#### Holdout (last 92 days: 2026-07-01 → 2026-10-01)
+
+| Variant | Trades | Win rate | Avg R | Total R | Profit factor | Return | Max DD |
+|---|---|---|---|---|---|---|---|
+| baseline | 26 | 15% | -0.66 | -17.2 | 0.30 | -6.8% | 7.7% |
+| swing_stop | 2 | 0% | -1.07 | -2.1 | 0.00 | -1.1% | 1.1% |
+| min_stop | 27 | 15% | -0.67 | -18.0 | 0.29 | -7.7% | 8.6% |
+| tp1_cap | 29 | 17% | -0.63 | -18.2 | 0.32 | -7.8% | 8.7% |
+| cooldown | 20 | 10% | -0.77 | -15.3 | 0.24 | -7.4% | 8.3% |
+| combined | 2 | 50% | +0.16 | +0.3 | 1.28 | +0.2% | 0.6% |
+| atr_2r | 33 | 39% | +0.07 | +2.4 | 1.11 | +1.9% | 2.7% |
+| confirm_level_atr | 7 | 14% | -0.56 | -3.9 | 0.39 | -2.0% | 3.2% |
+| confirm_atr_2r | 30 | 23% | -0.38 | -11.4 | 0.53 | -6.3% | 8.7% |
+
+#### By grade (new variants and baseline)
+
+| Variant | Grade | Tuning: trades | Avg R | Total R | Holdout: trades | Avg R | Total R |
+|---|---|---|---|---|---|---|---|
+| baseline | A | 10 | -0.00 | -0.0 | 19 | -0.50 | -9.5 |
+| baseline | B | 17 | -0.41 | -6.9 | 7 | -1.11 | -7.7 |
+| atr_2r | A | 13 | +0.23 | +3.1 | 20 | +0.26 | +5.3 |
+| atr_2r | B | 24 | -0.36 | -8.6 | 13 | -0.22 | -2.9 |
+| confirm_level_atr | A | 7 | -0.71 | -5.0 | 3 | -1.08 | -3.2 |
+| confirm_level_atr | B | 2 | -1.05 | -2.1 | 4 | -0.17 | -0.7 |
+| confirm_atr_2r | A | 12 | +0.34 | +4.1 | 19 | -0.39 | -7.4 |
+| confirm_atr_2r | B | 15 | -0.16 | -2.4 | 11 | -0.36 | -4.0 |
+
+#### Outcomes and blocks (whole year)
+
+| Variant | tp3 | breakeven | sl | expired | cancelled | blocked: duplicate |
+|---|---|---|---|---|---|---|
+| baseline | 3 | 8 | 42 | 6 | 21 | 116 |
+| atr_2r | 13 | 12 | 45 | 10 | 11 | 270 |
+| confirm_level_atr | 1 | 1 | 14 | 4 | 5 | 45 |
+| confirm_atr_2r | 11 | 7 | 39 | 18 | 16 | 291 |
+
+The full report (per-regime tables and the `combined` details) is in the run's step summary and artifact.
+
+---
+
+# Previous runs
+
 Generated on GitHub Actions. **Variants:** [run 36762973452](https://github.com/Ali-M1X/trade/actions/runs/36762973452): history fetched once, six variants replayed in parallel, comparison built by `trade-agent backtest-compare`. **Baseline details:** [run 36755789306](https://github.com/Ali-M1X/trade/actions/runs/36755789306). The raw per-variant results and the database are in those runs' artifacts.
 
-## Summary
+## Summary (four switches, 2025-09-30 → 2026-09-30)
 
 **None of the four changes, alone or together, makes the strategy profitable.** All R figures are net of fees, slippage and funding.
 

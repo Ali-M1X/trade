@@ -6,7 +6,7 @@ import json
 import logging
 import sys
 
-from .config import load_config, load_secrets
+from .config import live_config, load_config, load_secrets
 from .data.sources_check import as_dicts, check_sources, format_report, working_exchanges
 
 
@@ -218,7 +218,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(levelname)s %(name)s: %(message)s")
-    return COMMANDS[args.command](args, load_config(args.config), load_secrets())
+    cfg = load_config(args.config)
+    if args.command.startswith("run-"):      # live runs follow live.variant; backtests don't
+        cfg = live_config(cfg)
+    return COMMANDS[args.command](args, cfg, load_secrets())
 
 
 if __name__ == "__main__":

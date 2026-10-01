@@ -292,6 +292,8 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
         ev.flags.append("btc_weak")
     if regime.min_grade == "A" and grade == "B":
         ev.flags.append("neutral_regime_needs_A")
+    elif cfg["grades"].get("min_signal", "B") == "A" and grade == "B":
+        ev.flags.append("grade_b_off")
     hard_fail = not (ev.gates["regime"] and ev.gates["phase"])
     risk_mult = regime.risk_for(side, base == "BTC", btc_pair_up) * majors.risk_multiplier * \
         cyc.risk_multiplier

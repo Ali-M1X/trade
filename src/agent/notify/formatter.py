@@ -69,6 +69,7 @@ REASON_FA = {
     "chase": "منتظر پولبک",
     "btc_weak": "BTC ضعیف",
     "neutral_regime_needs_A": "رژیم خنثی فقط A",
+    "grade_b_off": "فعلاً فقط رده A",
     "funding_crowded": "فاندینگ شلوغ",
     "out_of_cap": "خارج از سقف",
     "not_issued": "صادر نشد",          # A/B setup the signal book held back (cap, correlation, ...)
@@ -153,7 +154,9 @@ def score_explanation(cfg: dict) -> str:
         f"برقرار باشد (هم‌جهت با رژیم بازار، فاز مجاز، ریسک به ریوارد حداقل ۱ به {rr} و "
         f"حداقل {conf_word} تأیید ورود)؛ اگر شرطی هنوز کامل نیست، ستاپ با هر امتیازی فقط Watch است. "
         f"بازه‌ها: {fa(a)} به بالا رده A با {_risk_words(share['A'])}، "
-        f"{fa(b)} تا {fa(a - 1)} رده B با {_risk_words(share['B'])}، "
+        + (f"{fa(b)} تا {fa(a - 1)} رده B که فعلاً خاموش است و فقط Watch می‌آید، "
+           if g.get("min_signal", "B") == "A" else
+           f"{fa(b)} تا {fa(a - 1)} رده B با {_risk_words(share['B'])}، ") +
         f"{fa(w)} تا {fa(b - 1)} فقط Watch (هشدار نزدیک ستاپ، بدون ورود) "
         f"و زیر {fa(w)} چیزی ارسال نمی‌شود."
     )
@@ -202,10 +205,15 @@ def coin_line(ev: dict, out_of_cap: bool = False) -> str:
     """ev: an Evaluation as a dict (Evaluation.to_dict()), with a trade plan."""
     p = ev["plan"]
     icon = SIGNAL_ICON if ev["grade"] in ("A", "B") else WATCH_ICON
+    if p["order"] == "confirm_4h":
+        # entry after a 4H confirmation: SL/TP shown are from the level price, final at fill
+        entry, tp2 = (f"ورود پس از تأیید 4H حوالی {fmt_price(p['entry'])}",
+                      f"TP2 {fmt_price(p['tp2'])} (نهایی پس از فعال شدن)")
+    else:
+        entry, tp2 = f"ورود {fmt_price(p['entry'])}", f"TP2 {fmt_price(p['tp2'])}"
     return " | ".join([
         f"{icon} {pair(ev['base'])}", side_word(ev["side"]), f"امتیاز {shown_score(ev['score'])}",
-        f"ورود {fmt_price(p['entry'])}", f"SL {fmt_price(p['sl'])}", f"TP1 {fmt_price(p['tp1'])}",
-        f"TP2 {fmt_price(p['tp2'])}", reason(ev, out_of_cap),
+        entry, f"SL {fmt_price(p['sl'])}", f"TP1 {fmt_price(p['tp1'])}", tp2, reason(ev, out_of_cap),
     ])
 
 
@@ -235,6 +243,10 @@ def event_message(sig: dict, e, cfg: dict) -> str:
     side = 1 if sig["side"] == "long" else -1
     k = e.kind
     if k == "filled":
+        lc = (sig.get("payload") or {}).get("lifecycle") or {}
+        if "confirm" in lc:                  # confirm_4h: SL/TP were rebuilt from this fill
+            return (f"✅ {head} | ورود فعال شد (تأیید 4H) | {fmt_price(e.price)} | "
+                    f"SL {fmt_price(lc['sl'])} | TP1 {fmt_price(lc['tp1'])}")
         return f"✅ {head} | ورود فعال شد | {fmt_price(e.price)}"
     if k == "tp1":
         return f"🎯 {head} | TP1 | {e.r:+.1f}R | SL به ورود"
@@ -252,7 +264,11 @@ def event_message(sig: dict, e, cfg: dict) -> str:
         return f"⌛️ {head} | منقضی شد | ورود در {hours} ساعت فعال نشد"
     if k == "cancelled":
         why = {"tp1_before_entry": "TP1 قبل از ورود",
-               "closed_beyond_sl": f"کلوز 4H {'زیر' if side == 1 else 'بالای'} SL"}.get(e.reason, e.reason)
+               "closed_beyond_sl": f"کلوز 4H {'زیر' if side == 1 else 'بالای'} SL",
+               "fill_rr": "پس از تأیید 4H ریسک به ریوارد کافی نیست",
+               "fill_sl_too_wide": "پس از تأیید 4H حد ضرر بیش از حد دور است",
+               "fill_sl_too_tight": "پس از تأیید 4H حد ضرر بیش از حد نزدیک است",
+               "fill_stop_wrong_side": "پس از تأیید 4H حد ضرر نامعتبر است"}.get(e.reason, e.reason)
         return f"❌ {head} | لغو شد | {why}"
     return f"{head} | {k}"
 

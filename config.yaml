@@ -286,6 +286,7 @@ technical:
     lookback_bars: 6           # 1H bars searched for the retest / CHoCH / RSI cross
 
 grades:
+  # min_signal: A switches grade B off (sent as Watch). Unset = B is a signal (STRATEGY.md).
   A: 75
   B: 65
   watch: 55
@@ -302,10 +303,20 @@ trade:
   sl_buffer_atr: 0.5
   # stop_mode "level": the level's farthest pivot + sl_buffer_atr x ATR (STRATEGY.md).
   # "swing_or_atr": the farther of the last 4H swing (+ swing_buffer_atr) and the level
-  # + swing_stop_atr x ATR (backtest variant 1).
+  # + swing_stop_atr x ATR (backtest variant 1). "atr": entry -/+ atr_stop_mult x ATR(4H).
   stop_mode: level
   swing_stop_atr: 1.0
   swing_buffer_atr: 0.1
+  atr_stop_mult: 1.5           # stop_mode "atr" only
+  # entry_mode "level" (STRATEGY.md): market inside the zone, else limit at the level.
+  # "confirm_4h": pending at the level; after price touches the zone it fills at the close of
+  # the first 4H candle closing in the trade direction beyond the level, and SL/TP are
+  # rebuilt from that fill price.
+  entry_mode: level
+  # tp1_mode "level": TP1 = first opposing level, which must be >= tp1_min_r (the R:R gate).
+  # "fixed_r": TP1 = tp1_fixed_r x R, TP2 = tp2_r x R, no level R:R rejection.
+  tp1_mode: level
+  tp1_fixed_r: 2.0
   min_stop_pct: 0.0            # reject setups with a tighter stop (variant 2: 0.8)
   tp1_max_r: null              # cap TP1 at this many R (variant 3: 3)
   max_sl_atr: 3.0
@@ -381,3 +392,18 @@ backtest:
     combined:
       trade: {stop_mode: swing_or_atr, min_stop_pct: 0.8, tp1_max_r: 3}
       lifecycle: {cooldown_after_stop_h: 24}
+    # entry/stop/target modes from the score/entry analysis (DECISIONS.md #108)
+    atr_2r: {trade: {stop_mode: atr, tp1_mode: fixed_r}}
+    confirm_level_atr: {trade: {entry_mode: confirm_4h, stop_mode: atr}}
+    confirm_atr_2r: {trade: {entry_mode: confirm_4h, stop_mode: atr, tp1_mode: fixed_r}}
+    # atr_2r with grade B switched off (B setups are sent as Watch only)
+    atr_2r_a_only:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      grades: {min_signal: A}
+
+# ------------------------------------------------------------- live settings
+# Live runs (run-*) apply this backtest variant on top of the settings above; the backtest
+# and tests use the settings above unchanged. Empty = exactly STRATEGY.md.
+# 2026-10-01: Ali chose atr_2r_a_only for paper trading (DECISIONS.md #133).
+live:
+  variant: atr_2r_a_only

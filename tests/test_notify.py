@@ -9,7 +9,8 @@ from agent.config import load_secrets
 from agent.notify import formatter as fmt
 from agent.notify.telegram import Notifier, split
 from agent.signals.lifecycle import Event
-from message_examples import NOW, funnel, open_signal, short_eval, signal_eval, watch_eval
+from message_examples import (NOW, confirm_eval, funnel, open_signal, short_eval, signal_eval,
+                              watch_eval)
 
 STRATEGY = Path(__file__).resolve().parents[1] / "docs" / "STRATEGY.md"
 FIELDS = ["side", "score", "entry", "sl", "tp1", "tp2", "reason"]
@@ -89,7 +90,7 @@ def test_reason_is_short_persian_and_without_codes(cfg):
 def test_every_flag_and_label_has_a_phrase(cfg):
     labels = set(cfg["scanners"]["label_quality"])
     flags = {"not_confirmed", "lower_cycle_correcting", "chase", "btc_weak",
-             "neutral_regime_needs_A", "funding_crowded"}
+             "neutral_regime_needs_A", "funding_crowded", "grade_b_off"}
     kinds = {f"level:{k}" for k in ("cluster", "flip", "prev_high", "prev_low", "round")}
     assert labels | flags | kinds <= set(fmt.REASON_FA)
 
@@ -113,6 +114,14 @@ def test_score_explanation_follows_config_changes(cfg):
     text = fmt.score_explanation(c)
     assert "۸۰ به بالا رده A" in text and "۷۰ تا ۷۹ رده B" in text and "۶۰ تا ۶۹ فقط Watch" in text
     assert "فاز بازار ۱۲" in text
+
+
+def test_score_explanation_when_grade_b_is_off(cfg):
+    import copy
+    c = copy.deepcopy(cfg)
+    c["grades"]["min_signal"] = "A"
+    text = fmt.score_explanation(c)
+    assert "رده B که فعلاً خاموش است" in text and "با نصف ریسک" not in text
 
 
 def test_score_explanation_weights_add_up_to_the_l6_maximum(cfg):
@@ -190,6 +199,27 @@ def test_updates_are_one_line_without_score(cfg):
     short = {"symbol": "APT", "side": "short"}
     assert fmt.event_message(short, Event("cancelled", 0, 2.5, 0, "closed_beyond_sl"), cfg) == \
         "❌ APTUSDT | لغو شد | کلوز 4H بالای SL"
+
+
+def test_confirm_4h_signal_line_is_one_honest_line(cfg):
+    msg = fmt.signal_message(confirm_eval(), cfg)
+    line = msg.split("\n")[0]
+    assert line == ("🟢 SOLUSDT | LONG | امتیاز 82 | ورود پس از تأیید 4H حوالی 152.30 | SL 148.90 | "
+                    "TP1 158.10 | TP2 163.20 (نهایی پس از فعال شدن) | پولبک به حمایت 4H + انگالف 1H")
+    assert line.count(" | ") == len(FIELDS)
+
+
+def test_confirm_4h_fill_shows_the_actual_entry_sl_and_tp1(cfg):
+    sig = {"symbol": "SOL", "side": "long",
+           "payload": {"lifecycle": {"confirm": {}, "entry": 153.1, "sl": 150.1, "tp1": 159.1}}}
+    assert fmt.event_message(sig, Event("filled", 0, 153.1), cfg) == \
+        "✅ SOLUSDT | ورود فعال شد (تأیید 4H) | 153.10 | SL 150.10 | TP1 159.10"
+    # signals of the default entry mode keep the short line
+    plain = {"symbol": "SOL", "side": "long", "payload": {"lifecycle": {"entry": 152.3}}}
+    assert fmt.event_message(plain, Event("filled", 0, 152.30), cfg) == "✅ SOLUSDT | ورود فعال شد | 152.30"
+    for reason in ("fill_rr", "fill_sl_too_wide", "fill_sl_too_tight", "fill_stop_wrong_side"):
+        msg = fmt.event_message(sig, Event("cancelled", 0, 153.1, 0, reason), cfg)
+        assert msg.startswith("❌ SOLUSDT | لغو شد | پس از تأیید 4H") and "fill_" not in msg
 
 
 def test_dry_run_prints_exactly_what_is_sent(cfg):

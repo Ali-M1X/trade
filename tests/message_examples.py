@@ -21,6 +21,15 @@ def signal_eval() -> Evaluation:
                       confirmations=["retest", "trigger_candle", "rvol"], trigger_1h="engulfing")
 
 
+def confirm_eval() -> Evaluation:
+    """trade.entry_mode = confirm_4h: the plan is a reference at the level (152.30); SL/TP
+    shown are from the level price and are rebuilt at the 4H-confirmed fill."""
+    p = plan(order="confirm_4h", risk_pct=1.0, sl_pct=2.23, size_pct=44.8, leverage=10,
+             margin_pct=4.48)
+    return Evaluation("SOL", 1, score=82.5, grade="A", gates=ALL_GATES, plan=p,
+                      confirmations=["retest", "trigger_candle", "rvol"], trigger_1h="engulfing")
+
+
 def watch_eval() -> Evaluation:
     p = plan(entry=0.6810, sl=0.6590, tp1=0.7260, tp2=0.7480, kind="flip", tf="1d")
     return Evaluation("ARB", 1, score=66, grade="Watch", plan=p,
