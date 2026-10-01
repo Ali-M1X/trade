@@ -1,21 +1,22 @@
-name: weight-analysis
+name: entry-stop-analysis
 
-# One-off analysis: how much each L6 score section predicts trade outcomes (BTC, ETH, alts)
-# and how candidate weight sets compare. Changes nothing in the project.
+# One-off analysis: entry, stop and target rules for L6 setups (incl. strong-level diagnosis).
+# Changes nothing in the project.
 on:
   workflow_dispatch:
   push:
     branches: [claude/score-weight-analysis]
     paths:
+      - "scripts/entry_stop_analysis.py"
       - "scripts/weight_analysis.py"
-      - ".github/workflows/weight-analysis.yml"
+      - ".github/workflows/entry-stop-analysis.yml"
 
 permissions:
   actions: read
   contents: read
 
 concurrency:
-  group: weight-analysis-${{ github.ref }}
+  group: entry-stop-analysis-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -52,10 +53,10 @@ jobs:
           fi
           ls -la data
       - name: Analyse
-        run: python scripts/weight_analysis.py -v --db data/backtest.db --out-dir weight_analysis
+        run: python scripts/entry_stop_analysis.py -v --db data/backtest.db --out-dir entry_stop
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: weight-analysis
-          path: weight_analysis/
+          name: entry-stop-analysis
+          path: entry_stop/
           retention-days: 30
