@@ -1,0 +1,63 @@
+name: entry-timing-analysis
+
+# One-off analysis: limit at the level vs entering earlier, under the live rules.
+# Changes nothing in the project.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/entry-timing-analysis]
+    paths:
+      - "scripts/entry_timing_analysis.py"
+      - "scripts/entry_stop_analysis.py"
+      - "scripts/weight_analysis.py"
+      - ".github/workflows/entry-timing-analysis.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: entry-timing-analysis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e . scipy
+      - name: Reuse the backtest history DB from run 36762973452
+        id: reuse
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          path: data
+          run-id: 36762973452
+          repository: Ali-M1X/trade
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Unpack or fetch history
+        run: |
+          if [ -f data/backtest.db.gz ]; then
+            echo "reusing backtest-db artifact"
+            gunzip -f data/backtest.db.gz
+          else
+            echo "artifact not available: fetching history"
+            trade-agent -v backtest --fetch-only 2>&1 | tail -20
+          fi
+          ls -la data
+      - name: Analyse
+        run: python scripts/entry_timing_analysis.py -v --db data/backtest.db --out-dir entry_timing
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: entry-timing-analysis
+          path: entry_timing/
+          retention-days: 30
