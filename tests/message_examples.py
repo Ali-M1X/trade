@@ -45,8 +45,16 @@ def short_eval() -> Evaluation:
                       notes=["pattern:double_top"])
 
 
+NEUTRAL = {"name": "neutral", "bias": "both", "risk": 0.5, "usdt_d": -1, "btc_d": 0, "total2": 1,
+           "other_alts_risk": None, "min_grade": "A"}
+ALT_SEASON = {"name": "alt_season", "bias": "long", "risk": 1.0, "usdt_d": -1, "btc_d": -1,
+              "total2": 1, "other_alts_risk": None, "min_grade": None}
+RISK_OFF = {"name": "risk_off", "bias": "short", "risk": 1.0, "usdt_d": 1, "btc_d": 1,
+            "total2": -1, "other_alts_risk": None, "min_grade": None}
+
+
 def funnel():
-    return {"regime": {"name": "neutral", "usdt_d": -1, "btc_d": 0, "total2": 1},
+    return {"regime": NEUTRAL,
             "majors": {"btc": 3, "eth": 2, "ethbtc": 1, "ethbtc_d": 1},
             "shortlist": [{"base": b, "side": 1, "score": s, "labels": ["EARLY_TREND"]}
                           for b, s in (("SOON", 96), ("GRASS", 91), ("ARB", 80), ("SOL", 78),

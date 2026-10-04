@@ -1,12 +1,20 @@
 """Persian Telegram messages.
 
-Every coin is shown as ONE line with the same fields in the same order, and the only score
-ever shown is the final L6 technical score:
+Every coin is shown as a CARD: one field per line, the same fields in the same order in every
+message (new signal, Watch, daily report). The only score ever shown is the final L6
+technical score:
 
-    <icon> <COIN>USDT | <LONG|SHORT> | امتیاز <score> | ورود <entry> | SL <sl> | TP1 <tp1> | TP2 <tp2> | <reason>
+    <icon> <COIN>USDT | <LONG|SHORT> | امتیاز <score> (رده A|رده B|Watch)
+    ورود: <entry>
+    حد ضرر (SL): <sl>
+    هدف ۱ (TP1): <tp1>
+    هدف ۲ (TP2): <tp2>
+    چرا: <reason>
 
-🟢 = signal (all gates passed, grade A/B), 🟡 = Watch (near setup). Messages that show a
-score end with SCORE_EXPLANATION. All text comes from templates and check results.
+A new signal adds the risk line and the regime line (which sides the regime allows), a Watch
+adds the regime line. Every message with a card ends with LEGEND (only the icons it shows) and
+the ℹ️ score explanation. Signal updates, pause, HOLD and performance messages are one line
+per item. All text comes from templates and check results.
 """
 from __future__ import annotations
 
@@ -20,59 +28,68 @@ REGIME_FA = {
     "capitulation": "ریزش همه‌جانبه",
     "neutral": "خنثی/رنج",
 }
+BIAS_FA = {"long": "فقط لانگ", "short": "فقط شورت", "both": "هر دو سمت", "none": "بدون معامله"}
 
 SIGNAL_ICON, WATCH_ICON = "🟢", "🟡"
-REASON_MAX = 60                      # characters; parts that don't fit are dropped, never wrapped
+# The colour legend: one line under every message with a card, listing only the icons shown.
+LEGEND = {
+    SIGNAL_ICON: "سیگنال: همه شرط‌ها برقرار است و می‌توانی طبق پلن وارد شوی",
+    WATCH_ICON: "Watch: نزدیک ستاپ است، هنوز وارد نشو",
+}
+REASON_MAX = 100                     # characters; parts that don't fit are dropped, never cut
+REASON_PARTS = 4                     # at most this many phrases
+DAILY_SPLIT = 3800                   # characters; longer daily reports are split between cards
 TF_FA = {"4h": "4H", "1d": "D", "1w": "W", "1h": "1H", "round": ""}
 
-# The one dictionary of reason phrases. Keys are the evaluation's flags, labels, 1H
-# confirmations, notes and the kind of level the entry leans on.
+# The one dictionary of reason phrases: plain Persian that says WHY. Keys are the
+# evaluation's flags, labels, 1H confirmations, notes and the kind of level the entry leans on.
 REASON_FA = {
     # level the entry leans on ({lvl} = حمایت / مقاومت, {tf} = its timeframe)
-    "level:cluster": "پولبک به {lvl} {tf}",
-    "level:flip": "ریتست سطح شکسته {tf}",
+    "level:cluster": "برگشت قیمت به {lvl} {tf}",
+    "level:flip": "برگشت به سطح شکسته‌شده {tf}",
     "level:prev_high": "برگشت به سقف قبلی {tf}",
     "level:prev_low": "برگشت به کف قبلی {tf}",
     "level:round": "واکنش به عدد رند",
     # 1H confirmations
-    "trigger:engulfing": "انگالف 1H",
+    "trigger:engulfing": "کندل برگشتی قوی 1H",
     "trigger:pin_bar": "پین‌بار 1H",
-    "trigger:strong_close": "کندل قوی 1H",
-    "choch": "تغییر ساختار 1H",
+    "trigger:strong_close": "کلوز قوی 1H",
+    "choch": "تغییر جهت ساختار 1H",
     "rsi:1": "RSI بالای 50",
     "rsi:-1": "RSI زیر 50",
-    "macd": "چرخش MACD",
-    "rvol": "حجم بالا 1H",
+    "macd": "چرخش مومنتوم MACD",
+    "rvol": "حجم بالا در 1H",
     # volume on 4H
-    "pullback_volume": "حجم کاهشی",
-    "breakout_volume": "شکست با حجم",
+    "pullback_volume": "اصلاح با حجم کم",
+    "breakout_volume": "شکست با حجم بالا",
     # scanner labels
-    "EARLY_TREND": "شکست رنج",
+    "EARLY_TREND": "شکست رنج و شروع روند",
     "RS_LEADER": "قوی‌تر از BTC",
-    "PULLBACK": "اصلاح سالم",
-    "SQUEEZE": "فشردگی قبل از حرکت",
-    "EXHAUSTION": "خستگی حرکت",
-    "OI_BUILDUP": "رشد اوپن‌اینترست",
-    "FUNDING_EXTREME": "فاندینگ افراطی",
+    "PULLBACK": "اصلاح سالم در روند",
+    "SQUEEZE": "نوسان فشرده قبل از حرکت",
+    "EXHAUSTION": "حرکت قبلی خسته شده",
+    "OI_BUILDUP": "رشد قراردادهای باز",
+    "FUNDING_EXTREME": "فاندینگ افراطی (بازار یک‌طرفه)",
     "VOLUME_ANOMALY": "حجم غیرعادی",
-    "HOT_SECTOR": "بخش داغ",
-    "BREAKOUT_WATCH": "شکست اخیر",
+    "HOT_SECTOR": "بخش داغ بازار",
+    "BREAKOUT_WATCH": "شکست تازه، منتظر برگشت",
     # chart patterns (notes "pattern:<name>")
-    "pattern:double_bottom": "کف دوقلو", "pattern:double_top": "سقف دوقلو",
-    "pattern:inverse_head_shoulders": "سر و شانه معکوس", "pattern:head_shoulders": "سر و شانه",
-    "pattern:triangle": "مثلث", "pattern:rising_wedge": "وج صعودی",
-    "pattern:falling_wedge": "وج نزولی", "pattern:bull_flag": "فلگ صعودی",
-    "pattern:bear_flag": "فلگ نزولی",
+    "pattern:double_bottom": "الگوی کف دوقلو", "pattern:double_top": "الگوی سقف دوقلو",
+    "pattern:inverse_head_shoulders": "الگوی سر و شانه معکوس",
+    "pattern:head_shoulders": "الگوی سر و شانه",
+    "pattern:triangle": "الگوی مثلث", "pattern:rising_wedge": "الگوی کنج صعودی",
+    "pattern:falling_wedge": "الگوی کنج نزولی", "pattern:bull_flag": "الگوی پرچم صعودی",
+    "pattern:bear_flag": "الگوی پرچم نزولی",
     # why a setup is only Watch / special cases
-    "not_confirmed": "منتظر تأیید 1H",
-    "lower_cycle_correcting": "اصلاح 4H ادامه دارد",
-    "chase": "منتظر پولبک",
-    "btc_weak": "BTC ضعیف",
-    "neutral_regime_needs_A": "رژیم خنثی فقط A",
-    "grade_b_off": "فعلاً فقط رده A",
-    "funding_crowded": "فاندینگ شلوغ",
-    "out_of_cap": "خارج از سقف",
-    "not_issued": "صادر نشد",          # A/B setup the signal book held back (cap, correlation, ...)
+    "not_confirmed": "هنوز تأیید 1H نیامده",
+    "lower_cycle_correcting": "اصلاح 4H هنوز ادامه دارد",
+    "chase": "قیمت دور شده، منتظر پولبک",
+    "btc_weak": "BTC ضعیف است",
+    "neutral_regime_needs_A": "در رژیم خنثی فقط رده A",
+    "grade_b_off": "فعلاً فقط رده A سیگنال می‌شود",
+    "funding_crowded": "فاندینگ شلوغ در همین سمت",
+    "out_of_cap": "خارج از سقف سیگنال‌های باز",
+    "not_issued": "سیگنال صادر نشد",   # A/B setup the signal book held back (cap, correlation, ...)
 }
 
 FA_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
@@ -162,79 +179,132 @@ def score_explanation(cfg: dict) -> str:
     )
 
 
-# ------------------------------------------------------------------ coin line
-def reason(ev: dict, out_of_cap: bool = False) -> str:
-    """Short reason (<= REASON_MAX characters) from the evaluation's checks, most
-    important first. Parts that don't fit are left out."""
-    side, plan = ev["side"], ev["plan"]
-    lvl_word = "حمایت" if side == 1 else "مقاومت"
-    level = REASON_FA[f"level:{plan['support_kind']}"].format(
-        lvl=lvl_word, tf=TF_FA.get(plan["support_tf"], plan["support_tf"])).strip()
-    labels = [REASON_FA[l] for l in ev.get("labels", []) if l in REASON_FA]
+# ------------------------------------------------------------------ coin card
+def reason_keys(ev: dict, out_of_cap: bool = False) -> list[str]:
+    """The REASON_FA keys for an evaluation, in display order and at most REASON_PARTS of
+    them: the level the entry leans on, the 1H trigger/confirmation, the scanner label, then
+    4H volume or a pattern (for Watch: what is still missing instead of the 1H part). Further
+    1H confirmations only fill free places."""
+    side = ev["side"]
+    labels = [l for l in ev.get("labels", []) if l in REASON_FA][:1]
     notes = ev.get("notes", [])
+    extra = [n for n in notes if n in ("pullback_volume", "breakout_volume")] + \
+        [n for n in notes if n.startswith("pattern:")]
+    level = f"level:{ev['plan']['support_kind']}"
     if ev["grade"] in ("A", "B"):
         conf = set(ev.get("confirmations", []))
-        parts = (["out_of_cap"] if out_of_cap else []) + [level]
-        if ev.get("trigger_1h"):
-            parts.append(f"trigger:{ev['trigger_1h']}")
-        if "choch" in conf:
-            parts.append("choch")
-        if "rsi" in conf:
-            parts.append(f"rsi:{side}")
-        if "macd" in conf:
-            parts.append("macd")
-        parts += labels[:1]
-        parts += [n for n in notes if n in ("pullback_volume", "breakout_volume")]
-        parts += [n for n in notes if n.startswith("pattern:")]
+        h1 = ([f"trigger:{ev['trigger_1h']}"] if ev.get("trigger_1h") else []) + \
+            [k for k in ("choch", "rsi", "macd") if k in conf]
+        h1 = [f"rsi:{side}" if k == "rsi" else k for k in h1]
+        lead = ["out_of_cap"] if out_of_cap else []
+        groups = [lead, [level], h1[:1], labels, extra[:1], h1[1:], extra[1:]]
+        order = [lead, [level], h1, labels, extra]           # display order
     else:
         flags = [f for f in ev.get("flags", []) if f in REASON_FA]
         lead = [f for f in flags if f == "not_issued"]
-        parts = lead + [level] + [f for f in flags if f not in lead] + labels[:1]
+        rest = [f for f in flags if f not in lead]
+        groups = [lead, [level], rest[:1], labels, rest[1:]]
+        order = [lead, [level], rest, labels]
+    picked: list[str] = []
+    for k in (k for g in groups for k in g):
+        if k in picked or len(picked) >= REASON_PARTS:
+            continue
+        if picked and len(_join(picked + [k], side, ev["plan"])) > REASON_MAX:
+            continue
+        picked.append(k)
+    return [k for g in order for k in g if k in picked]
+
+
+def _phrase(key: str, side: int, plan: dict) -> str:
+    return REASON_FA[key].format(lvl="حمایت" if side == 1 else "مقاومت",
+                                 tf=TF_FA.get(plan["support_tf"], plan["support_tf"])).strip()
+
+
+def _join(keys: list[str], side: int, plan: dict) -> str:
     out: list[str] = []
-    for key in parts:
-        phrase = REASON_FA.get(key, key)
-        if phrase in out:
-            continue
-        if out and len(" + ".join(out + [phrase])) > REASON_MAX:
-            continue
-        out.append(phrase)
-    return " + ".join(out)[:REASON_MAX]
+    for k in keys:
+        p = _phrase(k, side, plan)
+        if p not in out:
+            out.append(p)
+    return " + ".join(out)
 
 
-def coin_line(ev: dict, out_of_cap: bool = False) -> str:
+def reason(ev: dict, out_of_cap: bool = False) -> str:
+    """WHY in a few words (<= REASON_MAX characters, whole phrases only)."""
+    return _join(reason_keys(ev, out_of_cap), ev["side"], ev["plan"])
+
+
+def grade_word(grade: str) -> str:
+    return f"رده {grade}" if grade in ("A", "B") else "Watch"
+
+
+def coin_card(ev: dict, out_of_cap: bool = False) -> str:
     """ev: an Evaluation as a dict (Evaluation.to_dict()), with a trade plan."""
     p = ev["plan"]
     icon = SIGNAL_ICON if ev["grade"] in ("A", "B") else WATCH_ICON
     if p["order"] == "confirm_4h":
         # entry after a 4H confirmation: SL/TP shown are from the level price, final at fill
-        entry, tp2 = (f"ورود پس از تأیید 4H حوالی {fmt_price(p['entry'])}",
-                      f"TP2 {fmt_price(p['tp2'])} (نهایی پس از فعال شدن)")
+        entry = f"ورود پس از تأیید 4H حوالی {fmt_price(p['entry'])}"
+        tp2 = f"{fmt_price(p['tp2'])} (نهایی پس از فعال شدن)"
     else:
-        entry, tp2 = f"ورود {fmt_price(p['entry'])}", f"TP2 {fmt_price(p['tp2'])}"
-    return " | ".join([
-        f"{icon} {pair(ev['base'])}", side_word(ev["side"]), f"امتیاز {shown_score(ev['score'])}",
-        entry, f"SL {fmt_price(p['sl'])}", f"TP1 {fmt_price(p['tp1'])}", tp2, reason(ev, out_of_cap),
+        entry, tp2 = f"ورود: {fmt_price(p['entry'])}", fmt_price(p["tp2"])
+    return "\n".join([
+        f"{icon} {pair(ev['base'])} | {side_word(ev['side'])} | "
+        f"امتیاز {shown_score(ev['score'])} ({grade_word(ev['grade'])})",
+        entry,
+        f"حد ضرر (SL): {fmt_price(p['sl'])}",
+        f"هدف ۱ (TP1): {fmt_price(p['tp1'])}",
+        f"هدف ۲ (TP2): {tp2}",
+        f"چرا: {reason(ev, out_of_cap)}",
     ])
 
 
-def with_explanation(text: str, cfg: dict) -> str:
-    return f"{text}\n\n{score_explanation(cfg)}"
+def regime_line(regime: dict) -> str:
+    """Which sides the regime that produced the setup allows (its own bias, risk and
+    min_grade; nothing is recomputed)."""
+    name, bias = regime["name"], regime.get("bias", "both")
+    words = BIAS_FA.get(bias, bias)
+    extra = []
+    if regime.get("min_grade"):
+        extra.append(f"فقط رده {regime['min_grade']}")
+    if regime.get("risk") is not None and regime["risk"] < 1:
+        extra.append(_risk_words(regime["risk"]))
+    if extra:
+        words += "، " + " و ".join(extra)
+    return f"رژیم بازار: {REGIME_FA.get(name, name)} ({words})"
+
+
+def legend(icons) -> str:
+    """One line explaining the card icons, only those in `icons`, in LEGEND order."""
+    return " | ".join(f"{i} {t}" for i, t in LEGEND.items() if i in set(icons))
+
+
+def with_explanation(text: str, cfg: dict, icons=()) -> str:
+    head = f"{legend(icons)}\n" if legend(icons) else ""
+    return f"{text}\n\n{head}{score_explanation(cfg)}"
+
+
+def _icon(ev: dict) -> str:
+    return SIGNAL_ICON if ev["grade"] in ("A", "B") else WATCH_ICON
 
 
 # ------------------------------------------------------------------- messages
-def signal_message(ev, cfg: dict, out_of_cap: bool = False) -> str:
-    """New signal: the coin line, one risk line, then the score explanation."""
-    p = ev.plan
+def signal_message(ev, regime: dict, cfg: dict, out_of_cap: bool = False) -> str:
+    """New signal: the card, the risk line, the regime line, the legend and the score
+    explanation. `regime` is the funnel regime the signal came from (Regime.to_dict())."""
+    p, d = ev.plan, ev.to_dict()
     risk = (f"ریسک {fmt_num(p.risk_pct, 2)}٪ | حجم {round(p.size_pct)}٪ موجودی | "
             f"لوریج {p.leverage}x")
-    return with_explanation(f"{coin_line(ev.to_dict(), out_of_cap)}\n{risk}", cfg)
+    return with_explanation(f"{coin_card(d, out_of_cap)}\n{risk}\n{regime_line(regime)}", cfg,
+                            [_icon(d)])
 
 
-def watch_message(ev, cfg: dict) -> str | None:
-    """Near-setup alert. None when there is no trade plan to show."""
+def watch_message(ev, regime: dict, cfg: dict) -> str | None:
+    """Near-setup alert: the card and the regime line. None when there is no trade plan."""
     if ev.plan is None:
         return None
-    return with_explanation(coin_line(ev.to_dict()), cfg)
+    d = ev.to_dict()
+    return with_explanation(f"{coin_card(d)}\n{regime_line(regime)}", cfg, [_icon(d)])
 
 
 def event_message(sig: dict, e, cfg: dict) -> str:
@@ -279,15 +349,18 @@ def pause_message(until_ms: int) -> str:
 
 
 def daily_message(funnel: dict, open_signals: list[dict], evaluations: list[dict], now_ms: int,
-                  cfg: dict) -> str:
-    """Two header lines, then one line per coin with a signal or Watch plan (L6 score,
-    highest first), then the shortlisted coins without a setup (names only). 🟢 is kept for
-    signals that were actually sent and are open; an A/B setup the signal book held back
-    (cap, correlation, cooldown, loss brake) is shown 🟡 with "صادر نشد"."""
+                  cfg: dict) -> list[str]:
+    """The daily report as one or more Telegram messages. Two header lines, then one card per
+    coin with a signal or Watch plan (L6 score, highest first) separated by a blank line, then
+    the shortlisted coins without a setup (names only). 🟢 is kept for signals that were
+    actually sent and are open; an A/B setup the signal book held back (cap, correlation,
+    cooldown, loss brake) is shown 🟡 with "سیگنال صادر نشد". A report longer than
+    DAILY_SPLIT characters is split between cards (never inside one); the legend and the
+    score explanation are only in the last message."""
     date = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
     regime = funnel["regime"]["name"]
-    lines = [f"📊 گزارش روزانه {date} | رژیم: {REGIME_FA.get(regime, regime)}",
-             f"سیگنال باز: {len(open_signals)} از {cfg['lifecycle']['max_active']}"]
+    header = (f"📊 گزارش روزانه {date} | رژیم: {REGIME_FA.get(regime, regime)}\n"
+              f"سیگنال باز: {len(open_signals)} از {cfg['lifecycle']['max_active']}")
     rows: dict[str, dict] = {}
     for s in open_signals:                       # issued signals: the evaluation they came from
         ev = s["payload"].get("evaluation") or {}
@@ -301,14 +374,20 @@ def daily_message(funnel: dict, open_signals: list[dict], evaluations: list[dict
                 ev = {**ev, "grade": "Watch", "flags": ["not_issued", *ev.get("flags", [])]}
             rows[ev["base"]] = ev
     ordered = sorted(rows.values(), key=lambda e: (-e["score"], e["base"]))
-    lines += [coin_line(ev) for ev in ordered]
+    blocks = [header] + [coin_card(ev) for ev in ordered]
     if not ordered:
-        lines.append("ستاپ فعالی نیست.")
+        blocks[0] += "\nستاپ فعالی نیست."
     rest = [c["base"] for c in funnel.get("shortlist", []) if c["base"] not in rows]
     if rest:
-        lines.append("در گلچین بدون ستاپ: " + ", ".join(rest))
-    text = "\n".join(lines)
-    return with_explanation(text, cfg) if ordered else text
+        blocks.append("در گلچین بدون ستاپ: " + ", ".join(rest))
+    if ordered:
+        blocks.append(with_explanation("", cfg, [_icon(ev) for ev in ordered]).lstrip("\n"))
+    parts: list[list[str]] = [[]]
+    for b in blocks:
+        if parts[-1] and len("\n\n".join(parts[-1] + [b])) > DAILY_SPLIT:
+            parts.append([])
+        parts[-1].append(b)
+    return ["\n\n".join(p) for p in parts]
 
 
 def check(ok: bool) -> str:

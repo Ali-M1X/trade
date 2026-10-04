@@ -215,7 +215,8 @@ def test_run_1h_publishes_signals_and_respects_correlation(cfg):
     opened = SignalBook(repo, cfg).open_signals()
     # BTC, ETH and DOGE move identically in the fake data (correlation 1): only 2 per side
     assert len(signals) == 3 and len(opened) == cfg["lifecycle"]["max_correlated_same_side"]
-    assert all(m.startswith("🟢 ") and "USDT | LONG | امتیاز " in m for m in notifier.sent)
+    assert all(m.startswith("🟢 ") and "USDT | LONG | امتیاز " in m and "\nچرا: " in m and
+               "\nرژیم بازار: " in m for m in notifier.sent)
     assert "dry-run" in out.getvalue()
     # the same setups an hour later are duplicates, nothing new is sent
     notifier.sent.clear()
@@ -264,6 +265,7 @@ def test_manage_fills_hits_targets_and_reports(cfg):
     # expiry does not apply once filled; the daily report lists the open signal
     repo.set_state("funnel", {"regime": {"name": "neutral", "usdt_d": 0, "btc_d": 0, "total2": 0},
                               "majors": {"btc": 0, "eth": 0, "ethbtc": 0}, "shortlist": []})
-    text = daily(cfg, repo, notifier, NOW + 4 * q)
-    assert "سیگنال باز: 1 از 5" in text
-    assert "🟢 SOLUSDT | LONG | امتیاز 80 | ورود 100.00 | SL 95.00 | TP1 110.00 | TP2 115.00 |" in text
+    [text] = daily(cfg, repo, notifier, NOW + 4 * q)
+    assert notifier.sent[-1] == text and "سیگنال باز: 1 از 5" in text
+    assert ("🟢 SOLUSDT | LONG | امتیاز 80 (رده A)\nورود: 100.00\nحد ضرر (SL): 95.00\n"
+            "هدف ۱ (TP1): 110.00\nهدف ۲ (TP2): 115.00\nچرا: ") in text
