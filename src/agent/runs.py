@@ -212,12 +212,12 @@ def publish(cfg: dict, repo, market, notifier, evs: list[Evaluation], now_ms: in
                     "evaluation": ev.to_dict(), "out_of_cap": adm.out_of_cap}
             sid, _ = book.create(ev, now_ms, meta)
             created.append(sid)
-            notifier.send(fmt.signal_message(ev, cfg, adm.out_of_cap))
+            notifier.send(fmt.signal_message(ev, state["regime"], cfg, adm.out_of_cap))
         elif ev.grade == "Watch" and ev.plan is not None and cfg["watch_alerts"]["enabled"]:
             key = f"{ev.base}:{ev.side}"
             if now_ms - watch_sent.get(key, 0) >= cfg["watch_alerts"]["repeat_hours"] * 3_600_000:
                 watch_sent[key] = now_ms
-                notifier.send(fmt.watch_message(ev, cfg))
+                notifier.send(fmt.watch_message(ev, state["regime"], cfg))
     repo.set_state("watch_sent", watch_sent)
     return created
 
@@ -268,14 +268,17 @@ def manage(cfg: dict, repo, market, notifier, now_ms: int) -> list:
     return all_events
 
 
-def daily(cfg: dict, repo, notifier, now_ms: int) -> str | None:
+def daily(cfg: dict, repo, notifier, now_ms: int) -> list[str] | None:
+    """Sends the daily report (one or more messages, split between cards) and returns them."""
     state = repo.get_state("funnel")
     if not state:
         return None
     evaluations = repo.get_state("evaluations", {}).get("items", [])
-    text = fmt.daily_message(state, SignalBook(repo, cfg).open_signals(), evaluations, now_ms, cfg)
-    notifier.send(text)
-    return text
+    parts = fmt.daily_message(state, SignalBook(repo, cfg).open_signals(), evaluations, now_ms,
+                              cfg)
+    for text in parts:
+        notifier.send(text)
+    return parts
 
 
 # --------------------------------------------------------------------- HOLD
