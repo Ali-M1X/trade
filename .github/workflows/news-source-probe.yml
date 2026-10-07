@@ -1,9 +1,8 @@
 name: news-source-probe
-# One-off: which free crypto news / announcement sources answer from GitHub Actions. Changes nothing.
+# One-off: dump sample payloads of the news sources. Changes nothing.
 on:
   push:
     branches: [claude/news-source-probe]
-  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -11,28 +10,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Probe
+      - name: Dump
         run: |
-          probe() {
-            body=$(mktemp)
-            code=$(curl -s -L -o "$body" -m 20 -w "%{http_code}" -A "Mozilla/5.0 (X11; Linux x86_64)" "$1" || true)
-            size=$(wc -c < "$body")
-            items=$(grep -o -i -E "<item>|<entry>|\"title\"" "$body" | wc -l)
-            first=$(grep -o -i -E "<title>[^<]{5,120}</title>|\"title\": ?\"[^\"]{5,120}\"" "$body" | sed -n 2p)
-            echo "| $1 | $code | $size | $items | ${first//|/ } |" | tee -a "$GITHUB_STEP_SUMMARY"
-          }
-          echo "| url | http | bytes | items | sample title |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          for u in \
-            "https://nitter.net/binance/rss" \
-            "https://rsshub.app/telegram/channel/binance_announcements" \
-            "https://t.me/s/binance_announcements" \
-            "https://t.me/s/WuBlockchain" \
-            "https://t.me/s/tree_news_feed" \
-            "https://t.me/s/whale_alert_io" \
-            "https://www.kucoin.com/_api/cms/articles?page=1&pageSize=5&category=listing&lang=en_US" \
-            "https://www.bitget.com/v1/cms/helpCenter/content/section/helpScreen?sectionId=5955813039257&languageId=0&page=1&pageSize=5" \
-            "https://api.coinmarketcal.com/v1/events" \
-            "https://news.google.com/rss/search?q=crypto+listing&hl=en-US" \
-            "https://www.mexc.com/api/operation/new_coin_calendar?timestamp=0" \
-            ; do probe "$u"; done
+          d() { echo "=== $1"; curl -s -m 20 -A "Mozilla/5.0 (X11; Linux x86_64)" "$1" | head -c ${2:-2500}; echo; }
+          d "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageNo=1&pageSize=3" 4000
+          d "https://www.binance.com/bapi/composite/v1/public/cms/article/catalog/list/query?catalogId=48&pageNo=1&pageSize=3" 2500
+          d "https://www.okx.com/api/v5/support/announcements?annType=announcements-new-listings" 1500
+          d "https://www.okx.com/api/v5/support/announcement-types" 1500
+          d "https://www.kucoin.com/_api/cms/articles?page=1&pageSize=3&category=listing&lang=en_US" 2500
+          d "https://cointelegraph.com/rss" 2500
+          d "https://www.theblock.co/rss.xml" 1800
+          curl -s -m 20 -A "Mozilla/5.0" "https://t.me/s/binance_announcements" | grep -o 'tgme_widget_message_text[^>]*>[^<]\{0,200\}' | tail -3 || true
+          curl -s -m 20 -A "Mozilla/5.0" "https://t.me/s/binance_announcements" | grep -o 'data-post="[^"]*"' | tail -3 || true
