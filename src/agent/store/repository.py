@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS coin_history (
     id TEXT NOT NULL, ts INTEGER NOT NULL, mcap REAL, volume REAL,
     PRIMARY KEY (id, ts)
 );
+CREATE TABLE IF NOT EXISTS news (
+    id TEXT PRIMARY KEY, source TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+    url TEXT, published_at INTEGER, seen_at INTEGER NOT NULL, level INTEGER NOT NULL,
+    rule TEXT, coins TEXT NOT NULL, alerted INTEGER NOT NULL, prices TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_news_seen ON news(seen_at);
 """
 
 CANDLE_COLUMNS = ["ts", "open", "high", "low", "close", "volume"]
@@ -208,3 +214,34 @@ class Repository:
             args = (signal_id,)
         return [{"ts": r[0], "signal_id": r[1], "kind": r[2], "payload": json.loads(r[3])}
                 for r in self.conn.execute(q + " ORDER BY id", args).fetchall()]
+
+    # ---- news (news/run.py): one row per headline, prices filled in over the next 24h
+    def news_known(self, ids: list[str]) -> set[str]:
+        out: set[str] = set()
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            q = f"SELECT id FROM news WHERE id IN ({','.join('?' * len(chunk))})"
+            out |= {r[0] for r in self.conn.execute(q, chunk).fetchall()}
+        return out
+
+    def add_news(self, item: dict) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO news VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (item["id"], item["source"], item["kind"], item["title"], item.get("url"),
+                 item.get("ts"), item["seen_at"], item["level"], item.get("rule"),
+                 json.dumps(item.get("coins", [])), int(item.get("alerted", 0)),
+                 json.dumps(item.get("prices", {}))))
+
+    def get_news(self, since: int = 0, with_coins: bool = False) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, source, kind, title, url, published_at, seen_at, level, rule, coins,"
+            " alerted, prices FROM news WHERE seen_at>=? ORDER BY seen_at", (since,)).fetchall()
+        out = [{"id": r[0], "source": r[1], "kind": r[2], "title": r[3], "url": r[4], "ts": r[5],
+                "seen_at": r[6], "level": r[7], "rule": r[8], "coins": json.loads(r[9]),
+                "alerted": bool(r[10]), "prices": json.loads(r[11])} for r in rows]
+        return [n for n in out if n["coins"]] if with_coins else out
+
+    def set_news_prices(self, news_id: str, prices: dict) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE news SET prices=? WHERE id=?", (json.dumps(prices), news_id))

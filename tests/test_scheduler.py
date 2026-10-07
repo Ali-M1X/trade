@@ -54,11 +54,12 @@ def test_run_scheduled_runs_due_tasks_and_records_them(cfg, monkeypatch):
     monkeypatch.setattr(runs, "daily", lambda *a: calls.append("daily"))
     monkeypatch.setattr(runs, "hold_new_entrants", lambda *a: [])
     monkeypatch.setattr(runs, "weekly", lambda *a: calls.append("weekly") or [])
+    monkeypatch.setattr(cli, "news_pass", lambda *a: calls.append("news") or {})
     repo.set_state("last_runs", {"run-daily": MON, "run-weekly": MON, "run-1h": MON + 3 * HOUR,
                                  "run-4h": MON})
     code = cli.main(["run-scheduled"])
     assert code == 1                                   # run-4h failed ...
-    assert calls == ["15m", "1h"]                      # ... but the others still ran
+    assert calls == ["15m", "1h", "news"]              # ... but the others still ran
     last = repo.get_state("last_runs")
     assert last["run-1h"] == now and last["run-4h"] == MON   # a failed task stays due
     assert storage.pushed == ["run-scheduled run-15m,run-4h,run-1h"]
