@@ -15,7 +15,7 @@ jobs:
         run: |
           probe() {
             body=$(mktemp)
-            code=$(curl -s -L -o "$body" -m 20 -w "%{http_code}" -A "Mozilla/5.0 (X11; Linux x86_64)" "$1")
+            code=$(curl -s -L -o "$body" -m 20 -w "%{http_code}" -A "Mozilla/5.0 (X11; Linux x86_64)" "$1" || true)
             size=$(wc -c < "$body")
             items=$(grep -o -i -E "<item>|<entry>|\"title\"" "$body" | wc -l)
             first=$(grep -o -i -E "<title>[^<]{5,120}</title>|\"title\": ?\"[^\"]{5,120}\"" "$body" | sed -n 2p)
@@ -24,29 +24,15 @@ jobs:
           echo "| url | http | bytes | items | sample title |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
           for u in \
-            https://www.coindesk.com/arc/outboundfeeds/rss/ \
-            https://cointelegraph.com/rss \
-            https://www.theblock.co/rss.xml \
-            https://decrypt.co/feed \
-            https://blockworks.co/feed \
-            https://bitcoinmagazine.com/.rss/full/ \
-            https://thedefiant.io/api/feed \
-            https://www.coinbase.com/blog/rss.xml \
-            "https://cryptopanic.com/news/rss/" \
-            "https://cryptopanic.com/api/developer/v2/posts/?public=true" \
-            "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageNo=1&pageSize=5" \
-            "https://www.okx.com/api/v5/support/announcements?annType=announcements-new-listings" \
-            "https://www.okx.com/api/v5/support/announcements?annType=announcements-latest-announcements" \
-            "https://api.bybit.com/v5/announcements/index?locale=en-US&limit=5" \
-            "https://api.gateio.ws/api/v4/announcements" \
-            "https://api-manager.upbit.com/api/v1/announcements?os=web&page=1&per_page=5&category=trade" \
-            "https://api.coingecko.com/api/v3/search/trending" \
-            "https://min-api.cryptocompare.com/data/v2/news/?lang=EN" \
-            "https://www.reddit.com/r/CryptoCurrency/new.json?limit=5" \
             "https://nitter.net/binance/rss" \
             "https://rsshub.app/telegram/channel/binance_announcements" \
             "https://t.me/s/binance_announcements" \
             "https://t.me/s/WuBlockchain" \
             "https://t.me/s/tree_news_feed" \
             "https://t.me/s/whale_alert_io" \
+            "https://www.kucoin.com/_api/cms/articles?page=1&pageSize=5&category=listing&lang=en_US" \
+            "https://www.bitget.com/v1/cms/helpCenter/content/section/helpScreen?sectionId=5955813039257&languageId=0&page=1&pageSize=5" \
+            "https://api.coinmarketcal.com/v1/events" \
+            "https://news.google.com/rss/search?q=crypto+listing&hl=en-US" \
+            "https://www.mexc.com/api/operation/new_coin_calendar?timestamp=0" \
             ; do probe "$u"; done
