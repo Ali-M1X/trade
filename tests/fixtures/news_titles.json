@@ -1,0 +1,156 @@
+[
+ {
+  "title": "Binance Will List Hyperliquid (HYPE) with Seed Tag Applied",
+  "source": "binance",
+  "level": 2,
+  "rule": "binance_spot_listing",
+  "coins": [
+   "HYPE"
+  ]
+ },
+ {
+  "title": "Binance Will Add Hyperliquid (HYPE) on Earn, Buy Crypto, Convert, VIP Loan & Margin",
+  "source": "binance",
+  "level": 0,
+  "rule": "ignored",
+  "coins": [
+   "HYPE"
+  ]
+ },
+ {
+  "title": "Binance Will Add Hyperliquid (HYPE) on Earn, Buy Crypto, Convert & Margin",
+  "source": "binance",
+  "level": 1,
+  "rule": "binance_products",
+  "coins": [
+   "HYPE"
+  ]
+ },
+ {
+  "title": "Binance Futures Will Launch USDⓈ-Margined CTUSDT Perpetual Contract (2026-10-01)",
+  "source": "binance",
+  "level": 1,
+  "rule": "binance_futures",
+  "coins": [
+   "CT"
+  ]
+ },
+ {
+  "title": "Binance Futures Will Launch Multiple TradFi USDⓈ-Margined Perpetual Contracts (2026-10-06)",
+  "source": "binance",
+  "level": 0,
+  "rule": "ignored",
+  "coins": []
+ },
+ {
+  "title": "Binance Will Add 4 bStocks Tokenized Securities as Collateral Asset - 2026-10-07",
+  "source": "binance",
+  "level": 0,
+  "rule": "ignored",
+  "coins": []
+ },
+ {
+  "title": "Binance Will Delist ABC, DEF on 2026-10-15",
+  "source": "binance",
+  "level": -2,
+  "rule": "binance_delist",
+  "coins": []
+ },
+ {
+  "title": "Introducing Plasma (XPL) on Binance HODLer Airdrops!",
+  "source": "binance",
+  "level": 2,
+  "rule": "binance_hodler",
+  "coins": [
+   "XPL"
+  ]
+ },
+ {
+  "title": "OKX will launch AEON/USD for spot trading",
+  "source": "okx",
+  "level": 1,
+  "rule": "okx_spot_listing",
+  "coins": [
+   "AEON"
+  ]
+ },
+ {
+  "title": "OKX to list perpetual futures for QNT crypto",
+  "source": "okx",
+  "level": 1,
+  "rule": "okx_perp_listing",
+  "coins": [
+   "QNT"
+  ]
+ },
+ {
+  "title": "OKX to list SANDUSD and PARTIUSD X-Perp",
+  "source": "okx",
+  "level": 0,
+  "rule": "ignored",
+  "coins": []
+ },
+ {
+  "title": "Coinbase to list Hyperliquid's HYPE token",
+  "source": "cointelegraph",
+  "level": 2,
+  "rule": "media_major_listing",
+  "coins": null
+ },
+ {
+  "title": "Upbit lists SUI in Korean won market",
+  "source": "coindesk",
+  "level": 2,
+  "rule": "media_major_listing",
+  "coins": null
+ },
+ {
+  "title": "Binance to delist three tokens",
+  "source": "coindesk",
+  "level": -2,
+  "rule": "media_delist",
+  "coins": null
+ },
+ {
+  "title": "SEC approves first spot Solana ETF",
+  "source": "theblock",
+  "level": 2,
+  "rule": "media_etf_approved",
+  "coins": null
+ },
+ {
+  "title": "Grayscale says crypto ETF market is entering new phase as Zcash ETF tops $1 billion",
+  "source": "theblock",
+  "level": 0,
+  "rule": null,
+  "coins": null
+ },
+ {
+  "title": "Visa partners with Solana for stablecoin settlement",
+  "source": "decrypt",
+  "level": 2,
+  "rule": "media_big_partner",
+  "coins": null
+ },
+ {
+  "title": "DeFi protocol drained of $40M in exploit",
+  "source": "theblock",
+  "level": -2,
+  "rule": "media_hack",
+  "coins": null
+ },
+ {
+  "title": "Aptos mainnet upgrade goes live",
+  "source": "decrypt",
+  "level": 1,
+  "rule": "media_mainnet",
+  "coins": null
+ },
+ {
+  "title": "Here’s what happened in crypto today",
+  "source": "cointelegraph",
+  "level": 0,
+  "rule": null,
+  "coins": null
+ }
+]

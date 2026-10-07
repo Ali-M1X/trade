@@ -1,0 +1,43 @@
+{
+  "_doc": "Shared by the Python news run (src/agent/news) and the Cloudflare worker (cloudflare/news-worker). Patterns are case-insensitive JavaScript/Python-compatible regexes matched against the title. 'ignore' is checked first; then the first matching rule wins. level: 2 very positive, 1 positive, 0 neutral, -1 negative, -2 very negative. source: exchange source names the rule applies to, or 'media' for news sites; omitted = all.",
+  "ignore": [
+    "bStocks?\\b",
+    "\\bstocks?\\b",
+    "tokenized securit",
+    "X-Perps?\\b",
+    "\\bEquity\\b",
+    "Pre-IPO",
+    "TradFi",
+    "\\bP2P\\b",
+    "\\bVIP\\b",
+    "maintenance",
+    "wallet maintenance",
+    "network upgrade.*deposits? and withdrawals?"
+  ],
+  "rules": [
+    {"id": "binance_delist", "source": ["binance", "okx"], "pattern": "\\bdelist", "level": -2, "fa": "دلیست از صرافی"},
+    {"id": "binance_monitoring", "source": ["binance"], "pattern": "monitoring tag", "level": -1, "fa": "برچسب هشدار بایننس"},
+    {"id": "binance_spot_listing", "source": ["binance"], "pattern": "^Binance Will List\\b", "level": 2, "fa": "لیستینگ اسپات بایننس"},
+    {"id": "binance_hodler", "source": ["binance"], "pattern": "HODLer Airdrops", "level": 2, "fa": "ایردراپ HODLer بایننس (معمولاً همراه لیستینگ)"},
+    {"id": "binance_launchpool", "source": ["binance"], "pattern": "Launchpool|Megadrop|Launchpad", "level": 2, "fa": "لانچ‌پول بایننس"},
+    {"id": "binance_alpha", "source": ["binance"], "pattern": "Binance Alpha", "level": 1, "fa": "اضافه شدن به Binance Alpha"},
+    {"id": "binance_futures", "source": ["binance"], "pattern": "Binance Futures Will Launch .*Perpetual", "level": 1, "fa": "فیوچرز جدید بایننس"},
+    {"id": "binance_products", "source": ["binance"], "pattern": "Will Add .*\\(.*\\).* on (Earn|Buy Crypto|Convert|Margin)", "level": 1, "fa": "پشتیبانی محصولات بایننس"},
+    {"id": "okx_spot_listing", "source": ["okx"], "pattern": "OKX (will|to) (launch|list) .*(spot trading|for spot)", "level": 1, "fa": "لیستینگ اسپات OKX"},
+    {"id": "okx_perp_listing", "source": ["okx"], "pattern": "OKX (will|to) (launch|list) .*perpetual", "level": 1, "fa": "فیوچرز جدید OKX"},
+
+    {"id": "media_delist", "source": ["media"], "pattern": "\\bdelist", "level": -2, "fa": "دلیست از صرافی"},
+    {"id": "media_major_listing", "source": ["media"], "pattern": "\\b(Coinbase|Upbit|Robinhood|Binance|Bithumb)\\b.{0,40}\\b(to list|lists|will list|listing|adds)\\b", "level": 2, "fa": "لیستینگ در صرافی بزرگ"},
+    {"id": "media_etf_approved", "source": ["media"], "pattern": "\\bETF\\b.{0,40}\\b(approv|greenlight|launch(es|ed)?|go(es)? live|debut)|\\b(SEC|regulators?) (approves?|greenlights?)\\b.{0,30}\\bETF", "level": 2, "fa": "تأیید یا راه‌اندازی ETF"},
+    {"id": "media_big_partner", "source": ["media"], "pattern": "\\b(BlackRock|Google|Microsoft|Visa|Mastercard|PayPal|JPMorgan|Nvidia|Amazon|Meta|Apple|Stripe|Fidelity|Goldman|Nasdaq|CME|Samsung|Tesla)\\b.{0,50}\\b(partner|integrat|adopt|choos|select|launch(es)? on|build(s|ing)? on)", "level": 2, "fa": "همکاری با شرکت بزرگ"},
+    {"id": "media_hack", "source": ["media"], "pattern": "\\b(hack(ed)?|exploit(ed)?|drain(ed)?|stolen|breach)\\b", "level": -2, "fa": "هک یا سرقت"},
+    {"id": "media_legal", "source": ["media"], "pattern": "\\b(sues|lawsuit|charged|indict|investigation|probe|ban(s|ned)?)\\b", "level": -1, "fa": "مشکل حقوقی"},
+    {"id": "media_unlock", "source": ["media"], "pattern": "\\btoken unlocks?\\b|\\bunlock(s|ing)? .{0,20}tokens?\\b", "level": -1, "fa": "آزادسازی توکن"},
+    {"id": "media_buyback", "source": ["media"], "pattern": "\\b(buyback|buy back|buys? back|burn(s|ed)? .{0,20}tokens?|token burn)\\b", "level": 1, "fa": "بای‌بک یا سوزاندن توکن"},
+    {"id": "media_mainnet", "source": ["media"], "pattern": "\\bmainnet\\b.{0,30}\\b(launch|live|debut)|\\b(upgrade|hard fork)\\b.{0,30}\\b(goes live|activat|launch|complet)", "level": 1, "fa": "مِین‌نت یا آپگرید"},
+    {"id": "media_partner", "source": ["media"], "pattern": "\\b(partners? with|partnership|integrat(es|ion) with|teams up)\\b", "level": 1, "fa": "همکاری جدید"},
+    {"id": "media_funding", "source": ["media"], "pattern": "\\b(raises?|raised) \\$[0-9]|\\bfunding round\\b|\\bSeries [A-D]\\b", "level": 1, "fa": "جذب سرمایه"},
+    {"id": "media_treasury", "source": ["media"], "pattern": "\\b(treasury|reserve)\\b.{0,40}\\b(buy|buys|bought|adds|acquir)", "level": 1, "fa": "خرید برای خزانه‌ی شرکت"}
+  ],
+  "coin_stopwords": ["THE", "FOR", "AND", "NEW", "ETF", "SEC", "USD", "USDT", "USDC", "CEO", "CTO", "API", "NFT", "DAO", "DEX", "CEX", "TVL", "ATH", "ALL", "ONE", "TOP", "WILL", "WITH", "LIST", "SPOT", "OKX", "BNB CHAIN", "AI", "UK", "US", "EU", "IPO", "GDP", "CPI", "FED", "FOMC", "OK", "GAS", "PEOPLE", "MOVE", "TRUMP", "JUST", "WIN", "SUN", "OPEN", "BAND", "FUN", "HIGH", "REAL", "NOT", "ME", "IT", "ANY"]
+}

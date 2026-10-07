@@ -363,6 +363,27 @@ telegram:
   timeout_s: 20
   parse_mode: null
 
+news:
+  # Experimental news alerts (2026-10-07). Separate from the signal logic: switching this off
+  # changes nothing else. Exchange announcements are alerted within ~1 min by the Cloudflare
+  # worker (cloudflare/news-worker) when fast_path is cloudflare; this run (every scheduled
+  # run) alerts the news sites and logs prices for later measurement.
+  enabled: true
+  fast_path: cloudflare        # cloudflare | none (none: this run also alerts exchange news)
+  min_alert_level: 1           # 1 = positive and very positive (rules: src/agent/news/rules.json)
+  alert_negative_for_open_signals: true
+  max_age_min: 180             # older headlines are stored but not alerted
+  timeout_s: 15
+  context_file: news_context.json   # published next to the state on the data branch
+  feeds:
+    coindesk: https://www.coindesk.com/arc/outboundfeeds/rss/
+    cointelegraph: https://cointelegraph.com/rss
+    theblock: https://www.theblock.co/rss.xml
+    decrypt: https://decrypt.co/feed
+    blockworks: https://blockworks.co/feed
+    bitcoinmagazine: https://bitcoinmagazine.com/.rss/full/
+    thedefiant: https://thedefiant.io/api/feed
+
 storage:
   backend: local               # local | git_branch
   db_path: data/state.db

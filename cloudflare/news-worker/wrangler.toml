@@ -1,0 +1,18 @@
+# Cloudflare worker for the fast news path. Deployed by .github/workflows/news-worker.yml,
+# which fills in the KV namespace id and the Telegram secrets.
+name = "trade-news"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+CONTEXT_URL = "https://raw.githubusercontent.com/Ali-M1X/trade/data/news_context.json"
+MIN_ALERT_LEVEL = "1"
+MAX_AGE_MIN = "180"
+
+[[kv_namespaces]]
+binding = "NEWS_KV"
+id = "__KV_ID__"

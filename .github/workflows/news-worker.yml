@@ -1,0 +1,75 @@
+name: news-worker
+
+# Deploys the fast news path (cloudflare/news-worker) to Cloudflare Workers: it checks Binance
+# and OKX announcements every minute and alerts in Telegram. Needs the repository secrets
+# CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (plus the Telegram ones the agent uses);
+# without them this workflow only runs the worker tests.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "cloudflare/news-worker/**"
+      - "src/agent/news/rules.json"
+      - "tests/fixtures/news_titles.json"
+      - ".github/workflows/news-worker.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: news-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cloudflare/news-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER: npx --yes wrangler@4.148.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm test
+      - name: Check secrets
+        id: secrets
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Cloudflare secrets are not set: tests only, nothing deployed." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: KV namespace (create once)
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          find_id() { $WRANGLER kv namespace list 2>/dev/null | node -e '
+            let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+              const i = s.indexOf("["); const list = i < 0 ? [] : JSON.parse(s.slice(i));
+              const ns = list.find(n => /NEWS_KV$/.test(n.title)); if (ns) console.log(ns.id); });'; }
+          id=$(find_id)
+          if [ -z "$id" ]; then
+            $WRANGLER kv namespace create NEWS_KV
+            id=$(find_id)
+          fi
+          [ -n "$id" ] || { echo "could not find or create the NEWS_KV namespace"; exit 1; }
+          sed -i "s/__KV_ID__/$id/" wrangler.toml
+      - name: Deploy
+        if: steps.secrets.outputs.ok == 'true'
+        run: $WRANGLER deploy
+      - name: Telegram secrets
+        if: steps.secrets.outputs.ok == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          printf '%s' "$TELEGRAM_BOT_TOKEN" | $WRANGLER secret put TELEGRAM_BOT_TOKEN
+          printf '%s' "$TELEGRAM_CHAT_ID" | $WRANGLER secret put TELEGRAM_CHAT_ID
+          echo "Deployed: Binance and OKX announcements are checked every minute." >> "$GITHUB_STEP_SUMMARY"

@@ -1,8 +1,8 @@
 """Where the SQLite file lives between runs.
 
 LocalStorage: the file just stays on disk (VPS).
-GitBranchStorage: the file is gzipped and kept as the only file on a dedicated
-branch (GitHub Actions). Each push replaces the branch with a single commit so
+GitBranchStorage: the file is gzipped and kept on a dedicated branch (GitHub Actions),
+optionally with small extra files such as the news context. Each push replaces the branch with a single commit so
 the repository does not grow with every run.
 """
 from __future__ import annotations
@@ -21,8 +21,9 @@ class LocalStorage:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         return self.db_path.exists()
 
-    def push(self, message: str = "") -> None:
-        pass
+    def push(self, message: str = "", extra: dict[str, bytes] | None = None) -> None:
+        for name, data in (extra or {}).items():
+            (self.db_path.parent / name).write_bytes(data)
 
 
 class GitBranchStorage:
@@ -50,10 +51,15 @@ class GitBranchStorage:
         self.db_path.write_bytes(gzip.decompress(blob))
         return True
 
-    def push(self, message: str = "Update state") -> None:
-        data = gzip.compress(self.db_path.read_bytes(), mtime=0)
-        blob = self._git("hash-object", "-w", "--stdin", input=data).decode().strip()
-        tree = self._git("mktree", input=f"100644 blob {blob}\t{self.FILE}\n".encode()).decode().strip()
+    def push(self, message: str = "Update state", extra: dict[str, bytes] | None = None) -> None:
+        """extra: small public files to keep next to the database (e.g. the news context
+        the Cloudflare worker reads)."""
+        files = {self.FILE: gzip.compress(self.db_path.read_bytes(), mtime=0), **(extra or {})}
+        lines = ""
+        for name in sorted(files):
+            blob = self._git("hash-object", "-w", "--stdin", input=files[name]).decode().strip()
+            lines += f"100644 blob {blob}\t{name}\n"
+        tree = self._git("mktree", input=lines.encode()).decode().strip()
         env = {**os.environ,
                "GIT_AUTHOR_NAME": os.environ.get("GIT_AUTHOR_NAME", "trade-signal-agent"),
                "GIT_AUTHOR_EMAIL": os.environ.get("GIT_AUTHOR_EMAIL", "agent@users.noreply.github.com")}

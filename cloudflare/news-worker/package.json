@@ -1,0 +1,8 @@
+{
+  "name": "trade-news-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

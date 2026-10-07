@@ -125,9 +125,40 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
         except Exception:                       # one failing task must not block the others
             logging.getLogger(__name__).exception("%s failed", task)
             failed.append(task)
+    extra = {}
+    if cfg.get("news", {}).get("enabled"):
+        try:
+            extra = news_pass(cfg, repo, market, cg, notifier, now)
+        except Exception:                       # experimental: never blocks or fails the signal runs
+            logging.getLogger(__name__).exception("news failed")
     repo.close()
-    storage.push("run-scheduled " + ",".join(tasks))
+    if extra:
+        storage.push("run-scheduled " + ",".join(tasks), extra=extra)
+    else:
+        storage.push("run-scheduled " + ",".join(tasks))
     return 1 if failed else 0
+
+
+def news_pass(cfg, repo, market, cg, notifier, now) -> dict[str, bytes]:
+    """Run the news path and return the context file to publish for the worker."""
+    from .news.run import run_news
+    res = run_news(cfg, repo, market, cg, notifier, now)
+    print(f"news: {res['new']} new, {res['alerts']} alerts"
+          + (f", failed: {', '.join(res['failed'])}" if res["failed"] else ""))
+    return {cfg["news"]["context_file"]: json.dumps(res["context"], ensure_ascii=False).encode()}
+
+
+def cmd_run_news(args, cfg, secrets) -> int:
+    from .notify.telegram import Notifier
+    storage, repo, market, cg, now = open_context(cfg, secrets)
+    if args.preview:                 # alert today's headlines too, exchange ones included
+        cfg = {**cfg, "news": {**cfg["news"], "fast_path": "none"}}
+        if repo.get_state("news_seeded") is None:
+            repo.set_state("news_seeded", now)
+    extra = news_pass(cfg, repo, market, cg, Notifier(cfg, secrets), now)
+    repo.close()
+    storage.push("run-news", extra=extra)
+    return 0
 
 
 def cmd_backtest(args, cfg, secrets) -> int:
@@ -185,6 +216,7 @@ COMMANDS = {
     "run-daily": cmd_run_daily,
     "run-weekly": cmd_run_weekly,
     "run-scheduled": cmd_run_scheduled,
+    "run-news": cmd_run_news,
     "backtest": cmd_backtest,
     "backtest-compare": cmd_backtest_compare,
 }
@@ -209,6 +241,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--fetch-only", action="store_true", help="download history, don't replay")
             p.add_argument("--variant", help="replay one config variant (backtest.variants)")
             p.add_argument("--json", help="with --variant: where to save the raw results")
+        if name == "run-news":
+            p.add_argument("--preview", action="store_true",
+                           help="also alert headlines already out and exchange news (testing)")
         if name == "run-scheduled":
             p.add_argument("--only", help="comma-separated tasks to force, e.g. run-4h,run-1h")
         if name == "backtest-compare":

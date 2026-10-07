@@ -6,6 +6,8 @@ on:
     paths:
       - "src/agent/**"
       - "config.yaml"
+      - "tests/**"
+      - "cloudflare/**"
       - ".github/workflows/check-sources.yml"
 
 permissions:
@@ -23,6 +25,11 @@ jobs:
           cache: pip
       - run: pip install -e '.[dev]'
       - run: pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: News worker tests (same rules and vectors as tests/test_news.py)
+        run: npm test --prefix cloudflare/news-worker
       - name: Probe data sources
         env:
           COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
@@ -65,10 +72,12 @@ jobs:
         run: trade-agent -v run-daily 2>&1 | tee rundaily.txt
       - name: run-weekly
         run: trade-agent -v run-weekly 2>&1 | tee runweekly.txt
+      - name: run-news (preview of the alerts on today's headlines)
+        run: trade-agent -v run-news --preview 2>&1 | tee runnews.txt
       - name: Summary
         if: always()
         run: |
-          for f in run4h run1h run15m rundaily runweekly; do
+          for f in run4h run1h run15m rundaily runweekly runnews; do
             [ -f "$f.txt" ] || continue
             { echo "### $f"; echo '```'; grep -v '^INFO\|^WARNING' "$f.txt" | tail -80; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           done
