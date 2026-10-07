@@ -47,6 +47,17 @@ jobs:
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Check Cloudflare access
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          api() { curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4$1" \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);
+                console.log(j.success ? "ok" : "FAILED", JSON.stringify(j.errors||[]), JSON.stringify(j.messages||[]))})'; }
+          echo "token verify: $(api /user/tokens/verify)"
+          echo "account: $(api /accounts/$CLOUDFLARE_ACCOUNT_ID)"
+          echo "kv list: $(api /accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces)"
+          echo "workers subdomain: $(api /accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain)"
+          echo "account id length: ${#CLOUDFLARE_ACCOUNT_ID}"
       - name: KV namespace (create once)
         if: steps.secrets.outputs.ok == 'true'
         run: |
