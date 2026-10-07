@@ -7,7 +7,7 @@ name: news-worker
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, claude/news-alerts]   # TEMP: the PR branch deploys once to check the setup
     paths:
       - "cloudflare/news-worker/**"
       - "src/agent/news/rules.json"
