@@ -45,6 +45,15 @@ jobs:
             echo "Cloudflare secrets are not set: tests only, nothing deployed." | tee -a "$GITHUB_STEP_SUMMARY"
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
+            # tolerate a pasted URL around the account id, or "Bearer " / spaces around the token
+            acct=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | grep -oE '[0-9a-fA-F]{32}' | head -1)
+            tok=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]' | sed 's/^Bearer//I')
+            echo "::add-mask::$acct"
+            echo "::add-mask::$tok"
+            echo "account id: ${#CLOUDFLARE_ACCOUNT_ID} chars as saved, 32-hex id found: $([ -n "$acct" ] && echo yes || echo no)"
+            echo "token: ${#CLOUDFLARE_API_TOKEN} chars as saved, ${#tok} after cleanup, whitespace inside: $(printf '%s' "$CLOUDFLARE_API_TOKEN" | grep -q '[[:space:]]' && echo yes || echo no)"
+            echo "CLOUDFLARE_ACCOUNT_ID=$acct" >> "$GITHUB_ENV"
+            echo "CLOUDFLARE_API_TOKEN=$tok" >> "$GITHUB_ENV"
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Check Cloudflare access
