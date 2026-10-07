@@ -45,13 +45,25 @@ jobs:
             echo "Cloudflare secrets are not set: tests only, nothing deployed." | tee -a "$GITHUB_STEP_SUMMARY"
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
-            # tolerate a pasted URL around the account id, or "Bearer " / spaces around the token
-            acct=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | grep -oE '[0-9a-fA-F]{32}' | head -1)
-            tok=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]' | sed 's/^Bearer//I')
-            echo "::add-mask::$acct"
+            # tolerate what people often paste: the whole "curl ... Bearer <token>" test command
+            # Cloudflare shows after creating the token, spaces, or a URL instead of the account id
+            raw=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '\r\n')
+            if printf '%s' "$raw" | grep -q 'Bearer'; then
+              tok=$(printf '%s' "$raw" | grep -oE 'Bearer[[:space:]]+[A-Za-z0-9_.-]+' | head -1 | awk '{print $2}')
+            else
+              tok=$(printf '%s' "$raw" | tr -d '[:space:]')
+            fi
             echo "::add-mask::$tok"
-            echo "account id: ${#CLOUDFLARE_ACCOUNT_ID} chars as saved, 32-hex id found: $([ -n "$acct" ] && echo yes || echo no)"
-            echo "token: ${#CLOUDFLARE_API_TOKEN} chars as saved, ${#tok} after cleanup, whitespace inside: $(printf '%s' "$CLOUDFLARE_API_TOKEN" | grep -q '[[:space:]]' && echo yes || echo no)"
+            echo "token: ${#CLOUDFLARE_API_TOKEN} chars as saved, ${#tok} used"
+            acct=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | grep -oE '[0-9a-fA-F]{32}' | head -1)
+            if [ -z "$acct" ]; then
+              # not a valid id: take the token's own account
+              acct=$(curl -s -H "Authorization: Bearer $tok" "https://api.cloudflare.com/client/v4/accounts" \
+                | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);
+                    if (j.result && j.result.length) console.log(j.result[0].id)}catch(e){}})')
+              echo "account id secret is not a 32-character id; using the token's account: $([ -n "$acct" ] && echo found || echo NOT found)"
+            fi
+            [ -n "$acct" ] && echo "::add-mask::$acct"
             echo "CLOUDFLARE_ACCOUNT_ID=$acct" >> "$GITHUB_ENV"
             echo "CLOUDFLARE_API_TOKEN=$tok" >> "$GITHUB_ENV"
             echo "ok=true" >> "$GITHUB_OUTPUT"
