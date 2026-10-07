@@ -93,6 +93,7 @@ jobs:
           fi
           [ -n "$id" ] || { echo "could not find or create the NEWS_KV namespace"; exit 1; }
           sed -i "s/__KV_ID__/$id/" wrangler.toml
+          echo "KV_ID=$id" >> "$GITHUB_ENV"
       - name: Deploy
         if: steps.secrets.outputs.ok == 'true'
         run: $WRANGLER deploy
@@ -105,3 +106,12 @@ jobs:
           printf '%s' "$TELEGRAM_BOT_TOKEN" | $WRANGLER secret put TELEGRAM_BOT_TOKEN
           printf '%s' "$TELEGRAM_CHAT_ID" | $WRANGLER secret put TELEGRAM_CHAT_ID
           echo "Deployed: Binance and OKX announcements are checked every minute." >> "$GITHUB_STEP_SUMMARY"
+      - name: Check the worker reaches the exchanges (after its first runs)
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          sleep 150
+          seen=$($WRANGLER kv key get seen --namespace-id "$KV_ID" --remote 2>/dev/null || true)
+          b=$(printf '%s' "$seen" | grep -o '"binance:' | wc -l)
+          o=$(printf '%s' "$seen" | grep -o '"okx:' | wc -l)
+          echo "worker has seen: Binance $b, OKX $o announcements" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$b" -gt 0 ] && [ "$o" -gt 0 ] || { echo "the worker could not read one of the exchanges"; exit 1; }
