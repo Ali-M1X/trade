@@ -10,6 +10,7 @@ from ..analysis.cycles import CycleScore, score_cycles
 from ..analysis.frame import Frame
 from ..analysis.patterns import find_patterns
 from ..analysis.phase import Phase, climax, detect_phase, reversal_signs
+from ..analysis.trend_quality import trend_quality
 from ..indicators.divergence import divergence
 from .majors import Majors
 from .regime import Regime
@@ -221,6 +222,8 @@ class Evaluation:
     plan: TradePlan | None = None
     rejected: str | None = None
     funding_pct: float | None = None
+    trend_quality: dict = field(default_factory=dict)   # check -> -1/0/+1 (when not off)
+    tq_points: float | None = None
 
     @property
     def is_signal(self) -> bool:
@@ -264,6 +267,13 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
     ev.sections["cycles"], ev.cycle = float(cyc.points), cyc.note
     ev.sections["patterns"], health = health_section(h4, side, cfg)
     ev.notes = vol_notes + health
+    tq_mode = cfg["technical"].get("trend_quality", {}).get("mode", "off")
+    if tq_mode not in ("off", False, None):
+        tq = trend_quality(h4, side, cfg)
+        ev.trend_quality, ev.tq_points = tq.checks, tq.points
+        ev.notes += tq.notes
+        if tq_mode == "score":
+            ev.sections["trend_quality"] = tq.points
     ev.confirmations = confirmations(h1, side, plan, cfg)
     ev.sections["confirmation"] = confirmation_points(len(ev.confirmations), cfg)
     ev.gates["confirmation"] = len(ev.confirmations) >= cfg["technical"]["confirmation"]["min_confirmations"]
@@ -287,6 +297,8 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
         ev.flags.append("lower_cycle_correcting")
     if not ev.gates["confirmation"]:
         ev.flags.append("not_confirmed")
+    if tq_mode == "filter" and ev.tq_points <= cfg["technical"]["trend_quality"]["filter_max"]:
+        ev.flags.append("trend_weak")
     if majors.btc_weak and side == 1 and base != "BTC" and \
             ev.score < cfg["majors"]["btc_weak_min_score"]:
         ev.flags.append("btc_weak")

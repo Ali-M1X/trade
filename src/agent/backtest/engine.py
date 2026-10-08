@@ -181,6 +181,8 @@ class Backtest:
                 "risk_pct": p["plan"]["risk_pct"], "out_of_cap": p.get("out_of_cap", False),
                 "gross_r": p["lifecycle"]["realized_r"],
                 "filled_at": p["lifecycle"]["filled_at"], "closed_at": p["lifecycle"]["closed_at"],
+                "tq": p["evaluation"].get("trend_quality") or {},
+                "tq_points": p["evaluation"].get("tq_points"),
                 "events": [(e["kind"], e["ts"], e["payload"].get("price"))
                            for e in self.book_repo.get_events(s["id"]) if e["kind"] != "created"],
             })

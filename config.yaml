@@ -277,6 +277,47 @@ technical:
     pattern_recent_bars: 5     # neckline break must be this recent
     flag_pole_atr: 3.0
     flag_max_retrace: 0.5
+  # Trend quality (Ali's notes, 2026-10-08): swing amplitude and timing, candle size and
+  # body/wick, channel, volume on impulses vs corrections, quiet boxes, RSI persistence.
+  # Measured on 4H. mode: off | observe (computed and stored, score unchanged) |
+  # score (added to the score as its own section, +-max_points) |
+  # filter (score unchanged; a setup at or below filter_max points is only a Watch).
+  # Experimental: live stays off; the backtest variants tq_* switch it on.
+  trend_quality:
+    mode: "off"
+    max_points: 15
+    filter_max: -6
+    points: {amplitude: 2, impulse_size: 1, correction_bars: 1, impulse_speed: 2,
+             candle_size: 1, body_wick: 1, close_spacing: 1, opposite_burst: 2, channel: 2,
+             volume_legs: 2, volume_divergence: 2, pullback_volume: 1, box_breakout: 2,
+             extreme_volume: 1, rsi_persistence: 2}
+    legs: 8                    # last N swing legs looked at
+    trend_rel: 0.15            # a 3-leg series must change by >= 15% to count as a trend
+    amplitude_good: 1.5        # mean impulse / mean correction size
+    amplitude_bad: 1.0
+    volume_good: 1.2           # impulse / correction volume (and new vs old impulse)
+    volume_bad: 0.9
+    recent_bars: 10            # candle checks: last 10 bars vs the 20 before them
+    prior_bars: 20
+    size_good: 1.3
+    size_bad: 0.6
+    body_good: 1.25
+    body_bad: 0.75
+    burst_small_bars: 3
+    burst_small_atr: 0.5
+    burst_big_atr: 1.0
+    channel_swings: 4
+    channel_entry_zone: 0.35   # long: close in the lower 35% of the channel
+    channel_break_atr: 0.5
+    box_bars: 30
+    box_break_bars: 3
+    box_max_atr: 6
+    dryup_quantile: 0.1
+    extreme_bars: 30
+    extreme_near_atr: 0.5
+    rsi_bars: 12
+    rsi_hot: 70
+    rsi_min_bars: 8
   confirmation:
     min_confirmations: 2
     points_per_extra: 2.5
@@ -421,6 +462,13 @@ backtest:
     atr_2r_a_only:
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       grades: {min_signal: A}
+    # live (atr_2r) + trend quality (2026-10-08): as a score section / as a filter
+    tq_score:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {trend_quality: {mode: score}}
+    tq_filter:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {trend_quality: {mode: filter}}
 
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest

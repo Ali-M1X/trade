@@ -1,0 +1,109 @@
+name: trend-quality
+
+# Experiment (2026-10-08): does the trend-quality section improve the backtest?
+#  - replay: live rules (atr_2r) vs tq_score vs tq_filter on the stored year, then compare
+#  - setups: every L6 setup with the 15 checks recorded, outcome per check
+# Reuses the history DB of backtest run 36762973452. Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/trend-quality]
+    paths:
+      - "src/agent/analysis/trend_quality.py"
+      - "scripts/trend_quality_analysis.py"
+      - ".github/workflows/trend-quality.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: trend-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [atr_2r, tq_score, tq_filter]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          path: data
+          run-id: 36762973452
+          repository: Ali-M1X/trade
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: gunzip -f data/backtest.db.gz
+      - run: trade-agent -v backtest --variant ${{ matrix.variant }} --json ${{ matrix.variant }}.json 2>&1 | tail -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tq-variant-${{ matrix.variant }}
+          path: ${{ matrix.variant }}.json
+
+  compare:
+    needs: replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tq-variant-*
+          path: results
+          merge-multiple: true
+      - run: trade-agent backtest-compare results/*.json --out BACKTEST.md > /dev/null
+      - name: Report
+        run: |
+          cat BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
+          echo "----- BACKTEST.md -----"
+          sed -n '1,/## Details/p' BACKTEST.md
+          python - <<'PY'
+          import json, glob
+          for p in sorted(glob.glob("results/*.json")):
+              r = json.load(open(p))
+              tr = [t for t in r["trades"] if t.get("filled_at")]
+              print(p, "filled", len(tr), "net R", round(sum(t.get("net_r", 0) for t in tr), 2))
+          PY
+
+  setups:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e . scipy
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          path: data
+          run-id: 36762973452
+          repository: Ali-M1X/trade
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: gunzip -f data/backtest.db.gz
+      - name: Analyse
+        shell: bash
+        run: python scripts/trend_quality_analysis.py -v --db data/backtest.db --out-dir tq_analysis | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trend-quality-analysis
+          path: tq_analysis/
+          retention-days: 30
