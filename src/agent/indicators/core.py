@@ -58,6 +58,21 @@ def atr(df: pd.DataFrame, n: int) -> pd.Series:
     return pd.Series(_wilder(true_range(df).to_numpy(), n, 0), index=df.index)
 
 
+def adx(df: pd.DataFrame, n: int) -> pd.Series:
+    """Wilder ADX: smoothed +DM / -DM over the smoothed true range, then the smoothed DX."""
+    up, down = df["high"].diff(), -df["low"].diff()
+    plus = np.where((up > down) & (up > 0), up, 0.0)
+    minus = np.where((down > up) & (down > 0), down, 0.0)
+    a = 1 / n
+    tr = true_range(df).ewm(alpha=a, adjust=False).mean()
+    pdi = 100 * pd.Series(plus, index=df.index).ewm(alpha=a, adjust=False).mean() / tr
+    mdi = 100 * pd.Series(minus, index=df.index).ewm(alpha=a, adjust=False).mean() / tr
+    dx = (100 * (pdi - mdi).abs() / (pdi + mdi)).fillna(0.0)
+    out = dx.ewm(alpha=a, adjust=False).mean()
+    out.iloc[:2 * n] = np.nan                           # warm-up
+    return out
+
+
 def macd(close: pd.Series, fast: int, slow: int, signal: int) -> pd.DataFrame:
     line = ema(close, fast) - ema(close, slow)
     sig = line.ewm(span=signal, adjust=False, min_periods=signal).mean()
@@ -106,5 +121,7 @@ def add_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     out["atr"] = atr(out, c["atr_period"])
     out["rvol"] = rvol(out["volume"], c["rvol_lookback"])
     out["obv"] = obv(out)
+    out[f"ema{c.get('ema_impulse', 13)}"] = ema(out["close"], c.get("ema_impulse", 13))
+    out["adx"] = adx(out, c.get("adx_period", 14))
     out["bb_width"] = bollinger(out["close"], c["bollinger_period"], c["bollinger_std"])["width"]
     return out

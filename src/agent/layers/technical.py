@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..analysis import candles as cd
+from ..analysis.classic import classic_flags
 from ..analysis.cycles import CycleScore, score_cycles
 from ..analysis.frame import Frame
 from ..analysis.patterns import find_patterns
@@ -287,6 +288,7 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
         ev.flags.append("lower_cycle_correcting")
     if not ev.gates["confirmation"]:
         ev.flags.append("not_confirmed")
+    ev.flags += classic_flags(frames, side, cfg)
     if majors.btc_weak and side == 1 and base != "BTC" and \
             ev.score < cfg["majors"]["btc_weak_min_score"]:
         ev.flags.append("btc_weak")
