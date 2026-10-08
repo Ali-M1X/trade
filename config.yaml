@@ -439,7 +439,7 @@ backtest:
     # live (atr_2r) + classic trend-following rules (2026-10-08)
     cl_exit:                   # let winners run: 25% at TP1, 75% trails MA25 from TP1
       trade: {stop_mode: atr, tp1_mode: fixed_r, tp1_close_pct: 25, tp2_close_pct: 0, trail_from: tp1}
-    cl_vcp:
+    cl_vcp:                    # also the live variant candidate (atr_2r + VCP)
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical: {classic: {vcp: true}}
     cl_impulse:
@@ -456,5 +456,6 @@ backtest:
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest
 # and tests use the settings above unchanged. Empty = exactly STRATEGY.md.
 # 2026-10-01: Ali chose atr_2r for paper trading (DECISIONS.md #133, #135).
+# 2026-10-08: Ali chose cl_vcp (atr_2r + Minervini VCP filter) for paper trading.
 live:
-  variant: atr_2r
+  variant: cl_vcp
