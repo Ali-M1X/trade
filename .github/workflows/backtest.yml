@@ -44,7 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         # must match backtest.variants in config.yaml (a test checks this)
-        variant: [baseline, swing_stop, min_stop, tp1_cap, cooldown, combined, atr_2r, confirm_level_atr, confirm_atr_2r, atr_2r_a_only, cl_exit, cl_vcp, cl_impulse, cl_adx, cl_all]
+        variant: [baseline, swing_stop, min_stop, tp1_cap, cooldown, combined, atr_2r, confirm_level_atr, confirm_atr_2r, atr_2r_a_only, cl_exit, cl_vcp, cl_impulse, cl_adx, cl_all, ph_weekly, ph_stage, ph_dryup, ph_dmi, ph_er, ph_all, ph_all_vcp]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

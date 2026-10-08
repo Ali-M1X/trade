@@ -291,6 +291,19 @@ technical:
     vcp_legs: 10
     vcp_contractions: 2        # the last N corrections must shrink step by step
     vcp_max_ratio: 0.8         # each correction at most 80% as deep as the one before
+    # market-phase filters (second experiment; variants ph_*)
+    weekly_tide: false         # Elder: weekly EMA26 slopes with the trade
+    weekly_ema: 26
+    stage: false               # Weinstein: long only in stage 2 (close > rising MA150 on D)
+    stage_ma: 150
+    stage_slope_bars: 20
+    range_dryup: false         # Wyckoff: range setups need falling volume inside the range
+    dmi: false                 # ADX >= dmi_adx_min and +DI/-DI with the trade
+    dmi_tf: 1d
+    dmi_adx_min: 20
+    er_min: 0                  # Kaufman efficiency ratio (signed) >= er_min; 0 = off
+    er_bars: 20
+    er_tf: 1d
   confirmation:
     min_confirmations: 2
     points_per_extra: 2.5
@@ -451,6 +464,28 @@ backtest:
     cl_all:
       trade: {stop_mode: atr, tp1_mode: fixed_r, tp1_close_pct: 25, tp2_close_pct: 0, trail_from: tp1}
       technical: {classic: {vcp: true, impulse: true, adx_min: 20}}
+    # live (atr_2r) + market-phase filters (2026-10-08), one at a time, all, all + VCP
+    ph_weekly:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {weekly_tide: true}}
+    ph_stage:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+    ph_dryup:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {range_dryup: true}}
+    ph_dmi:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {dmi: true}}
+    ph_er:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {er_min: 0.2}}
+    ph_all:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {weekly_tide: true, stage: true, range_dryup: true, dmi: true, er_min: 0.2}}
+    ph_all_vcp:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {vcp: true, weekly_tide: true, stage: true, range_dryup: true, dmi: true, er_min: 0.2}}
 
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest

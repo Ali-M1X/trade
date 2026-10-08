@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [atr_2r, cl_exit, cl_vcp, cl_impulse, cl_adx, cl_all]
+        variant: [atr_2r, cl_vcp, ph_weekly, ph_stage, ph_dryup, ph_dmi, ph_er, ph_all, ph_all_vcp]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

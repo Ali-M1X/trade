@@ -6,6 +6,17 @@
   vcp      Minervini's volatility contraction: the last corrections get shallower one after
            another and the latest one is quieter (lower volume) than the one before.
 
+Market-phase filters (second experiment, 2026-10-08):
+
+  weekly_tide  Elder's tide: the weekly EMA26 must slope with the trade.
+  stage        Weinstein stages on the 30-week (150-day) average: longs only in stage 2 (close
+               above a rising MA150), shorts only in stage 4.
+  range_dryup  Wyckoff: when the setup comes from a range (ACC/DIST phase), volume in the
+               last third of the range must be lower than in the first third.
+  dmi          ADX/DMI on the phase timeframe: ADX >= dmi_adx_min and +DI/-DI with the trade.
+  er_min       Kaufman efficiency ratio over er_bars on the phase timeframe, signed with the
+               trade, must be at least er_min (a straight move, not chop).
+
 Each returns the name of the failed filter (a flag that downgrades the setup to a Watch)
 or None. Nothing here runs unless technical.classic switches it on.
 """
@@ -41,6 +52,64 @@ def vcp(f: Frame, side: int, p: dict) -> bool:
     vol = f.df["volume"].to_numpy(float)
     v = [vol[l.start + 1:l.end + 1].mean() for l in cor[-2:]]
     return bool(v[1] < v[0])
+
+
+def slope_with(series, bars: int, side: int) -> bool | None:
+    s = series.dropna()
+    if len(s) <= bars:
+        return None
+    return bool((s.iloc[-1] - s.iloc[-1 - bars]) * side > 0)
+
+
+def stage_ok(f: Frame, side: int, ma: int, bars: int) -> bool | None:
+    m = f.col("close").rolling(ma).mean()
+    rising = slope_with(m, bars, side)
+    if rising is None:
+        return None
+    return bool(rising and (f.close - m.iloc[-1]) * side > 0)
+
+
+def dryup(f: Frame, bars: int) -> bool:
+    v = f.df["volume"].to_numpy(float)[-bars:]
+    k = len(v) // 3
+    return bool(k and v[-k:].mean() < v[:k].mean())
+
+
+def efficiency(f: Frame, bars: int, side: int) -> float | None:
+    c = f.col("close").to_numpy(float)
+    if len(c) <= bars:
+        return None
+    path = np.abs(np.diff(c[-bars - 1:])).sum()
+    return float((c[-1] - c[-1 - bars]) * side / path) if path > 0 else 0.0
+
+
+def phase_flags(frames: dict[str, Frame], side: int, cfg: dict, phase_d: str = "",
+                phase_4h: str = "") -> list[str]:
+    p = cfg["technical"].get("classic") or {}
+    flags = []
+    if p.get("weekly_tide") and "1w" in frames:
+        e = frames["1w"].col("close").ewm(span=p["weekly_ema"], adjust=False, min_periods=p["weekly_ema"]).mean()
+        if slope_with(e, 1, side) is False:
+            flags.append("weekly_tide_against")
+    if p.get("stage") and stage_ok(frames["1d"], side, p["stage_ma"], p["stage_slope_bars"]) is False:
+        flags.append("stage_against")
+    if p.get("range_dryup"):
+        for name, tf in ((phase_d, "1d"), (phase_4h, "4h")):
+            if name.split(":")[0] in ("ACC", "DIST"):
+                if not dryup(frames[tf], cfg["technical"]["phase"]["acc_min_bars"]):
+                    flags.append("range_no_dryup")
+                break
+    if p.get("dmi"):
+        last = frames[p["dmi_tf"]].last
+        ok = bool(np.isfinite(last["adx"])) and last["adx"] >= p["dmi_adx_min"] and \
+            (last["pdi"] - last["mdi"]) * side > 0
+        if not ok:
+            flags.append("dmi_against")
+    if p.get("er_min"):
+        er = efficiency(frames[p["er_tf"]], p["er_bars"], side)
+        if er is not None and er < p["er_min"]:
+            flags.append("choppy")
+    return flags
 
 
 def classic_flags(frames: dict[str, Frame], side: int, cfg: dict) -> list[str]:

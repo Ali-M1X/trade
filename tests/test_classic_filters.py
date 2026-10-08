@@ -85,3 +85,19 @@ def test_default_still_trails_only_after_tp2(cfg):
                     "tp2": 115.0}, T0, cfg)
     on_candle(s, T0 + M15, 111, 104, cfg)
     assert on_4h_close(s, T0 + 4 * H4, 108.0, 109.0, False) == []
+
+
+# ------------------------------------------------------------------ market-phase filters
+def test_phase_filters(cfg):
+    from agent.analysis.classic import efficiency, phase_flags, stage_ok
+    up = frame(path([(220, 0.5)]), cfg)
+    assert stage_ok(up, 1, 150, 20) is True and stage_ok(up, -1, 150, 20) is False
+    assert efficiency(up, 20, 1) == pytest.approx(1.0)
+    chop = frame(path([(220, 0.5)] + [(2, 1.0), (2, -1.0)] * 6), cfg)
+    assert abs(efficiency(chop, 20, 1)) < 0.2
+    frames = {"1d": up, "4h": up, "1w": up}
+    assert phase_flags(frames, -1, cfg) == []                      # all off by default
+    cfg["technical"]["classic"].update(weekly_tide=True, stage=True, dmi=True, er_min=0.2)
+    assert phase_flags(frames, 1, cfg) == []
+    assert set(phase_flags(frames, -1, cfg)) == {"weekly_tide_against", "stage_against",
+                                                 "dmi_against", "choppy"}
