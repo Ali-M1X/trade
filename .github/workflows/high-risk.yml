@@ -1,0 +1,79 @@
+name: high-risk
+
+# Experiment (2026-10-09): high-risk system 2 candidates, the live rules (ph_stage) with other
+# L6 section weights and/or lower grade thresholds. Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/high-risk-system]
+    paths:
+      - "src/agent/layers/technical.py"
+      - ".github/workflows/high-risk.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: high-risk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [ph_stage, s2_research, s2_levels, s2_trend, s2_loose, s2_levels_loose]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db
+          path: data
+          run-id: 36762973452
+          repository: Ali-M1X/trade
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: gunzip -f data/backtest.db.gz
+      - run: trade-agent -v backtest --variant ${{ matrix.variant }} --json ${{ matrix.variant }}.json 2>&1 | tail -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hr-variant-${{ matrix.variant }}
+          path: ${{ matrix.variant }}.json
+
+  compare:
+    needs: replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hr-variant-*
+          path: results
+          merge-multiple: true
+      - run: trade-agent backtest-compare results/*.json --out BACKTEST.md > /dev/null
+      - name: Report
+        run: |
+          cat BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
+          echo "----- BACKTEST.md -----"
+          sed -n '1,/## Details/p' BACKTEST.md
+          python - <<'PY'
+          import json, glob
+          for p in sorted(glob.glob("results/*.json")):
+              r = json.load(open(p))
+              tr = [t for t in r["trades"] if t.get("filled_at")]
+              print(p, "filled", len(tr), "net R", round(sum(t.get("net_r", 0) for t in tr), 2))
+          PY
+

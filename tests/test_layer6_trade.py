@@ -312,3 +312,17 @@ def test_tp1_cap(cfg):
     # the R:R gate still uses the first opposing level
     assert build_trade(1, fake_h4(143.0, 2.0), [lvl(142.7), lvl(145.0)],
                        with_trade(cfg, tp1_max_r=3)) == Rejected("rr")
+
+
+def test_section_weights_rescale_each_section(cfg, setup):
+    import copy
+    from agent.layers.technical import section_max
+    frames, majors, regime = setup
+    assert sum(section_max(cfg).values()) == 100
+    base = evaluate("SOL", 1, frames, regime, majors, cfg, funding=0.0001)
+    c = copy.deepcopy(cfg)
+    c["technical"]["section_weights"] = {**section_max(cfg), "levels": 30, "patterns": 0}
+    e = evaluate("SOL", 1, frames, regime, majors, c, funding=0.0001)
+    assert e.sections["levels"] == pytest.approx(base.sections["levels"] * 2)
+    assert e.sections["patterns"] == 0 and e.sections["dow"] == base.sections["dow"]
+    assert e.score == pytest.approx(max(0.0, sum(e.sections.values())))
