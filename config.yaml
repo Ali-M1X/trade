@@ -452,7 +452,7 @@ backtest:
     # live (atr_2r) + classic trend-following rules (2026-10-08)
     cl_exit:                   # let winners run: 25% at TP1, 75% trails MA25 from TP1
       trade: {stop_mode: atr, tp1_mode: fixed_r, tp1_close_pct: 25, tp2_close_pct: 0, trail_from: tp1}
-    cl_vcp:                    # also the live variant candidate (atr_2r + VCP)
+    cl_vcp:
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical: {classic: {vcp: true}}
     cl_impulse:
@@ -468,7 +468,7 @@ backtest:
     ph_weekly:
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical: {classic: {weekly_tide: true}}
-    ph_stage:
+    ph_stage:                  # live since 2026-10-09
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical: {classic: {stage: true}}
     ph_dryup:
@@ -491,6 +491,6 @@ backtest:
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest
 # and tests use the settings above unchanged. Empty = exactly STRATEGY.md.
 # 2026-10-01: Ali chose atr_2r for paper trading (DECISIONS.md #133, #135).
-# 2026-10-08: Ali chose cl_vcp (atr_2r + Minervini VCP filter) for paper trading.
+# 2026-10-09: Ali chose ph_stage (atr_2r + Weinstein stage filter) for paper trading.
 live:
-  variant: cl_vcp
+  variant: ph_stage
