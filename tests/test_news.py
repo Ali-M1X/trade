@@ -219,3 +219,18 @@ def test_git_branch_keeps_extra_files(tmp_path):
     assert git(remote, "show", "data:news_context.json") == '{"ts": 1}'
     s.push("run 2")                                  # without extra: only the database
     assert git(remote, "ls-tree", "--name-only", "data").split() == ["state.db.gz"]
+
+
+def test_fresh_headline_without_coins_is_stored_not_alerted(cfg):
+    # a coin-less fresh headline used to store `alerted` as [] and crash the news pass
+    class NoCoins(CG):
+        def markets(self):
+            return []
+    repo = Repository()
+    repo.set_state("news_seeded", 1)
+    n = Notifier(cfg, load_secrets({}), out=io.StringIO())
+    market = Market()
+    market.perp_bases_and_spreads = lambda: (set(), {})
+    res = run_news(cfg, repo, market, NoCoins(), n, NOW, session=Session(NOW - 60_000))
+    assert res["new"] == 3 and res["alerts"] == 0
+    assert all(r["alerted"] is False for r in repo.get_news())

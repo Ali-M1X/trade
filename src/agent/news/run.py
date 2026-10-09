@@ -103,7 +103,7 @@ def run_news(cfg: dict, repo, market, cg, notifier, now: int, session=None,
                  else media_coins(item["title"], names))
         fresh = item["ts"] is None or now - item["ts"] <= n_cfg["max_age_min"] * 60_000
         worker_does_it = item["kind"] == "exchange" and n_cfg["fast_path"] == "cloudflare"
-        alert = (not first_run and fresh and coins and not worker_does_it and
+        alert = bool(not first_run and fresh and coins and not worker_does_it and
                  (sc.level >= n_cfg["min_alert_level"] or
                   (sc.level < 0 and n_cfg["alert_negative_for_open_signals"] and
                    any("signal" in ctx["coins"].get(c, {}) for c in coins))))
