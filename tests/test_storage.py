@@ -41,3 +41,21 @@ def test_make_storage_env_override(cfg, monkeypatch):
     assert isinstance(make_storage(cfg), LocalStorage)
     monkeypatch.setenv("AGENT_STORAGE", "git_branch")
     assert isinstance(make_storage(cfg), GitBranchStorage)
+
+
+def test_git_branch_keeps_extra_databases(tmp_path):
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "--bare", str(remote))
+    for name in ("a", "b"):
+        git(tmp_path, "init", str(tmp_path / name))
+        git(tmp_path / name, "remote", "add", "origin", str(remote))
+    a = GitBranchStorage(tmp_path / "a" / "state.db", repo_dir=tmp_path / "a",
+                         extra_dbs=[tmp_path / "a" / "state_s2.db"])
+    a.db_path.write_bytes(b"main")
+    a.push("no system 2 yet")                       # missing extra db is simply skipped
+    (tmp_path / "a" / "state_s2.db").write_bytes(b"system2")
+    a.push("both")
+    b = GitBranchStorage(tmp_path / "b" / "state.db", repo_dir=tmp_path / "b",
+                         extra_dbs=[tmp_path / "b" / "state_s2.db"])
+    assert b.pull() is True
+    assert (tmp_path / "b" / "state_s2.db").read_bytes() == b"system2"

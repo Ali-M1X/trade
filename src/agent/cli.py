@@ -125,6 +125,15 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
         except Exception:                       # one failing task must not block the others
             logging.getLogger(__name__).exception("%s failed", task)
             failed.append(task)
+    from . import system2
+    if system2.enabled(cfg):
+        from .store.repository import Repository
+        repo2 = Repository(cfg["system2"]["db_path"])
+        try:
+            system2.run_system2(cfg, repo, repo2, market, notifier, now, tasks)
+        except Exception:                       # paper experiment: never blocks the live system
+            logging.getLogger(__name__).exception("system2 failed")
+        repo2.close()
     extra = {}
     if cfg.get("news", {}).get("enabled"):
         try:

@@ -186,6 +186,25 @@ def confirmation_points(count: int, cfg: dict) -> float:
     return min(c["max_points"], c["points_per_extra"] * count) if count >= c["min_confirmations"] else 0.0
 
 
+def section_max(cfg: dict) -> dict[str, float]:
+    """Most points each L6 section can give with the current scoring config (sums to 100)."""
+    t = cfg["technical"]
+    return {"phase": t["phase"]["points_both"], "dow": t["dow"]["points_both"],
+            "levels": t["levels"]["points_strong"], "volume": t["volume"]["max_points"],
+            "candles": t["candles"]["max_points"], "cycles": t["cycles"]["points_all_aligned_fresh"],
+            "patterns": t["patterns"]["max_points"], "confirmation": t["confirmation"]["max_points"]}
+
+
+def reweight(sections: dict[str, float], cfg: dict) -> dict[str, float]:
+    """technical.section_weights {section: new max}: rescale each section's points to its new
+    maximum (high-risk system 2). Unset = points as they are."""
+    w = cfg["technical"].get("section_weights")
+    if not w:
+        return sections
+    mx = section_max(cfg)
+    return {k: v * w.get(k, mx[k]) / mx[k] for k, v in sections.items()}
+
+
 # ---------------------------------------------------------------- grade
 def grade_for(score: float, cfg: dict) -> str | None:
     g = cfg["grades"]
@@ -271,6 +290,7 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
     if "trigger_candle" in ev.confirmations:
         ev.trigger_1h = cd.trigger_candle(h1.df, h1.n - 1, side, cfg)
 
+    ev.sections = reweight(ev.sections, cfg)
     score = sum(ev.sections.values())
     t = cfg["trade"]
     if funding is not None:

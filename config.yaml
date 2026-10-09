@@ -412,6 +412,14 @@ news:
     bitcoinmagazine: https://bitcoinmagazine.com/.rss/full/
     thedefiant: https://thedefiant.io/api/feed
 
+# High-risk system 2 (paper trading, Ali 2026-10-09): runs next to the live system on the same
+# shortlist with `variant` from backtest.variants, its own database, and messages headed
+# «🔥 سیستم ۲ (High Risk)». Set enabled: false to stop it.
+system2:
+  enabled: true
+  variant: s2_trend
+  db_path: data/state_s2.db
+
 storage:
   backend: local               # local | git_branch
   db_path: data/state.db
@@ -471,6 +479,33 @@ backtest:
     ph_stage:                  # live since 2026-10-09
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical: {classic: {stage: true}}
+    # high-risk system 2 candidates (2026-10-09): live (ph_stage) with other section weights
+    # (new max points per section, sum 100) and/or lower grade thresholds, risk 2% (A) / 1% (B)
+    s2_research:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 15, dow: 20, levels: 15, volume: 15, candles: 5, cycles: 5, patterns: 10, confirmation: 15}
+    s2_levels:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 15, dow: 15, levels: 25, volume: 10, candles: 10, cycles: 5, patterns: 10, confirmation: 10}
+    s2_trend:                  # live as system 2 since 2026-10-09
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+    s2_loose:                  # current weights, A from 70, B from 60
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical: {classic: {stage: true}}
+      grades: {A: 70, B: 60, watch: 50}
+    s2_levels_loose:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 15, dow: 15, levels: 25, volume: 10, candles: 10, cycles: 5, patterns: 10, confirmation: 10}
+      grades: {A: 70, B: 60, watch: 50}
     ph_dryup:
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical: {classic: {range_dryup: true}}

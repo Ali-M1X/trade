@@ -135,7 +135,11 @@ def run_4h(cfg: dict, repo, market: LiveMarket, cg, now_ms: int) -> FunnelResult
     return result
 
 
-def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None) -> list[Evaluation]:
+def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None,
+           book_repo=None) -> list[Evaluation]:
+    """book_repo: where the evaluations and signals go (system 2 keeps its own database);
+    the funnel state is always read from repo."""
+    book_repo = book_repo or repo
     state = repo.get_state("funnel")
     if not state:
         log.warning("no funnel state yet: run-4h first")
@@ -157,9 +161,9 @@ def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None) -> l
                       funding=market.funding_now(base), btc_pair_up=btc_pair_up, extra_levels=extra,
                       labels=item["labels"])
         out.append(ev)
-    repo.set_state("evaluations", {"ts": now_ms, "items": [e.to_dict() for e in out]})
+    book_repo.set_state("evaluations", {"ts": now_ms, "items": [e.to_dict() for e in out]})
     if notifier is not None:
-        publish(cfg, repo, market, notifier, out, now_ms)
+        publish(cfg, book_repo, market, notifier, out, now_ms, state)
     return out
 
 
@@ -190,10 +194,11 @@ def summarize_evaluations(evs: list[Evaluation]) -> str:
 
 
 # ------------------------------------------------------------------ signals
-def publish(cfg: dict, repo, market, notifier, evs: list[Evaluation], now_ms: int) -> list[int]:
+def publish(cfg: dict, repo, market, notifier, evs: list[Evaluation], now_ms: int,
+            state: dict | None = None) -> list[int]:
     """Turn A/B evaluations into signals (subject to the book's rules) and send Watch
-    alerts. Returns the new signal ids."""
-    state = repo.get_state("funnel")
+    alerts. Returns the new signal ids. state: the funnel state (default: read from repo)."""
+    state = state or repo.get_state("funnel")
     book = SignalBook(repo, cfg)
 
     def corr(a: str, b: str):
