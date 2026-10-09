@@ -267,3 +267,25 @@ def test_manage_fills_hits_targets_and_reports(cfg):
     text = daily(cfg, repo, notifier, NOW + 4 * q)
     assert "سیگنال باز: 1 از 5" in text
     assert "🟢 SOLUSDT | LONG | امتیاز 80 | ورود 100.00 | SL 95.00 | TP1 110.00 | TP2 115.00 |" in text
+
+
+def test_system2_keeps_its_own_signals_and_labels_messages(cfg):
+    import io
+
+    from agent import system2
+    from agent.config import load_secrets
+    from agent.notify.telegram import Notifier
+    from agent.signals.manager import SignalBook
+    repo, repo2 = Repository(), Repository()
+    run_4h(cfg, repo, FakeMarket(), FakeCG(), NOW)
+    notifier = Notifier(cfg, load_secrets({}), out=io.StringIO())
+    run_1h(cfg, repo, FakeMarket(), NOW, notifier)
+    live = len(SignalBook(repo, cfg).open_signals())
+    notifier.sent.clear()
+    system2.run_system2(cfg, repo, repo2, FakeMarket(), notifier, NOW, ["run-15m", "run-1h"])
+    cfg2 = system2.system2_config(cfg)
+    assert cfg2["technical"]["section_weights"]["phase"] == 20 and cfg2["trade"]["base_risk_pct"] == 2.0
+    assert len(SignalBook(repo, cfg).open_signals()) == live        # live book untouched
+    assert SignalBook(repo2, cfg2).open_signals()                   # system 2 opened its own
+    assert notifier.sent and all(m.startswith(system2.HEADER + "\n") for m in notifier.sent)
+    assert repo2.get_state("evaluations")["items"]

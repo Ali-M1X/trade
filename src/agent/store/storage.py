@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 class LocalStorage:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, extra_dbs: list[str | Path] = ()):
         self.db_path = Path(db_path)
 
     def pull(self) -> bool:
@@ -30,8 +30,10 @@ class GitBranchStorage:
     FILE = "state.db.gz"
 
     def __init__(self, db_path: str | Path, branch: str = "data", remote: str = "origin",
-                 repo_dir: str | Path = "."):
+                 repo_dir: str | Path = ".", extra_dbs: list[str | Path] = ()):
+        """extra_dbs: further SQLite files kept on the branch as <name>.gz (system 2)."""
         self.db_path = Path(db_path)
+        self.extra_dbs = [Path(p) for p in extra_dbs]
         self.branch = branch
         self.remote = remote
         self.repo_dir = Path(repo_dir)
@@ -49,12 +51,20 @@ class GitBranchStorage:
         except subprocess.CalledProcessError:
             return False
         self.db_path.write_bytes(gzip.decompress(blob))
+        for path in self.extra_dbs:
+            try:
+                path.write_bytes(gzip.decompress(self._git("show", f"FETCH_HEAD:{path.name}.gz")))
+            except subprocess.CalledProcessError:       # not created yet
+                pass
         return True
 
     def push(self, message: str = "Update state", extra: dict[str, bytes] | None = None) -> None:
         """extra: small public files to keep next to the database (e.g. the news context
         the Cloudflare worker reads)."""
         files = {self.FILE: gzip.compress(self.db_path.read_bytes(), mtime=0), **(extra or {})}
+        for path in self.extra_dbs:
+            if path.exists():
+                files[f"{path.name}.gz"] = gzip.compress(path.read_bytes(), mtime=0)
         lines = ""
         for name in sorted(files):
             blob = self._git("hash-object", "-w", "--stdin", input=files[name]).decode().strip()
@@ -72,8 +82,10 @@ class GitBranchStorage:
 def make_storage(cfg: dict, repo_dir: str | Path = "."):
     s = cfg["storage"]
     backend = os.environ.get("AGENT_STORAGE") or s["backend"]
+    s2 = cfg.get("system2") or {}
+    extra_dbs = [s2["db_path"]] if s2.get("enabled") else []
     if backend == "local":
-        return LocalStorage(s["db_path"])
+        return LocalStorage(s["db_path"], extra_dbs)
     if backend == "git_branch":
-        return GitBranchStorage(s["db_path"], s["git_branch"], s["git_remote"], repo_dir)
+        return GitBranchStorage(s["db_path"], s["git_branch"], s["git_remote"], repo_dir, extra_dbs)
     raise ValueError(f"unknown storage backend: {backend}")
