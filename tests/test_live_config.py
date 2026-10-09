@@ -7,8 +7,11 @@ def test_live_config_applies_the_live_variant_on_top(cfg):
     live = live_config(cfg)
     assert live["trade"]["stop_mode"] == "atr" and live["trade"]["tp1_mode"] == "fixed_r"
     assert live["grades"].get("min_signal", "B") == "B"     # grade B is a signal again (#135)
+    assert live["technical"]["classic"]["stage"] is True    # Weinstein stage filter (2026-10-09)
+    assert live["technical"]["classic"]["vcp"] is False
     # the base config (backtest baseline, tests) is untouched
     assert cfg["trade"]["stop_mode"] == "level" and "min_signal" not in cfg["grades"]
+    assert cfg["technical"]["classic"]["stage"] is False
 
 
 def test_live_config_without_a_variant_is_the_base(cfg):

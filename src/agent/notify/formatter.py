@@ -72,7 +72,13 @@ REASON_FA = {
     "grade_b_off": "فعلاً فقط رده A",
     "funding_crowded": "فاندینگ شلوغ",
     "out_of_cap": "خارج از سقف",
-    "not_issued": "صادر نشد",          # A/B setup the signal book held back (cap, correlation, ...)
+    "not_issued": "صادر نشد",
+    # classic filters (technical.classic, experiment)
+    "no_vcp": "بدون VCP",
+    "adx_low": "ADX پایین",
+    "impulse_against_4h": "ایمپالس خلاف 4H", "impulse_against_1w": "ایمپالس خلاف هفتگی",
+    "weekly_tide_against": "روند هفتگی مخالف", "stage_against": "مرحله واینستین مخالف",
+    "range_no_dryup": "حجم رنج خشک نشده", "dmi_against": "ADX/DMI مخالف", "choppy": "حرکت پرنوسان",          # A/B setup the signal book held back (cap, correlation, ...)
 }
 
 FA_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")

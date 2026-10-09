@@ -1,6 +1,7 @@
 """Signal lifecycle as a pure state machine (shared by live runs and the backtest).
 
 pending --fill--> active --TP1--> tp1 --TP2--> tp2 --trail exit--> tp3
+(with trade.trail_from = tp1 the trail exit already applies in tp1)
    |                 |              |            |
    |                 +--SL--> sl    +--SL at entry--> breakeven
    +--> expired (no fill in time) | cancelled (TP1 before entry, or 4H close beyond SL)
@@ -45,6 +46,7 @@ def new_signal(plan: dict, created_ms: int, cfg: dict) -> dict:
         "expires_at": created_ms + lc["expiry_bars_4h"] * H4,
         "sl_now": plan["sl"], "open_frac": 1.0, "realized_r": 0.0,
         "filled_at": None, "closed_at": None,
+        "trail_from": cfg["trade"].get("trail_from", "tp2"),     # tp2 | tp1
         # candles are processed once each: only those opening after these markers
         "last_candle_ts": created_ms - 1, "last_4h_ts": created_ms - 1,
     }
@@ -138,7 +140,8 @@ def on_4h_close(s: dict, ts: int, close: float, ma25: float, choch_against: bool
             return _confirm_fill(s, ts + H4, close)
     if s["status"] == "pending" and (close - s["sl"]) * s["side"] < 0:
         return [_close(s, "cancelled", ts, close, "closed_beyond_sl")]
-    if s["status"] == "tp2" and ((close - ma25) * s["side"] < 0 or choch_against):
+    trailing = s["status"] == "tp2" or (s["status"] == "tp1" and s.get("trail_from") == "tp1")
+    if trailing and ((close - ma25) * s["side"] < 0 or choch_against):
         return [_close(s, "tp3", ts, close, "ma25" if (close - ma25) * s["side"] < 0 else "choch")]
     return []
 

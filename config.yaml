@@ -71,6 +71,8 @@ indicators:
   bollinger_period: 20
   bollinger_std: 2
   obv_lookback: 20
+  ema_impulse: 13             # Elder impulse system
+  adx_period: 14
 
 swings:
   # Fractal pivot: N candles on each side.
@@ -277,6 +279,31 @@ technical:
     pattern_recent_bars: 5     # neckline break must be this recent
     flag_pole_atr: 3.0
     flag_max_retrace: 0.5
+  # Filters from classic trend-following systems (experiment 2026-10-08, off live; the
+  # backtest variants cl_* switch them on). A setup that fails one is only a Watch.
+  classic:
+    impulse: false             # Elder impulse: EMA13 and MACD-hist slopes both against
+    impulse_tfs: [4h, 1w]
+    adx_min: 0                 # 0 = off; e.g. 20: no trade while ADX(14) is below it
+    adx_tf: 4h
+    vcp: false                 # Minervini VCP: shallower corrections, last one quieter
+    vcp_tf: 4h
+    vcp_legs: 10
+    vcp_contractions: 2        # the last N corrections must shrink step by step
+    vcp_max_ratio: 0.8         # each correction at most 80% as deep as the one before
+    # market-phase filters (second experiment; variants ph_*)
+    weekly_tide: false         # Elder: weekly EMA26 slopes with the trade
+    weekly_ema: 26
+    stage: false               # Weinstein: long only in stage 2 (close > rising MA150 on D)
+    stage_ma: 150
+    stage_slope_bars: 20
+    range_dryup: false         # Wyckoff: range setups need falling volume inside the range
+    dmi: false                 # ADX >= dmi_adx_min and +DI/-DI with the trade
+    dmi_tf: 1d
+    dmi_adx_min: 20
+    er_min: 0                  # Kaufman efficiency ratio (signed) >= er_min; 0 = off
+    er_bars: 20
+    er_tf: 1d
   confirmation:
     min_confirmations: 2
     points_per_extra: 2.5
@@ -324,6 +351,7 @@ trade:
   tp1_close_pct: 50
   tp2_r: 3.0
   tp2_close_pct: 30
+  trail_from: tp2              # the rest trails (4H close beyond MA25 / CHoCH) after tp2, or tp1
   leverage_cap: 10
   liquidation_sl_multiple: 2.5
   margin_mode: isolated
@@ -421,10 +449,48 @@ backtest:
     atr_2r_a_only:
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       grades: {min_signal: A}
+    # live (atr_2r) + classic trend-following rules (2026-10-08)
+    cl_exit:                   # let winners run: 25% at TP1, 75% trails MA25 from TP1
+      trade: {stop_mode: atr, tp1_mode: fixed_r, tp1_close_pct: 25, tp2_close_pct: 0, trail_from: tp1}
+    cl_vcp:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {vcp: true}}
+    cl_impulse:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {impulse: true}}
+    cl_adx:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {adx_min: 20}}
+    cl_all:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, tp1_close_pct: 25, tp2_close_pct: 0, trail_from: tp1}
+      technical: {classic: {vcp: true, impulse: true, adx_min: 20}}
+    # live (atr_2r) + market-phase filters (2026-10-08), one at a time, all, all + VCP
+    ph_weekly:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {weekly_tide: true}}
+    ph_stage:                  # live since 2026-10-09
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+    ph_dryup:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {range_dryup: true}}
+    ph_dmi:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {dmi: true}}
+    ph_er:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {er_min: 0.2}}
+    ph_all:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {weekly_tide: true, stage: true, range_dryup: true, dmi: true, er_min: 0.2}}
+    ph_all_vcp:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {vcp: true, weekly_tide: true, stage: true, range_dryup: true, dmi: true, er_min: 0.2}}
 
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest
 # and tests use the settings above unchanged. Empty = exactly STRATEGY.md.
 # 2026-10-01: Ali chose atr_2r for paper trading (DECISIONS.md #133, #135).
+# 2026-10-09: Ali chose ph_stage (atr_2r + Weinstein stage filter) for paper trading.
 live:
-  variant: atr_2r
+  variant: ph_stage
