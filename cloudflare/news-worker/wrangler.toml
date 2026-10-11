@@ -12,6 +12,8 @@ crons = ["* * * * *"]
 CONTEXT_URL = "https://raw.githubusercontent.com/Ali-M1X/trade/data/news_context.json"
 MIN_ALERT_LEVEL = "1"
 MAX_AGE_MIN = "180"
+AGENT_REPO = "Ali-M1X/trade"
+AGENT_WORKFLOW = "agent.yml"
 
 [[kv_namespaces]]
 binding = "NEWS_KV"

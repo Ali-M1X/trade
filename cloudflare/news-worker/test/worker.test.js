@@ -90,3 +90,19 @@ test("negative news is sent when the coin has an open signal", async () => {
   assert.equal(sent.length, 1);
   assert.ok(sent[0].startsWith("⛔️ خبر خیلی منفی | ABC"));
 });
+
+test("agent dispatch: only at minutes 1/16/31/46 and only with a token", async () => {
+  const { dispatchAgent, dispatchDue } = await import("../src/dispatch.js");
+  const at = (m) => Date.UTC(2026, 9, 11, 18, m, 3);
+  assert.deepEqual([0, 1, 15, 16, 31, 46, 47].map((m) => dispatchDue(at(m))), [false, true, false, true, true, true, false]);
+  const calls = [];
+  const fake = async (url, opts) => { calls.push([url, opts]); return { status: 204 }; };
+  const env = { AGENT_REPO: "o/r", AGENT_WORKFLOW: "agent.yml", AGENT_DISPATCH_TOKEN: "t" };
+  assert.deepEqual(await dispatchAgent(env, at(2), fake), { dispatched: false });
+  assert.deepEqual(await dispatchAgent({ ...env, AGENT_DISPATCH_TOKEN: "" }, at(16), fake), { dispatched: false });
+  assert.equal(calls.length, 0);
+  assert.equal((await dispatchAgent(env, at(16), fake)).dispatched, true);
+  assert.equal(calls[0][0], "https://api.github.com/repos/o/r/actions/workflows/agent.yml/dispatches");
+  assert.equal(calls[0][1].headers.authorization, "Bearer t");
+  assert.deepEqual(JSON.parse(calls[0][1].body), { ref: "main" });
+});

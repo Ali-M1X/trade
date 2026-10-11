@@ -4,6 +4,7 @@
 import { classify, exchangeCoins } from "./rules.js";
 import { fetchAll } from "./sources.js";
 import { newsMessage } from "./format.js";
+import { dispatchAgent } from "./dispatch.js";
 
 const KEEP_IDS = 600;
 
@@ -68,9 +69,13 @@ async function telegram(env, text) {
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(step(env, Date.now()).then((r) => console.log(JSON.stringify(r))));
+    // the two jobs are independent: a news failure never stops the agent dispatch
+    const now = event.scheduledTime || Date.now();
+    ctx.waitUntil(dispatchAgent(env, now).then((r) => r.status && console.log(JSON.stringify(r)),
+                                                (e) => console.log(`agent dispatch error: ${e}`)));
+    ctx.waitUntil(step(env, now).then((r) => console.log(JSON.stringify(r))));
   },
   async fetch() {
-    return new Response("trade-news worker: runs every minute\n");
+    return new Response("trade-news worker: news every minute, agent run every 15 minutes\n");
   },
 };
