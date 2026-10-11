@@ -3,6 +3,7 @@ name: news-worker
 # Deploys the fast news path (cloudflare/news-worker) to Cloudflare Workers: it checks Binance
 # and OKX announcements every minute and alerts in Telegram. Needs the repository secrets
 # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (plus the Telegram ones the agent uses);
+# with AGENT_DISPATCH_TOKEN it also starts the agent workflow on time every 15 minutes;
 # without them this workflow only runs the worker tests.
 on:
   workflow_dispatch:
@@ -106,6 +107,23 @@ jobs:
           printf '%s' "$TELEGRAM_BOT_TOKEN" | $WRANGLER secret put TELEGRAM_BOT_TOKEN
           printf '%s' "$TELEGRAM_CHAT_ID" | $WRANGLER secret put TELEGRAM_CHAT_ID
           echo "Deployed: Binance and OKX announcements are checked every minute." >> "$GITHUB_STEP_SUMMARY"
+      - name: Agent dispatch secret (on-time runs)
+        if: steps.secrets.outputs.ok == 'true'
+        env:
+          AGENT_DISPATCH_TOKEN: ${{ secrets.AGENT_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$AGENT_DISPATCH_TOKEN" ]; then
+            echo "AGENT_DISPATCH_TOKEN is not set: the agent keeps running on GitHub's cron only." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          tok=$(printf '%s' "$AGENT_DISPATCH_TOKEN" | tr -d '[:space:]')
+          echo "::add-mask::$tok"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $tok" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml")
+          echo "token can read the agent workflow: HTTP $code"
+          [ "$code" = 200 ] || { echo "AGENT_DISPATCH_TOKEN cannot reach this repository's Actions"; exit 1; }
+          printf '%s' "$tok" | $WRANGLER secret put AGENT_DISPATCH_TOKEN
+          echo "Agent runs are started on time from Cloudflare (minutes 1, 16, 31, 46 UTC)." >> "$GITHUB_STEP_SUMMARY"
       - name: Check the worker reaches the exchanges (after its first runs)
         if: steps.secrets.outputs.ok == 'true'
         run: |
