@@ -99,7 +99,7 @@ def hot_category_coins(cg, hot: set[str], bases: set[str], known: set[str], cfg:
 
 def run_4h(cfg: dict, repo, market: LiveMarket, cg, now_ms: int) -> FunnelResult:
     bases, spreads = market.perp_bases_and_spreads()
-    raw, rows = load_universe(cg, bases, cfg)
+    raw, rows = load_universe(cg, bases, cfg, cfg["universe"].get("coins_top_n"))
     snapshot_global(cg, repo, now_ms)
     ensure_dominance_history(cg, repo, raw, cfg)
     dom = dominance_series(merged_history(repo))

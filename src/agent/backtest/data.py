@@ -49,7 +49,7 @@ def fetch_history(cfg: dict, repo, client, market, cg, now_ms: int) -> dict:
     start = now_ms - b["days"] * DAY
     bases, _ = market.perp_bases_and_spreads()
     # backtest.universe_top_n widens the coin list only; dominance stays on universe.top_n
-    raw, rows = load_universe(cg, bases, cfg, b.get("universe_top_n"))
+    raw, rows = load_universe(cg, bases, cfg, b.get("universe_top_n") or cfg["universe"].get("coins_top_n"))
     if b["max_coins"]:
         rows = rows[:b["max_coins"]]
     targets = sorted({r["symbol"].upper() for r in rows} | {"BTC", "ETH"})

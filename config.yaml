@@ -35,7 +35,10 @@ tvdatafeed:
 
 # ------------------------------------------------------------------ universe
 universe:
-  top_n: 100
+  top_n: 100                   # dominance (TOTAL, BTC.D, USDT.D) is rebuilt from this top list
+  # 2026-10-16: Ali chose 200 coins for both systems (more-trades backtest); the dominance
+  # list above stays at the top 100.
+  coins_top_n: 200
   min_volume_24h_usd: 10000000
   # Pulled from CoinGecko categories and removed from the universe.
   exclude_categories: [stablecoins, wrapped-tokens]
