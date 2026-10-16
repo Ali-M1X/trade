@@ -31,13 +31,16 @@ def frames_for(market, base: str, tfs, cfg, quote_base: str | None = None) -> di
     return out
 
 
-def load_universe(cg, market_bases: set[str], cfg: dict) -> tuple[list[dict], list[dict]]:
+def load_universe(cg, market_bases: set[str], cfg: dict,
+                  top_n: int | None = None) -> tuple[list[dict], list[dict]]:
     """Returns (raw top markets incl. stablecoins, tradable universe rows).
     Universe = top N without stables/wrapped + CoinGecko trending + coins of the hot
     categories, limited to coins with a USDT perpetual on the exchange."""
     u = cfg["universe"]
     raw = cg.markets()
-    rows = cg.top_universe()
+    rows = cg.top_universe(top_n)
+    for i, r in enumerate(rows):
+        r["u_rank"] = i                 # place in the top list (stables excluded)
     ids = {r["id"] for r in rows}
     extra = []
     if u["add_exchange_trending"]:
@@ -96,7 +99,7 @@ def hot_category_coins(cg, hot: set[str], bases: set[str], known: set[str], cfg:
 
 def run_4h(cfg: dict, repo, market: LiveMarket, cg, now_ms: int) -> FunnelResult:
     bases, spreads = market.perp_bases_and_spreads()
-    raw, rows = load_universe(cg, bases, cfg)
+    raw, rows = load_universe(cg, bases, cfg, cfg["universe"].get("coins_top_n"))
     snapshot_global(cg, repo, now_ms)
     ensure_dominance_history(cg, repo, raw, cfg)
     dom = dominance_series(merged_history(repo))

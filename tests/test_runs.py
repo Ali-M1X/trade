@@ -136,7 +136,8 @@ class FakeCG:
                      "total_volume": 1e9, "price_change_percentage_7d_in_currency": 20}]
         return self.rows
 
-    def top_universe(self):
+    def top_universe(self, top_n=None):
+        self.top_n = top_n
         return [r for r in self.rows if r["id"] != "tether"]
 
     def trending_ids(self):
@@ -168,7 +169,9 @@ class FakeCG:
 
 def test_run_4h_then_1h(cfg):
     repo = Repository()
-    res = run_4h(cfg, repo, FakeMarket(), FakeCG(), NOW)
+    cg = FakeCG()
+    res = run_4h(cfg, repo, FakeMarket(), cg, NOW)
+    assert cg.top_n == cfg["universe"]["coins_top_n"] == 200      # dominance stays on top_n
     state = repo.get_state("funnel")
     assert res.regime.name == state["regime"]["name"] == "alt_season"
     assert res.watchlist["SOL"] == ["EARLY_TREND", "RS_LEADER", "HOT_SECTOR"]

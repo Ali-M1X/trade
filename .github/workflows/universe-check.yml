@@ -1,0 +1,54 @@
+name: universe-check
+
+# Check (2026-10-16): how long the live 4H funnel takes with 200 coins, on a scratch copy of
+# the live database. Sends nothing and pushes nothing.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/fair-test]
+    paths: [".github/workflows/universe-check.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - name: Scratch copy of the live database
+        run: |
+          git fetch --depth=1 origin data
+          mkdir -p scratch && git show FETCH_HEAD:state.db.gz | gunzip > scratch/state.db
+      - name: 4H funnel, 100 vs 200 coins
+        run: |
+          python - <<'PY'
+          import os, shutil, time
+          from agent.config import load_config
+          from agent.data.coingecko import CoinGecko
+          from agent.data.exchange import ExchangeClient
+          from agent.data.market import LiveMarket
+          from agent.runs import run_4h, summarize_funnel
+          from agent.store.repository import Repository
+          for n in (100, 200):
+              cfg = load_config()
+              cfg["universe"]["coins_top_n"] = n
+              shutil.copy("scratch/state.db", f"scratch/s{n}.db")
+              repo = Repository(f"scratch/s{n}.db")
+              now = int(time.time() * 1000)
+              market = LiveMarket(cfg, repo, ExchangeClient(cfg), now)
+              cg = CoinGecko(cfg, repo=repo, api_key=os.environ["COINGECKO_API_KEY"])
+              t0 = time.time()
+              res = run_4h(cfg, repo, market, cg, now)
+              print(f"=== {n} coins: {time.time() - t0:.0f}s")
+              print(summarize_funnel(res))
+              repo.close()
+          PY

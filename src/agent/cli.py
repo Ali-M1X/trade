@@ -177,6 +177,8 @@ def cmd_backtest(args, cfg, secrets) -> int:
     from .store.repository import Repository
     if args.days:
         cfg["backtest"]["days"] = args.days
+    if args.top_n:
+        cfg["backtest"]["universe_top_n"] = args.top_n
     if args.max_coins is not None:
         cfg["backtest"]["max_coins"] = args.max_coins
     repo = Repository(args.db or cfg["backtest"]["db_path"])
@@ -217,6 +219,19 @@ def cmd_backtest_compare(args, cfg, secrets) -> int:
     return 0
 
 
+def cmd_backtest_robust(args, cfg, secrets) -> int:
+    import json
+    from pathlib import Path
+
+    from .backtest.robust import robust_report
+    results = [json.loads(Path(p).read_text(encoding="utf-8")) for p in args.inputs]
+    text = robust_report(results, args.baseline)
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.out).write_text(text, encoding="utf-8")
+    print(text)
+    return 0
+
+
 COMMANDS = {
     "check-sources": cmd_check_sources,
     "run-4h": cmd_run_4h,
@@ -228,6 +243,7 @@ COMMANDS = {
     "run-news": cmd_run_news,
     "backtest": cmd_backtest,
     "backtest-compare": cmd_backtest_compare,
+    "backtest-robust": cmd_backtest_robust,
 }
 
 
@@ -245,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--db", help="backtest database (default: backtest.db_path)")
             p.add_argument("--days", type=int, help="replay the last N days (default: backtest.days)")
             p.add_argument("--max-coins", type=int, help="limit the universe (0 = all)")
+            p.add_argument("--top-n", type=int, help="with --fetch: coins from the top N by market cap")
             p.add_argument("--out", default="docs/BACKTEST.md", help="report path")
             p.add_argument("--trades", default="data/backtest_trades.csv", help="trade list CSV")
             p.add_argument("--fetch-only", action="store_true", help="download history, don't replay")
@@ -259,6 +276,10 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("inputs", nargs="+", help="variant result JSON files")
             p.add_argument("--out", default="docs/BACKTEST.md")
             p.add_argument("--detail", default="combined", help="variant shown in full")
+        if name == "backtest-robust":
+            p.add_argument("inputs", nargs="+", help="variant result JSON files (same history)")
+            p.add_argument("--baseline", default="ph_stage", help="variant the others are judged against")
+            p.add_argument("--out", default="ROBUST.md")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(levelname)s %(name)s: %(message)s")

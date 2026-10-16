@@ -16,7 +16,7 @@ DAY = 86_400_000
 LIMITS = """
 ## Assumptions and limits
 
-- **Universe:** today's top-100 (plus the coins that were tradable on the exchange), applied to the whole year. Coins that dropped out of the top 100 during the year are missing (survivorship bias); coins listed during the year enter when their candles start.
+- **Universe:** today's top-200 coins (`universe.coins_top_n`, only those tradable on the exchange), applied to the whole year. Coins that dropped out of that list during the year are missing (survivorship bias); coins listed during the year enter when their candles start.
 - **Dominance:** USDT.D, BTC.D and TOTAL2 come from CoinGecko daily market caps of the top 100 (the free tier allows 365 days). The regime therefore uses the D direction only (no 4H snapshots in the past), and during the first ~100 days MA99 is still warming up, so the direction leans on Dow structure.
 - **Liquidity and categories:** 24h volume and 7-day/30-day category growth use CoinGecko daily history; coin categories are today's. Spreads are unknown historically, so the spread part of the liquidity score is not given.
 - **Open interest:** exchanges keep little OI history, so OI_BUILDUP never fires in the backtest. Trending coins aren't known historically either.
