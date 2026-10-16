@@ -1,0 +1,103 @@
+name: more-trades
+
+# Experiment (2026-10-16): more trades per year. Fetches one history with the top 200 coins,
+# replays the live rules on the top 100 only (today's universe) and on all 200, with a wider
+# shortlist and with a lower B threshold, then judges them with backtest-robust.
+# Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/fair-test]
+    paths: [".github/workflows/more-trades.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - run: trade-agent -v backtest --fetch-only --top-n 200 2>&1 | tail -20
+      - run: gzip -k data/backtest.db
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-db-top200
+          path: data/backtest.db.gz
+          retention-days: 30
+
+  replay:
+    needs: fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [ph_stage_top100, ph_stage, mt_list12, mt_list20, mt_list20_top100, mt_b60, s2_trend_top100, s2_trend, s2_trend_list20]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-top200
+          path: data
+      - run: gunzip data/backtest.db.gz
+      - run: trade-agent -v backtest --variant ${{ matrix.variant }} --json ${{ matrix.variant }}.json 2>&1 | tail -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt-variant-${{ matrix.variant }}
+          path: ${{ matrix.variant }}.json
+
+  robust:
+    needs: replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mt-variant-*
+          path: results
+          merge-multiple: true
+      - name: Report
+        run: |
+          trade-agent backtest-robust results/*.json --baseline ph_stage_top100 --out MORE_TRADES.md > /dev/null
+          python - >> MORE_TRADES.md <<'PY'
+          import json, glob
+          from collections import defaultdict
+          print("\n## Per coin (closed trades, net R)\n")
+          for p in sorted(glob.glob("results/*.json")):
+              r = json.load(open(p))
+              c = defaultdict(lambda: [0, 0.0])
+              for t in r["trades"]:
+                  if t["status"] in ("sl", "breakeven", "tp3"):
+                      c[t["base"]][0] += 1; c[t["base"]][1] += t["net_r"]
+              top = sorted(c.items(), key=lambda kv: -kv[1][1])
+              fmt = lambda kv: f"{kv[0]} {kv[1][1]:+.1f} ({kv[1][0]})"
+              print(f"- `{r['variant']}` ({r['meta']['coins']} coins): best " + ", ".join(map(fmt, top[:5]))
+                    + " · worst " + ", ".join(map(fmt, top[-5:])))
+              print(f"  stats: {dict(sorted(r['stats'].items()))}")
+          PY
+          cat MORE_TRADES.md
+          cat MORE_TRADES.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: more-trades
+          path: MORE_TRADES.md
