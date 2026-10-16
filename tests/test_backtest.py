@@ -156,3 +156,23 @@ def test_split_by_opening_time():
            "trades": [{"created": 50 * 86_400_000}, {"created": 95 * 86_400_000}]}
     tune, hold, cut = split(res, 10)
     assert len(tune) == 1 and len(hold) == 1 and cut == 90 * 86_400_000
+
+
+def _res(name, trades, days=28):
+    return {"variant": name, "meta": {"start": 0, "end": days * 86_400_000, "coins": 2},
+            "trades": [{"created": d * 86_400_000, "net_r": r, "base": c, "status": "tp3"}
+                       for d, r, c in trades]}
+
+
+def test_robust_quarters_bootstrap_and_coin_dependence():
+    from agent.backtest.robust import judge, quarter_totals, robust_report
+    base = _res("base", [(1, -1, "A"), (8, 1, "A"), (15, -1, "B"), (22, 1, "B")])
+    good = _res("good", [(1, 1, "A"), (8, 2, "A"), (15, 1, "B"), (22, 2, "B"), (23, -1, "B")])
+    assert quarter_totals(good) == [1, 2, 1, 1]
+    j = judge(good, base)
+    assert j["better_quarters"] == 3 and j["p_better"] >= 0.9 and j["robust"]
+    assert j["best_coin"] == "A" and j["without_best"] == 2
+    one = _res("one_coin", [(1, 5, "A"), (8, -1, "B"), (15, -1, "B"), (22, -1, "B")])
+    assert not judge(one, base)["robust"]
+    md = robust_report([base, good, one], "base")
+    assert "`good` ✅" in md and "**Passed the rule:** `good`." in md

@@ -1,0 +1,42 @@
+name: robust
+
+# Fair test (2026-10-16): judge every stored variant against the live rules (ph_stage) by
+# quarter, weekly bootstrap and coin dependence. Reuses the 27 variant results of backtest
+# run 37907905856 (one history, 2025-10-09 → 2026-10-09). Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/fair-test]
+    paths:
+      - "src/agent/backtest/robust.py"
+      - ".github/workflows/robust.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  robust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: variant-*
+          path: results
+          merge-multiple: true
+          run-id: 37907905856
+          repository: Ali-M1X/trade
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: trade-agent backtest-robust results/*.json --baseline ph_stage --out ROBUST.md
+      - run: cat ROBUST.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: robust
+          path: ROBUST.md
