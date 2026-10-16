@@ -117,11 +117,11 @@ class CoinGecko:
                 pass  # static lists still apply
         return ids
 
-    def top_universe(self) -> list[dict]:
+    def top_universe(self, top_n: int | None = None) -> list[dict]:
         """Top N coins by market cap, without stablecoins and wrapped tokens."""
         return filter_universe(self.markets(), self.excluded_ids(),
                                set(self.universe_cfg["exclude_symbols"]),
-                               self.universe_cfg["top_n"])
+                               top_n or self.universe_cfg["top_n"])
 
 
 def filter_universe(markets: list[dict], excluded_ids: set[str], excluded_symbols: set[str],

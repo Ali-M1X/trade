@@ -176,3 +176,16 @@ def test_robust_quarters_bootstrap_and_coin_dependence():
     assert not judge(one, base)["robust"]
     md = robust_report([base, good, one], "base")
     assert "`good` ✅" in md and "**Passed the rule:** `good`." in md
+
+
+def test_universe_rank_replays_only_the_top_of_a_wider_list(cfg):
+    from agent.backtest.engine import Backtest
+    from agent.backtest.variants import variant_cfg
+    repo = build(days=30)
+    rows = repo.get_state("bt_universe")
+    repo.set_state("bt_universe", [{**r, "u_rank": i} for i, r in enumerate(rows)])
+    meta = repo.get_state("bt_meta")
+    assert len(Backtest(cfg, repo, meta["start"], meta["end"]).rows) == len(rows)
+    cfg["backtest"]["universe_rank"] = 1
+    assert len(Backtest(cfg, repo, meta["start"], meta["end"]).rows) == 1
+    assert variant_cfg(cfg, "ph_stage_top100")["backtest"]["universe_rank"] == 100

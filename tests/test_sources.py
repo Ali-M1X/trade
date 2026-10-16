@@ -134,7 +134,7 @@ def test_check_sources_report(cfg):
     class FakeCG:
         def ping(self): return {"gecko_says": "(V3) To the Moon!"}
         def global_data(self): return {"market_cap_percentage": {"btc": 57.1}}
-        def top_universe(self): return [{}] * 100
+        def top_universe(self, top_n=None): return [{}] * 100
         def categories(self): raise RuntimeError("HTTP 429")
 
     probes = check_sources(cfg, load_secrets({}), factory=factory_with({"bitget"}, {"bitunix"}),

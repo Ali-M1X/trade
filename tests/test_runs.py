@@ -136,7 +136,7 @@ class FakeCG:
                      "total_volume": 1e9, "price_change_percentage_7d_in_currency": 20}]
         return self.rows
 
-    def top_universe(self):
+    def top_universe(self, top_n=None):
         return [r for r in self.rows if r["id"] != "tether"]
 
     def trending_ids(self):

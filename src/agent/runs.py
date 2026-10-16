@@ -31,13 +31,16 @@ def frames_for(market, base: str, tfs, cfg, quote_base: str | None = None) -> di
     return out
 
 
-def load_universe(cg, market_bases: set[str], cfg: dict) -> tuple[list[dict], list[dict]]:
+def load_universe(cg, market_bases: set[str], cfg: dict,
+                  top_n: int | None = None) -> tuple[list[dict], list[dict]]:
     """Returns (raw top markets incl. stablecoins, tradable universe rows).
     Universe = top N without stables/wrapped + CoinGecko trending + coins of the hot
     categories, limited to coins with a USDT perpetual on the exchange."""
     u = cfg["universe"]
     raw = cg.markets()
-    rows = cg.top_universe()
+    rows = cg.top_universe(top_n)
+    for i, r in enumerate(rows):
+        r["u_rank"] = i                 # place in the top list (stables excluded)
     ids = {r["id"] for r in rows}
     extra = []
     if u["add_exchange_trending"]:

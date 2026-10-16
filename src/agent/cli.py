@@ -177,6 +177,8 @@ def cmd_backtest(args, cfg, secrets) -> int:
     from .store.repository import Repository
     if args.days:
         cfg["backtest"]["days"] = args.days
+    if args.top_n:
+        cfg["backtest"]["universe_top_n"] = args.top_n
     if args.max_coins is not None:
         cfg["backtest"]["max_coins"] = args.max_coins
     repo = Repository(args.db or cfg["backtest"]["db_path"])
@@ -259,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--db", help="backtest database (default: backtest.db_path)")
             p.add_argument("--days", type=int, help="replay the last N days (default: backtest.days)")
             p.add_argument("--max-coins", type=int, help="limit the universe (0 = all)")
+            p.add_argument("--top-n", type=int, help="with --fetch: coins from the top N by market cap")
             p.add_argument("--out", default="docs/BACKTEST.md", help="report path")
             p.add_argument("--trades", default="data/backtest_trades.csv", help="trade list CSV")
             p.add_argument("--fetch-only", action="store_true", help="download history, don't replay")

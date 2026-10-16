@@ -521,6 +521,42 @@ backtest:
     ph_all_vcp:
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical: {classic: {vcp: true, weekly_tide: true, stage: true, range_dryup: true, dmi: true, er_min: 0.2}}
+    # more trades (2026-10-16), on a history fetched with --top-n 200. `*_top100` replays only
+    # the top 100 of that list (today's universe); the rest add coins, a wider shortlist
+    # (more coins reach the L6 score each 4H) or a lower B threshold.
+    ph_stage_top100:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      backtest: {universe_rank: 100}
+    mt_list12:                 # ph_stage, shortlist 12 coins from score 55 (now 8 from 60)
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      shortlist: {max_coins: 12, min_score: 55}
+    mt_list20:                 # ph_stage, shortlist 20 coins from score 50
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      shortlist: {max_coins: 20, min_score: 50}
+    mt_list20_top100:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      shortlist: {max_coins: 20, min_score: 50}
+      backtest: {universe_rank: 100}
+    mt_b60:                    # ph_stage, grade B from 60 (now 65), A unchanged at 75
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      grades: {B: 60, watch: 50}
+    s2_trend_top100:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+      backtest: {universe_rank: 100}
+    s2_trend_list20:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+      shortlist: {max_coins: 20, min_score: 50}
 
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest

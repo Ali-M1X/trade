@@ -39,6 +39,8 @@ class Backtest:
         self.book_repo = Repository()
         self.book = SignalBook(self.book_repo, cfg)
         self.rows = data_repo.get_state("bt_universe", [])
+        if cfg["backtest"].get("universe_rank"):      # replay only the top N of a wider list
+            self.rows = [r for r in self.rows if r.get("u_rank", 0) < cfg["backtest"]["universe_rank"]]
         self.categories = data_repo.get_state("bt_categories", {})
         self.dom = dominance_series(merged_history(data_repo))
         self.watch: dict = {}
