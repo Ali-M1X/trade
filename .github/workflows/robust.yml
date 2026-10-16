@@ -35,6 +35,19 @@ jobs:
           repository: Ali-M1X/trade
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - run: trade-agent backtest-robust results/*.json --baseline ph_stage --out ROBUST.md
+      # the same check on the older history (2025-09-30 → 2026-09-30) used for system 2
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hr-variant-*
+          path: results_old
+          merge-multiple: true
+          run-id: 37902857594
+          repository: Ali-M1X/trade
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          trade-agent backtest-robust results_old/*.json --baseline ph_stage --out ROBUST_old.md
+          printf '\n## Older history\n\n' >> ROBUST.md
+          sed 1d ROBUST_old.md >> ROBUST.md
       - run: cat ROBUST.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
