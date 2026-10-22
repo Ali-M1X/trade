@@ -1,0 +1,41 @@
+name: price-regime
+
+# Analysis (2026-10-22): price-based bull / bear / range regime over several years, and the
+# backtest trades labelled with it. Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/regime-review]
+    paths: ["scripts/price_regime.py", ".github/workflows/price-regime.yml"]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with: {pattern: "mt-variant-*", path: r200, merge-multiple: true, run-id: 38937668729,
+               repository: Ali-M1X/trade, github-token: "${{ secrets.GITHUB_TOKEN }}"}
+      - uses: actions/download-artifact@v4
+        with: {pattern: "hr-variant-*", path: r30, merge-multiple: true, run-id: 37902857594,
+               repository: Ali-M1X/trade, github-token: "${{ secrets.GITHUB_TOKEN }}"}
+      - run: |
+          python scripts/price_regime.py --since 2019-01-01 \
+            --trades r200/ph_stage_top100.json r200/s2_trend_top100.json r30/ph_stage.json r30/s2_trend.json
+          cat PRICE_REGIME.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: price-regime
+          path: |
+            PRICE_REGIME.md
+            price_regime.csv
