@@ -1,0 +1,75 @@
+name: long-systems
+
+# Experiment (2026-10-22): published rule systems as candidates for one regime each, replayed
+# year by year on the multi-year history fetched by long-backtest (run 39759176433).
+# Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/regime-review]
+    paths: [".github/workflows/long-systems.yml"]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [bull_donchian, bull_pullback, bear_donchian, bear_rally_short, range_meanrev]
+        year: [2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-long
+          path: data
+          run-id: 39759176433
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: gunzip data/backtest.db.gz
+      - name: Replay one year
+        run: |
+          next=$(( ${{ matrix.year }} + 1 ))
+          trade-agent -v backtest --variant ${{ matrix.variant }} --start ${{ matrix.year }}-01-01 \
+            --end ${next}-01-01 --json ${{ matrix.variant }}-${{ matrix.year }}.json 2>&1 | tail -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sys-${{ matrix.variant }}-${{ matrix.year }}
+          path: ${{ matrix.variant }}-${{ matrix.year }}.json
+
+  report:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sys-*
+          path: results
+          merge-multiple: true
+      - name: Report
+        run: |
+          python scripts/long_report.py results/*.json
+          cat LONG_BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: systems-report
+          path: |
+            LONG_BACKTEST.md
+            *_joined.json
