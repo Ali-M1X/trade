@@ -1,0 +1,83 @@
+name: long-combo
+
+# Experiment (2026-10-22): one system per regime, assembled from the 2021-2026 split, judged
+# against the house system (long_ph_stage) with backtest-robust. Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/regime-review]
+    paths: [".github/workflows/long-combo.yml"]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [regime_combo, regime_combo_bear_off]
+        year: [2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-long
+          path: data
+          run-id: 39759176433
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: gunzip data/backtest.db.gz
+      - name: Replay one year
+        run: |
+          next=$(( ${{ matrix.year }} + 1 ))
+          trade-agent -v backtest --variant ${{ matrix.variant }} --start ${{ matrix.year }}-01-01 \
+            --end ${next}-01-01 --json ${{ matrix.variant }}-${{ matrix.year }}.json 2>&1 | tail -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: combo-${{ matrix.variant }}-${{ matrix.year }}
+          path: ${{ matrix.variant }}-${{ matrix.year }}.json
+
+  report:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: combo-*
+          path: results
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: long-long_*
+          path: results
+          merge-multiple: true
+          run-id: 39759176433
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Report
+        run: |
+          python scripts/long_report.py results/*.json
+          trade-agent backtest-robust *_joined.json --baseline long_ph_stage --out ROBUST.md
+          cat ROBUST.md LONG_BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: combo-report
+          path: |
+            LONG_BACKTEST.md
+            ROBUST.md
+            *_joined.json
