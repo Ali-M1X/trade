@@ -28,7 +28,6 @@ import pandas as pd
 
 from agent.backtest.report import CLOSED_TRADES
 from agent.config import load_config
-from agent.data.exchange import ExchangeClient, perp_symbol
 
 DAY = 86_400_000
 BASKET = ["ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "LINK", "AVAX", "DOT", "LTC", "BCH", "TRX"]
@@ -37,13 +36,47 @@ FWD = 30
 NAMES = ("bull", "range", "bear")
 
 
-def daily(client, base: str, since: int) -> pd.Series:
-    try:
-        _, rows = client.fetch_history(perp_symbol(base), "1d", since)
-    except Exception as e:
-        print(f"{base}: {e}")
-        return pd.Series(dtype=float)
-    df = pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close", "volume"])
+SPOT_EXCHANGES = ("okx", "gate", "kucoin")
+
+
+def _spot(name: str, cfg: dict):
+    import ccxt
+    return getattr(ccxt, name)({"enableRateLimit": True, "timeout": cfg["exchange"]["timeout_ms"],
+                                "options": {"defaultType": "spot"}})
+
+
+def _range(ex, symbol: str, since: int, limit: int) -> list:
+    """Forward pages from `since`; empty windows before the listing are skipped, not
+    replaced by the latest candles (ExchangeClient.fetch_ohlcv_range does that)."""
+    now, out, cursor = ex.milliseconds(), {}, since
+    while cursor < now:
+        batch = ex.fetch_ohlcv(symbol, "1d", cursor, limit) or []
+        batch = [r for r in batch if r[0] >= cursor]
+        # nothing in this window (before the listing), or the exchange ignored `since`
+        if not batch or batch[0][0] >= cursor + limit * DAY:
+            cursor += limit * DAY
+            continue
+        out.update({r[0]: r for r in batch})
+        cursor = batch[-1][0] + DAY
+    return [out[k] for k in sorted(out)]
+
+
+def daily(cfg: dict, base: str, since: int) -> pd.DataFrame:
+    """Spot daily candles (longer history than perpetuals) from the exchange with the
+    earliest start."""
+    best = []
+    for name in SPOT_EXCHANGES:
+        try:
+            rows = _range(_spot(name, cfg), f"{base}/USDT", since, 100)
+        except Exception as e:
+            print(f"{base} {name}: {type(e).__name__}: {str(e)[:120]}")
+            continue
+        print(f"{base} {name}: {len(rows)} days" + (f" from {_d(rows[0][0])}" if rows else ""))
+        if rows and (not best or rows[0][0] < best[0][0]):
+            best = rows
+        if best and best[0][0] <= since + 7 * DAY:
+            break
+    df = pd.DataFrame(best, columns=["ts", "open", "high", "low", "close", "volume"])
     return df.set_index("ts")[["high", "low", "close"]].astype(float)
 
 
@@ -186,9 +219,9 @@ def main():
     ap.add_argument("--trades", nargs="*", default=[])
     a = ap.parse_args()
     since = int(datetime.fromisoformat(a.since + "T00:00:00+00:00").timestamp() * 1000)
-    client = ExchangeClient(load_config())
-    btc = daily(client, "BTC", since)
-    alts = basket_index({b: f for b in BASKET if len(f := daily(client, b, since))})
+    cfg = load_config()
+    btc = daily(cfg, "BTC", since)
+    alts = basket_index({b: f for b in BASKET if len(f := daily(cfg, b, since))})
     alts = alts.reindex(btc.index).ffill()
     print(f"BTC {len(btc)} days from {_d(btc.index[0])}; basket from {_d(alts.dropna().index[0])}")
     lines = ["# Price regime: bull / bear / range", "",
