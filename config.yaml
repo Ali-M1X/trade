@@ -598,6 +598,24 @@ backtest:
       regime: {source: price, price: {systems: {bear: {system: {kind: ma_pullback, sides: [-1]}}, bull: "off", range: "off"}}}
     range_meanrev:
       regime: {source: price, price: {systems: {range: {system: {kind: meanrev}}, bull: "off", bear: "off"}}}
+    # assembled from the 2021-2026 split (DECISIONS: per-regime systems): the house system
+    # (ph_stage) long-only in bull and range, system 2 (s2_trend) short-only in bear
+    regime_combo:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+    regime_combo_bear_off:     # the same without trading the bear regime
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}}
+          systems: {bear: "off"}
 
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest
