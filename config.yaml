@@ -622,5 +622,6 @@ backtest:
 # and tests use the settings above unchanged. Empty = exactly STRATEGY.md.
 # 2026-10-01: Ali chose atr_2r for paper trading (DECISIONS.md #133, #135).
 # 2026-10-09: Ali chose ph_stage (atr_2r + Weinstein stage filter) for paper trading.
+# 2026-10-22: one system per price regime (regime_combo, DECISIONS.md #138-140).
 live:
-  variant: ph_stage
+  variant: regime_combo

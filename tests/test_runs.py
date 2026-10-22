@@ -292,3 +292,39 @@ def test_system2_keeps_its_own_signals_and_labels_messages(cfg):
     assert SignalBook(repo2, cfg2).open_signals()                   # system 2 opened its own
     assert notifier.sent and all(m.startswith(system2.HEADER + "\n") for m in notifier.sent)
     assert repo2.get_state("evaluations")["items"]
+
+
+def test_price_regime_runs_the_regime_system_and_keeps_system2_on_dominance(cfg):
+    """live.variant regime_combo: system 1 trades by the price regime; system 2 reads the
+    dominance funnel."""
+    import io
+
+    from agent import system2
+    from agent.backtest.variants import variant_cfg
+    from agent.config import load_secrets
+    from agent.notify.telegram import Notifier
+    from agent.signals.manager import SignalBook
+    live = variant_cfg(cfg, "regime_combo")
+    repo, repo2 = Repository(), Repository()
+    res = run_4h(live, repo, FakeMarket(), FakeCG(), NOW)
+    assert res.regime.name == "bull" and res.regime.bias == "long"      # every series trends up
+    assert all(c.side == 1 for c in res.shortlist)
+    assert repo.get_state("funnel_dominance")["regime"]["name"] == "alt_season"
+    notifier = Notifier(live, load_secrets({}), out=io.StringIO())
+    run_1h(live, repo, FakeMarket(), NOW, notifier)
+    sigs = SignalBook(repo, live).open_signals()
+    assert sigs and all(s["payload"]["system"] == "bull" for s in sigs)
+    system2.run_system2(live, repo, repo2, FakeMarket(), notifier, NOW, ["run-1h"])
+    assert system2.system2_config(live)["regime"]["source"] == "dominance"
+    assert all(s["payload"]["regime"]["name"] == "alt_season"
+               for s in SignalBook(repo2, live).open_signals())
+
+
+def test_bear_regime_uses_its_own_system(cfg):
+    from agent.backtest.variants import variant_cfg
+    from agent.regime_systems import system_cfg
+    live = variant_cfg(cfg, "regime_combo")
+    assert system_cfg(live, "bear")["trade"]["base_risk_pct"] == 2.0          # s2_trend
+    assert system_cfg(live, "bull")["trade"]["base_risk_pct"] == 1.0
+    assert system_cfg(live, "neutral") is live                                # older signals
+    assert system_cfg(variant_cfg(cfg, "regime_combo_bear_off"), "bear") is None

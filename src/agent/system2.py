@@ -37,7 +37,9 @@ def system2_config(cfg: dict) -> dict:
     variants = cfg["backtest"]["variants"]
     if name not in variants:
         raise SystemExit(f"system2.variant {name!r} is not in backtest.variants")
-    return merge(cfg, {**variants[name], "watch_alerts": {"enabled": False}})
+    # system 2 stays on the dominance regime when system 1 trades by price regime
+    return merge(cfg, {**variants[name], "watch_alerts": {"enabled": False},
+                       "regime": {"source": "dominance"}})
 
 
 def run_system2(cfg: dict, repo, repo2, market, notifier, now_ms: int, tasks: list[str]) -> None:
@@ -46,7 +48,8 @@ def run_system2(cfg: dict, repo, repo2, market, notifier, now_ms: int, tasks: li
     if "run-15m" in tasks:
         print(f"system2 run-15m: {len(manage(cfg2, repo2, market, out, now_ms))} signal events")
     if "run-1h" in tasks:
-        evs = run_1h(cfg2, repo, market, now_ms, out, book_repo=repo2)
+        key = "funnel_dominance" if repo.get_state("funnel_dominance") else "funnel"
+        evs = run_1h(cfg2, repo, market, now_ms, out, book_repo=repo2, state_key=key)
         print(f"system2 run-1h: {sum(e.is_signal for e in evs)} A/B of {len(evs)} evaluated")
     if "run-weekly" in tasks:
         out.send(fmt.performance_message(repo2.get_signals(), now_ms))

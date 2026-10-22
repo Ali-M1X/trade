@@ -19,6 +19,9 @@ REGIME_FA = {
     "risk_off": "Risk-off",
     "capitulation": "ریزش همه‌جانبه",
     "neutral": "خنثی/رنج",
+    "bull": "صعودی",
+    "range": "رنج",
+    "bear": "نزولی",
 }
 
 SIGNAL_ICON, WATCH_ICON = "🟢", "🟡"

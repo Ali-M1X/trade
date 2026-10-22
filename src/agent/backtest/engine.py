@@ -23,6 +23,7 @@ from ..layers.price_regime import alt_index, market_states
 from ..layers.regime import Regime, compute_regime, make_price_regime
 from ..layers.scanners import CoinData, liquid
 from ..layers.technical import evaluate
+from ..regime_systems import system_cfg
 from ..layers.trade import flip_level
 from ..signals.lifecycle import OPEN, on_4h_close, on_candle, on_time
 from ..signals.manager import SignalBook
@@ -119,17 +120,8 @@ class Backtest:
         self.stats["shortlisted"] += len(res.shortlist)
 
     def _systems(self) -> dict:
-        """regime.price.systems: regime name -> a variant name, overrides, or "off". The
-        regime's system screens, scores, plans and manages the trades opened in it."""
-        from .variants import merge
-        out = {}
-        for name, sys in (self.cfg["regime"]["price"].get("systems") or {}).items():
-            if sys == "off":
-                out[name] = None
-            else:
-                over = self.cfg["backtest"]["variants"][sys] if isinstance(sys, str) else sys
-                out[name] = merge(self.cfg, {k: v for k, v in over.items() if k != "regime"})
-        return out
+        """Regime name -> its system's config (None = "off"); see regime_systems.py."""
+        return {name: system_cfg(self.cfg, name) for name in ("bull", "range", "bear")}
 
     def cfg_for(self, regime_name: str | None) -> dict:
         return self.systems.get(regime_name) or self.cfg
