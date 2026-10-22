@@ -586,6 +586,18 @@ backtest:
         classic: {stage: true}
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
       regime: {source: price}
+    # one regime at a time (the others off): published rule systems (layers/classic_systems.py)
+    # as candidates where the house system loses; compared with the house rows of long_*
+    bull_donchian:
+      regime: {source: price, price: {systems: {bull: {system: {kind: donchian, sides: [1]}}, range: "off", bear: "off"}}}
+    bull_pullback:
+      regime: {source: price, price: {systems: {bull: {system: {kind: ma_pullback, sides: [1]}}, range: "off", bear: "off"}}}
+    bear_donchian:
+      regime: {source: price, price: {systems: {bear: {system: {kind: donchian, sides: [-1]}}, bull: "off", range: "off"}}}
+    bear_rally_short:
+      regime: {source: price, price: {systems: {bear: {system: {kind: ma_pullback, sides: [-1]}}, bull: "off", range: "off"}}}
+    range_meanrev:
+      regime: {source: price, price: {systems: {range: {system: {kind: meanrev}}, bull: "off", bear: "off"}}}
 
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest

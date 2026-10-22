@@ -15,12 +15,13 @@ from collections import Counter
 import pandas as pd
 
 from ..data.dominance import dominance_series, merged_history
+from ..layers.classic_systems import evaluate_classic
 from ..layers.funnel import run_funnel
 from ..layers.majors import Majors
 from ..layers.pairs import returns_corr_beta
 from ..layers.price_regime import alt_index, market_states
 from ..layers.regime import Regime, compute_regime, make_price_regime
-from ..layers.scanners import CoinData
+from ..layers.scanners import CoinData, liquid
 from ..layers.technical import evaluate
 from ..layers.trade import flip_level
 from ..signals.lifecycle import OPEN, on_4h_close, on_candle, on_time
@@ -62,6 +63,8 @@ class Backtest:
             self.manage(h)
             if h % H4 == 0:
                 self.funnel(h)
+            if h % DAY == 0 and self.state and self._classic():
+                self.classic(h)
             if self.state:
                 self.regime_hours[self.state["regime"]["name"]] += 1
                 self.l6(h)
@@ -110,7 +113,7 @@ class Backtest:
                          breakout_watch=self.watch, now_ms=t, regime=self._regime[1])
         self.watch = res.breakout_watch
         self.state = res.to_dict()
-        if self.systems.get(name, "") is None:                 # no system for this regime
+        if self.systems.get(name, "") is None or self._classic():    # off, or a rule system
             self.state["shortlist"] = []
         self.stats["funnel_runs"] += 1
         self.stats["shortlisted"] += len(res.shortlist)
@@ -130,6 +133,43 @@ class Backtest:
 
     def cfg_for(self, regime_name: str | None) -> dict:
         return self.systems.get(regime_name) or self.cfg
+
+    def _classic(self) -> dict | None:
+        """The rule system (layers/classic_systems.py) of the current regime, if it has one."""
+        if not self._regime or self.systems.get(self._regime[1].name, "") is None:
+            return None
+        return self.cfg_for(self._regime[1].name).get("system")
+
+    def classic(self, t: int) -> None:
+        regime, majors = Regime(**self.state["regime"]), Majors(**self.state["majors"])
+        cfg, sys = self.cfg_for(regime.name), self._classic()
+        hits = []
+        for row in self.rows:
+            info = self.h.coin_row(row, t)
+            if info is None or not liquid(info, cfg):
+                continue
+            base = row["symbol"].upper()
+            d = self.h.closed(base, "1d", t).iloc[-400:]
+            for side in sys.get("sides", [1, -1]):
+                if not regime.allows(side):
+                    continue
+                self.stats["evaluations"] += 1
+                hit = evaluate_classic(base, d, side, sys, regime.risk_for(side, base == "BTC", True)
+                                       * majors.risk_multiplier, cfg)
+                if hit:
+                    hits.append(hit)
+        for ev, _ in sorted(hits, key=lambda h: (-h[1], h[0].base)):
+            self.stats["grade_A"] += 1
+            adm = self.book.admit(ev.base, ev.side, ev.score, t, self._corr(t))
+            if not adm.ok:
+                self.stats[f"blocked_{adm.reason}"] += 1
+                continue
+            self.book.cfg = cfg
+            self.book.create(ev, t, {"regime": self.state["regime"], "majors": self.state["majors"],
+                                     "evaluation": ev.to_dict(), "out_of_cap": adm.out_of_cap,
+                                     "system": sys["kind"]})
+            self.book.cfg = self.cfg
+            self.stats["signals"] += 1
 
     def _price_series(self):
         """Daily rows for the price regime, stamped at the day's close - 1 ms so that
@@ -227,7 +267,7 @@ class Backtest:
             out.append({
                 "id": s["id"], "base": s["symbol"], "side": p["lifecycle"]["side"],
                 "grade": s["grade"], "score": s["score"], "created": s["created_at"],
-                "regime": p["regime"]["name"], "status": s["status"],
+                "regime": p["regime"]["name"], "system": p.get("system", "house"), "status": s["status"],
                 # the lifecycle's entry/stop: the plan's, or rebuilt at a confirm_4h fill
                 "order": p["plan"]["order"], "entry": p["lifecycle"]["entry"],
                 "sl": p["lifecycle"]["sl"], "tp1_r": _tp1_r(p),
