@@ -1,0 +1,38 @@
+name: regime-review
+
+# Analysis (2026-10-22): backtest trades by market regime and simple what-if filters, on the
+# three stored histories. Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/regime-review]
+    paths: ["scripts/regime_review.py", ".github/workflows/regime-review.yml"]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with: {pattern: "mt-variant-*", path: r200, merge-multiple: true, run-id: 38937668729,
+               repository: Ali-M1X/trade, github-token: "${{ secrets.GITHUB_TOKEN }}"}
+      - uses: actions/download-artifact@v4
+        with: {pattern: "variant-*", path: r09, merge-multiple: true, run-id: 37907905856,
+               repository: Ali-M1X/trade, github-token: "${{ secrets.GITHUB_TOKEN }}"}
+      - uses: actions/download-artifact@v4
+        with: {pattern: "hr-variant-*", path: r30, merge-multiple: true, run-id: 37902857594,
+               repository: Ali-M1X/trade, github-token: "${{ secrets.GITHUB_TOKEN }}"}
+      - run: |
+          python scripts/regime_review.py --set "Oct16 top200" r200/*.json --set "Oct09 top100" r09/*.json \
+            --set "Sep30 top100" r30/*.json | tee REGIMES.md
+          cat REGIMES.md >> "$GITHUB_STEP_SUMMARY"
