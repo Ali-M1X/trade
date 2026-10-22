@@ -160,3 +160,21 @@ def test_history_falls_back_to_latest_when_since_predates_listing(cfg):
     name, rows = client.fetch_history("NEW/USDT:USDT", "1w", since=0, until=5000)
     assert name == "okx" and [r[0] for r in rows] == [4000, 4001]
     assert calls == [0, None]
+
+
+def test_history_skip_gaps_pages_past_the_listing(cfg):
+    """Multi-year backtests: an empty page before the listing moves on, it never falls back
+    to the latest candles."""
+    cfg["exchange"].update(primary="okx", fallbacks=[], ohlcv_limit=3)
+    ex = FakeExchange("okx")
+    ex.parse_timeframe = lambda tf: 1          # 1 s per candle -> step 1000 ms
+    data = [[t, 1, 1, 1, 1, 1] for t in range(250_000, 260_000, 1000)]
+
+    def fetch(symbol, tf, since=None, limit=None):
+        if since is None:
+            return data[-limit:]
+        return [r for r in data if r[0] >= since][:limit]
+    ex.fetch_ohlcv = fetch
+    client = ExchangeClient(cfg, factory=lambda n, c: ex, sleep=lambda s: None)
+    _, rows = client.fetch_history("NEW/USDT:USDT", "1d", since=0, until=270_000, skip_gaps=True)
+    assert [r[0] for r in rows] == [r[0] for r in data]

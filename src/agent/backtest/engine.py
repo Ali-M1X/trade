@@ -12,11 +12,14 @@ from __future__ import annotations
 import logging
 from collections import Counter
 
+import pandas as pd
+
 from ..data.dominance import dominance_series, merged_history
 from ..layers.funnel import run_funnel
 from ..layers.majors import Majors
 from ..layers.pairs import returns_corr_beta
-from ..layers.regime import Regime, compute_regime
+from ..layers.price_regime import alt_index, market_states
+from ..layers.regime import Regime, compute_regime, make_price_regime
 from ..layers.scanners import CoinData
 from ..layers.technical import evaluate
 from ..layers.trade import flip_level
@@ -28,6 +31,7 @@ from .history import History
 log = logging.getLogger(__name__)
 HOUR = 3_600_000
 H4 = 4 * HOUR
+DAY = 24 * HOUR
 
 
 class Backtest:
@@ -42,7 +46,8 @@ class Backtest:
         if cfg["backtest"].get("universe_rank"):      # replay only the top N of a wider list
             self.rows = [r for r in self.rows if r.get("u_rank", 0) < cfg["backtest"]["universe_rank"]]
         self.categories = data_repo.get_state("bt_categories", {})
-        self.dom = dominance_series(merged_history(data_repo))
+        self.price = cfg["regime"].get("source") == "price"
+        self.dom = self._price_series() if self.price else dominance_series(merged_history(data_repo))
         self.watch: dict = {}
         self._regime: tuple | None = None       # (last dominance ts, Regime)
         self.state: dict | None = None
@@ -93,13 +98,35 @@ class Backtest:
                 categories=self.categories.get(row["id"], [])))
         last_dom = int(dom["ts"].iloc[-1])
         if not self._regime or self._regime[0] != last_dom:     # dominance is daily
-            self._regime = (last_dom, compute_regime(dom, self.cfg))
+            if self.price:
+                row = dom.iloc[-1]
+                self._regime = (last_dom, make_price_regime(int(row["state"]), int(row["alts_dir"]),
+                                                            self.cfg))
+            else:
+                self._regime = (last_dom, compute_regime(dom, self.cfg))
         res = run_funnel(dom, majors, coins, markets, self.categories, self.cfg,
                          breakout_watch=self.watch, now_ms=t, regime=self._regime[1])
         self.watch = res.breakout_watch
         self.state = res.to_dict()
         self.stats["funnel_runs"] += 1
         self.stats["shortlisted"] += len(res.shortlist)
+
+    def _price_series(self):
+        """Daily rows for the price regime, stamped at the day's close - 1 ms so that
+        `ts <= t` keeps only closed days and a floor to the day gives the candle's own day:
+        state/alts_dir (layers/price_regime.py) and total2 = the alt index (pairs read its
+        daily closes in place of TOTAL2)."""
+        p = self.cfg["regime"]["price"]
+        cols = ["high", "low", "close"]
+        btc = self.h.raw("BTC", "1d").set_index("ts")[cols].astype(float)
+        alts = alt_index({b: f.set_index("ts")[cols].astype(float)
+                          for b in p["basket"] if len(f := self.h.raw(b, "1d"))})
+        alts = alts.reindex(btc.index).ffill()
+        st = market_states(btc, alts, p).dropna()
+        out = pd.DataFrame({"ts": st.index + DAY - 1, "state": st["state"].astype(int),
+                            "alts_dir": st["alts"].astype(int),
+                            "total2": alts["close"].reindex(st.index).to_numpy()})
+        return out.reset_index(drop=True)
 
     def _frames(self, base, tfs, t, quote_base=None) -> dict:
         out = {}

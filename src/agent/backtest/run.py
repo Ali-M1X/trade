@@ -32,9 +32,11 @@ def simulate(cfg: dict, repo, days: int | None = None) -> dict:
     meta = repo.get_state("bt_meta")
     if not meta:
         raise SystemExit("no backtest data: run `backtest --fetch` first")
-    days = days or cfg["backtest"]["days"]
-    end = meta["end"]
-    start = end - days * DAY
+    b = cfg["backtest"]
+    days = days or b["days"]
+    end = min(meta["end"], b.get("replay_end") or meta["end"])
+    start = b.get("replay_start") or end - days * DAY
+    days = round((end - start) / DAY)
     t0 = time.time()
     bt = Backtest(cfg, repo, start, end)
     trades = bt.run()

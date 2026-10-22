@@ -67,6 +67,15 @@ def make_regime(dirs: dict[str, int], cfg: dict) -> Regime:
                   r.get("other_alts_risk"), r.get("min_grade"))
 
 
+def make_price_regime(state: int, alts_dir: int, cfg: dict) -> Regime:
+    """Regime from the price state (layers/price_regime.py): bull / range / bear. TOTAL2's
+    slot carries the alt index's own direction (majors read it for the BTC divergence)."""
+    name = {1: "bull", 0: "range", -1: "bear"}[state]
+    r = cfg["regime"]["price"]["regimes"][name]
+    return Regime(name, r["bias"], r["risk"], 0, 0, alts_dir, r.get("other_alts_risk"),
+                  r.get("min_grade"))
+
+
 def index_candles(series: pd.DataFrame, column: str, tf: str) -> pd.DataFrame:
     """Snapshots (ts, value) -> OHLC candles of `tf` (volume is zero)."""
     s = series.set_index(pd.to_datetime(series["ts"], unit="ms"))[column].dropna()

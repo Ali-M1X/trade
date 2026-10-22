@@ -170,6 +170,11 @@ def cmd_run_news(args, cfg, secrets) -> int:
     return 0
 
 
+def _ms(day: str) -> int:
+    from datetime import datetime, timezone
+    return int(datetime.fromisoformat(day).replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+
 def cmd_backtest(args, cfg, secrets) -> int:
     import time
 
@@ -181,6 +186,9 @@ def cmd_backtest(args, cfg, secrets) -> int:
         cfg["backtest"]["universe_top_n"] = args.top_n
     if args.max_coins is not None:
         cfg["backtest"]["max_coins"] = args.max_coins
+    for key, val in (("replay_start", args.start), ("replay_end", args.end)):
+        if val:
+            cfg["backtest"][key] = _ms(val)
     repo = Repository(args.db or cfg["backtest"]["db_path"])
     if args.fetch or args.fetch_only:
         from .backtest.data import fetch_history
@@ -189,8 +197,13 @@ def cmd_backtest(args, cfg, secrets) -> int:
         from .data.market import LiveMarket
         now = int(time.time() * 1000)
         client = ExchangeClient(cfg)
-        stats = fetch_history(cfg, repo, client, LiveMarket(cfg, repo, client, now),
-                              CoinGecko(cfg, repo=repo, api_key=secrets.coingecko_api_key), now)
+        market = LiveMarket(cfg, repo, client, now)
+        cg = CoinGecko(cfg, repo=repo, api_key=secrets.coingecko_api_key)
+        if args.since:
+            from .backtest.data import fetch_long_history
+            stats = fetch_long_history(cfg, repo, client, market, cg, now, _ms(args.since))
+        else:
+            stats = fetch_history(cfg, repo, client, market, cg, now)
         print(f"fetched: {stats}")
     if args.fetch_only:
         repo.close()
@@ -267,6 +280,10 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--fetch-only", action="store_true", help="download history, don't replay")
             p.add_argument("--variant", help="replay one config variant (backtest.variants)")
             p.add_argument("--json", help="with --variant: where to save the raw results")
+            p.add_argument("--since", help="with --fetch: multi-year history from this date "
+                           "(YYYY-MM-DD; no CoinGecko charts, needs regime.source price)")
+            p.add_argument("--start", help="replay from this date (YYYY-MM-DD)")
+            p.add_argument("--end", help="replay until this date (YYYY-MM-DD)")
         if name == "run-news":
             p.add_argument("--preview", action="store_true",
                            help="also alert headlines already out and exchange news (testing)")

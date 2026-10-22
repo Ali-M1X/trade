@@ -107,6 +107,20 @@ regime:
     capitulation: {bias: short, risk: 1.0}                         # all longs forbidden
     neutral:      {bias: both,  risk: 0.5, min_grade: A}
   dominance_snapshot_every_h: 4
+  # source: dominance (live) | price (bull/range/bear from BTC + an alt index; backtest only
+  # for now, it has years of history; layers/price_regime.py)
+  source: dominance
+  price:
+    definition: trend_adx      # trend_adx | ma200 | weinstein
+    adx_period: 14
+    adx_min: 20
+    ma: 100
+    hold_days: 3
+    basket: [ETH, SOL, XRP, BNB, ADA, DOGE, LINK, AVAX, DOT, LTC, BCH, TRX]
+    regimes:                   # every side open: the long backtest labels trades by regime
+      bull:  {bias: both, risk: 1.0}
+      range: {bias: both, risk: 1.0}
+      bear:  {bias: both, risk: 1.0}
   backfill_days: 365           # CoinGecko free/Demo history is limited to 365 days
 
 # ------------------------------------------------------------------ Layer 2
@@ -560,6 +574,18 @@ backtest:
         classic: {stage: true}
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
       shortlist: {max_coins: 20, min_score: 50}
+    # multi-year history (2026-10-22, `backtest --since`): the live systems with the price
+    # regime and every side open, so trades can be split by bull / range / bear afterwards
+    long_ph_stage:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      regime: {source: price}
+    long_s2_trend:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+      regime: {source: price}
 
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest
