@@ -47,6 +47,7 @@ class Backtest:
             self.rows = [r for r in self.rows if r.get("u_rank", 0) < cfg["backtest"]["universe_rank"]]
         self.categories = data_repo.get_state("bt_categories", {})
         self.price = cfg["regime"].get("source") == "price"
+        self.systems = self._systems() if self.price else {}
         self.dom = self._price_series() if self.price else dominance_series(merged_history(data_repo))
         self.watch: dict = {}
         self._regime: tuple | None = None       # (last dominance ts, Regime)
@@ -104,12 +105,31 @@ class Backtest:
                                                             self.cfg))
             else:
                 self._regime = (last_dom, compute_regime(dom, self.cfg))
-        res = run_funnel(dom, majors, coins, markets, self.categories, self.cfg,
+        name = self._regime[1].name
+        res = run_funnel(dom, majors, coins, markets, self.categories, self.cfg_for(name),
                          breakout_watch=self.watch, now_ms=t, regime=self._regime[1])
         self.watch = res.breakout_watch
         self.state = res.to_dict()
+        if self.systems.get(name, "") is None:                 # no system for this regime
+            self.state["shortlist"] = []
         self.stats["funnel_runs"] += 1
         self.stats["shortlisted"] += len(res.shortlist)
+
+    def _systems(self) -> dict:
+        """regime.price.systems: regime name -> a variant name, overrides, or "off". The
+        regime's system screens, scores, plans and manages the trades opened in it."""
+        from .variants import merge
+        out = {}
+        for name, sys in (self.cfg["regime"]["price"].get("systems") or {}).items():
+            if sys == "off":
+                out[name] = None
+            else:
+                over = self.cfg["backtest"]["variants"][sys] if isinstance(sys, str) else sys
+                out[name] = merge(self.cfg, {k: v for k, v in over.items() if k != "regime"})
+        return out
+
+    def cfg_for(self, regime_name: str | None) -> dict:
+        return self.systems.get(regime_name) or self.cfg
 
     def _price_series(self):
         """Daily rows for the price regime, stamped at the day's close - 1 ms so that
@@ -139,14 +159,15 @@ class Backtest:
     # ------------------------------------------------------------------- L6
     def l6(self, t: int) -> None:
         regime, majors = Regime(**self.state["regime"]), Majors(**self.state["majors"])
+        cfg = self.cfg_for(regime.name)
         for item in self.state["shortlist"]:
             base, side = item["base"], item["side"]
             frames = self._frames(base, ["1w", "1d", "4h", "1h"], t)
             if len(frames) < 4:
                 continue
-            extra = [flip_level(item["flip_level"], self.cfg)] if item.get("flip_level") else []
+            extra = [flip_level(item["flip_level"], cfg)] if item.get("flip_level") else []
             funding = self.h.funding_until(base, t, 1)
-            ev = evaluate(base, side, frames, regime, majors, self.cfg,
+            ev = evaluate(base, side, frames, regime, majors, cfg,
                           funding=funding[0] if funding else None,
                           btc_pair_up=item["pairs"]["dirs"].get("BTC", {}).get("1d") == 1,
                           extra_levels=extra, labels=item["labels"])
@@ -161,8 +182,10 @@ class Backtest:
             if not adm.ok:
                 self.stats[f"blocked_{adm.reason}"] += 1
                 continue
+            self.book.cfg = cfg                         # the plan's lifecycle settings
             self.book.create(ev, t, {"regime": self.state["regime"], "majors": self.state["majors"],
                                      "evaluation": ev.to_dict(), "out_of_cap": adm.out_of_cap})
+            self.book.cfg = self.cfg
             self.stats["signals"] += 1
 
     def _corr(self, t: int):
@@ -178,10 +201,11 @@ class Backtest:
         for sig in self.book.open_signals():
             lc = sig["payload"]["lifecycle"]
             base = sig["symbol"]
+            cfg = self.cfg_for(sig["payload"]["regime"]["name"])
             events = []
             h1 = self.h.closed(base, "1h", t)
             for r in h1[h1["ts"] > lc["last_candle_ts"]].itertuples():
-                events += on_candle(lc, int(r.ts), float(r.high), float(r.low), self.cfg)
+                events += on_candle(lc, int(r.ts), float(r.high), float(r.low), cfg)
             if t % H4 == 0 and lc["status"] in OPEN:
                 f = self.h.frame(base, "4h", t)
                 if f is not None and int(f.df["ts"].iloc[-1]) == t - H4:

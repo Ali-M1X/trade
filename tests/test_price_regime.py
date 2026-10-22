@@ -64,3 +64,25 @@ def test_backtest_with_price_regime_and_replay_window(cfg):
     assert res["meta"]["days"] == 20 and res["stats"]["funnel_runs"] == 120
     assert set(res["regime_hours"]) <= {"bull", "range", "bear"} and res["regime_hours"]
     assert all(t["regime"] in {"bull", "range", "bear"} for t in res["trades"])
+
+
+def test_each_regime_runs_its_own_system(cfg, monkeypatch):
+    from agent.backtest import engine as engine_mod
+    seen = []
+    real = engine_mod.evaluate
+
+    def spy(base, side, frames, regime, majors, c, **kw):
+        seen.append((regime.name, c["trade"]["base_risk_pct"]))
+        return real(base, side, frames, regime, majors, c, **kw)
+    monkeypatch.setattr(engine_mod, "evaluate", spy)
+    repo = build(days=200)
+    cfg["regime"]["source"] = "price"
+    cfg["regime"]["price"]["basket"] = ["SOL", "ADA", "LINK", "DOT"]
+    cfg["regime"]["price"]["systems"] = {"bull": {"trade": {"base_risk_pct": 2.0}},
+                                         "range": {"trade": {"base_risk_pct": 3.0}}, "bear": "off"}
+    meta = repo.get_state("bt_meta")
+    cfg["backtest"]["replay_start"] = meta["end"] - 60 * DAY
+    res = simulate(cfg, repo)
+    want = {"bull": 2.0, "range": 3.0}
+    assert seen and all(want[n] == r for n, r in seen)
+    assert all(t["regime"] != "bear" for t in res["trades"])
