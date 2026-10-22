@@ -248,6 +248,20 @@ def main():
         lines.append(f"| {r['system']} | {r['kind']} | {iran(r['t'])} | {r['base']} {'L' if r['side'] == 1 else 'S'} | "
                      f"{r['grade']} | {r['score']:.1f} | {','.join(r['flags']) or '-'} | "
                      f"{n['r']:+.2f} ({n['status']}) | {n.get('mfe', 0):+.1f} | {p['r']:+.2f} ({p['status']}) |")
+    lines += ["", "### جمع هر گروه", "",
+              "| سیستم | نوع | پیام | همان لحظه: سودده | همان لحظه: جمع R | روی نقطه ورود: پر شد | روی نقطه ورود: سودده | روی نقطه ورود: جمع R | هنوز باز |",
+              "|---|---|---|---|---|---|---|---|---|"]
+    for system in (1, 2):
+        for kind in ("green", "yellow"):
+            sub = [r for r in rows if r["kind"] == kind and r["system"] == system]
+            if not sub:
+                continue
+            now = [r["now"]["r"] for r in sub if r["now"]["status"] != "skip"]
+            plan = [r["plan_result"] for r in sub]
+            filled = [x for x in plan if x["filled"]]
+            still = sum(r["now"]["status"] not in CLOSED and r["now"]["status"] != "skip" for r in sub)
+            lines.append(f"| {system} | {kind} | {len(sub)} | {sum(x > 0 for x in now)} | {sum(now):+.2f} | "
+                         f"{len(filled)} | {sum(x['r'] > 0 for x in filled)} | {sum(x['r'] for x in plan):+.2f} | {still} |")
     for kind in ("green", "yellow"):
         sub = [r for r in rows if r["kind"] == kind and r["system"] == 1]
         lines += table(f"سیستم ۱، {kind}: بر اساس پرچم", summary(

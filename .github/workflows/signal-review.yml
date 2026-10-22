@@ -1,6 +1,7 @@
 name: signal-review
 
-# Analysis (2026-10-16): every green and yellow Telegram message since the 2026-10-09 update,
+# Analysis (2026-10-22): every green and yellow Telegram message since the 200-coin update
+# (PR #12, 2026-10-16 18:38 UTC),
 # what entering at the moment of the message would have made, and results per coin.
 # Changes nothing live.
 on:
@@ -31,21 +32,12 @@ jobs:
           git fetch --depth=1 origin data
           git show FETCH_HEAD:state.db.gz | gunzip > state.db
           git show FETCH_HEAD:state_s2.db.gz | gunzip > state_s2.db
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: hr-variant-*
-          path: results
-          merge-multiple: true
-          run-id: 37902857594
-          repository: Ali-M1X/trade
-          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python scripts/signal_review.py --since 2026-10-09T06:49:42Z --since2 2026-10-09T08:54:45Z \
-            --repo ${{ github.repository }} --db1 state.db --db2 state_s2.db \
-            --backtest results/ph_stage.json results/s2_trend.json
+          python scripts/signal_review.py --since 2026-10-16T18:38:13Z \
+            --repo ${{ github.repository }} --db1 state.db --db2 state_s2.db
           cat signal_review.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
