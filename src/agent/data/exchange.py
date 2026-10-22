@@ -7,6 +7,7 @@ import time
 import ccxt
 
 log = logging.getLogger(__name__)
+GAP_PAGE = 100      # candles skipped per empty page (some exchanges serve 100 per page)
 
 
 class UnsupportedExchange(Exception):
@@ -82,8 +83,10 @@ class ExchangeClient:
         return self.call("fetch_ohlcv", symbol, timeframe, since, limit or self.limit)
 
     def fetch_ohlcv_range(self, name: str, symbol: str, timeframe: str, since: int,
-                          until: int | None = None) -> list:
-        """Paginate one exchange from `since` (ms) to `until` (ms, default now)."""
+                          until: int | None = None, skip_gaps: bool = False) -> list:
+        """Paginate one exchange from `since` (ms) to `until` (ms, default now).
+        skip_gaps: an empty page (before the listing) moves on to the next page instead of
+        falling back to the latest candles (multi-year backtests)."""
         ex = self.exchange(name)
         step = ex.parse_timeframe(timeframe) * 1000
         until = until or ex.milliseconds()
@@ -91,6 +94,12 @@ class ExchangeClient:
         cursor = since
         while cursor < until:
             batch = self._call_one(name, "fetch_ohlcv", symbol, timeframe, cursor, self.limit)
+            if skip_gaps:
+                batch = [r for r in batch or [] if r[0] >= cursor]
+                # nothing in this page, or the exchange ignored `since`: try the next page
+                if not batch or (not out and batch[0][0] >= cursor + GAP_PAGE * step):
+                    cursor += GAP_PAGE * step
+                    continue
             if not batch:
                 if not out:
                     # `since` is before the listing and the exchange returned nothing:
@@ -106,12 +115,13 @@ class ExchangeClient:
         dedup = {r[0]: r for r in out}
         return [dedup[k] for k in sorted(dedup)]
 
-    def fetch_history(self, symbol: str, timeframe: str, since: int, until: int | None = None):
+    def fetch_history(self, symbol: str, timeframe: str, since: int, until: int | None = None,
+                      skip_gaps: bool = False):
         """Paginated candles from the first exchange that answers: (name, rows)."""
         errors = []
         for name in self.names:
             try:
-                return name, self.fetch_ohlcv_range(name, symbol, timeframe, since, until)
+                return name, self.fetch_ohlcv_range(name, symbol, timeframe, since, until, skip_gaps)
             except (UnsupportedExchange, ccxt.BaseError) as e:
                 log.warning("%s history %s %s failed: %s", name, symbol, timeframe, e)
                 errors.append(f"{name}: {type(e).__name__}: {e}")

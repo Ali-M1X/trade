@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 from .analysis.frame import make_frame
+from .backtest.variants import merge
 from .data.dominance import backfill, dominance_series, merged_history, snapshot_global
 from .data.market import LiveMarket
 from .layers.funnel import FunnelResult, run_funnel
@@ -15,6 +16,7 @@ from .layers.technical import Evaluation, evaluate
 from .layers.pairs import returns_corr_beta
 from .layers.trade import flip_level
 from .notify import formatter as fmt
+from .regime_systems import live_price_regime, price_source, system_cfg
 from .signals.lifecycle import H4, on_4h_close, on_candle, on_time
 from .signals.manager import SignalBook
 
@@ -131,23 +133,41 @@ def run_4h(cfg: dict, repo, market: LiveMarket, cg, now_ms: int) -> FunnelResult
             oi=market.open_interest(base),
             categories=categories.get(r["id"], []),
             spread_pct=spreads.get(base)))
-    result = run_funnel(dom, majors, coins, rows, categories, cfg, hot=hot,
-                        breakout_watch=repo.get_state("breakout_watch", {}), now_ms=now_ms)
+    watch = repo.get_state("breakout_watch", {})
+    if price_source(cfg):
+        # one system per price regime (regime_systems.py). System 2 keeps the dominance
+        # regime: its funnel is stored apart (funnel_dominance).
+        dom_cfg = merge(cfg, {"regime": {"source": "dominance"}})
+        side = run_funnel(dom, majors, coins, rows, categories, dom_cfg, hot=hot,
+                          breakout_watch=watch, now_ms=now_ms)
+        repo.set_state("funnel_dominance", {**side.to_dict(), "ts": now_ms})
+        regime = live_price_regime(market, cfg)
+        if regime is None:
+            raise RuntimeError("price regime: not enough daily candles")
+        sys_cfg = system_cfg(cfg, regime.name)
+        result = run_funnel(dom, majors, coins, rows, categories, sys_cfg or cfg, hot=hot,
+                            breakout_watch=watch, now_ms=now_ms, regime=regime)
+        if sys_cfg is None:                          # this regime trades no system
+            result.shortlist = []
+    else:
+        result = run_funnel(dom, majors, coins, rows, categories, cfg, hot=hot,
+                            breakout_watch=watch, now_ms=now_ms)
     repo.set_state("funnel", {**result.to_dict(), "ts": now_ms})
     repo.set_state("breakout_watch", result.breakout_watch)
     return result
 
 
 def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None,
-           book_repo=None) -> list[Evaluation]:
+           book_repo=None, state_key: str = "funnel") -> list[Evaluation]:
     """book_repo: where the evaluations and signals go (system 2 keeps its own database);
-    the funnel state is always read from repo."""
+    the funnel state is always read from repo (`state_key`)."""
     book_repo = book_repo or repo
-    state = repo.get_state("funnel")
+    state = repo.get_state(state_key)
     if not state:
         log.warning("no funnel state yet: run-4h first")
         return []
     regime = Regime(**state["regime"])
+    cfg = system_cfg(cfg, regime.name) or cfg       # the regime's system (price regime)
     majors = Majors(**state["majors"])
     out = []
     for item in state["shortlist"]:
@@ -218,6 +238,8 @@ def publish(cfg: dict, repo, market, notifier, evs: list[Evaluation], now_ms: in
                 continue
             meta = {"regime": state["regime"], "majors": state["majors"],
                     "evaluation": ev.to_dict(), "out_of_cap": adm.out_of_cap}
+            if price_source(cfg):
+                meta["system"] = state["regime"]["name"]
             sid, _ = book.create(ev, now_ms, meta)
             created.append(sid)
             notifier.send(fmt.signal_message(ev, cfg, adm.out_of_cap))
@@ -239,6 +261,7 @@ def manage(cfg: dict, repo, market, notifier, now_ms: int) -> list:
     for sig in book.open_signals():
         lc = sig["payload"]["lifecycle"]
         base, side = sig["symbol"], lc["side"]
+        sig_cfg = system_cfg(cfg, (sig["payload"].get("regime") or {}).get("name")) or cfg
         steps = []
         m15 = market.candles(base, cfg["timeframes"]["fast_trigger"])
         for r in m15[m15["ts"] > lc["last_candle_ts"]].itertuples():
@@ -258,7 +281,7 @@ def manage(cfg: dict, repo, market, notifier, now_ms: int) -> list:
         first = 1 if "confirm" in lc else 0
         for _, kind, item in sorted(steps, key=lambda x: (x[0], x[1] != first)):
             if kind == 0:
-                events += on_candle(lc, int(item.ts), float(item.high), float(item.low), cfg)
+                events += on_candle(lc, int(item.ts), float(item.high), float(item.low), sig_cfg)
             else:
                 r, ma_v, choch = item
                 events += on_4h_close(lc, int(r.ts), float(r.close), float(ma_v), choch,

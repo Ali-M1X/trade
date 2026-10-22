@@ -107,6 +107,20 @@ regime:
     capitulation: {bias: short, risk: 1.0}                         # all longs forbidden
     neutral:      {bias: both,  risk: 0.5, min_grade: A}
   dominance_snapshot_every_h: 4
+  # source: dominance (live) | price (bull/range/bear from BTC + an alt index; backtest only
+  # for now, it has years of history; layers/price_regime.py)
+  source: dominance
+  price:
+    definition: trend_adx      # trend_adx | ma200 | weinstein
+    adx_period: 14
+    adx_min: 20
+    ma: 100
+    hold_days: 3
+    basket: [ETH, SOL, XRP, BNB, ADA, DOGE, LINK, AVAX, DOT, LTC, BCH, TRX]
+    regimes:                   # every side open: the long backtest labels trades by regime
+      bull:  {bias: both, risk: 1.0}
+      range: {bias: both, risk: 1.0}
+      bear:  {bias: both, risk: 1.0}
   backfill_days: 365           # CoinGecko free/Demo history is limited to 365 days
 
 # ------------------------------------------------------------------ Layer 2
@@ -560,11 +574,54 @@ backtest:
         classic: {stage: true}
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
       shortlist: {max_coins: 20, min_score: 50}
+    # multi-year history (2026-10-22, `backtest --since`): the live systems with the price
+    # regime and every side open, so trades can be split by bull / range / bear afterwards
+    long_ph_stage:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      regime: {source: price}
+    long_s2_trend:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+      regime: {source: price}
+    # one regime at a time (the others off): published rule systems (layers/classic_systems.py)
+    # as candidates where the house system loses; compared with the house rows of long_*
+    bull_donchian:
+      regime: {source: price, price: {systems: {bull: {system: {kind: donchian, sides: [1]}}, range: "off", bear: "off"}}}
+    bull_pullback:
+      regime: {source: price, price: {systems: {bull: {system: {kind: ma_pullback, sides: [1]}}, range: "off", bear: "off"}}}
+    bear_donchian:
+      regime: {source: price, price: {systems: {bear: {system: {kind: donchian, sides: [-1]}}, bull: "off", range: "off"}}}
+    bear_rally_short:
+      regime: {source: price, price: {systems: {bear: {system: {kind: ma_pullback, sides: [-1]}}, bull: "off", range: "off"}}}
+    range_meanrev:
+      regime: {source: price, price: {systems: {range: {system: {kind: meanrev}}, bull: "off", bear: "off"}}}
+    # assembled from the 2021-2026 split (DECISIONS: per-regime systems): the house system
+    # (ph_stage) long-only in bull and range, system 2 (s2_trend) short-only in bear
+    regime_combo:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+    regime_combo_bear_off:     # the same without trading the bear regime
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}}
+          systems: {bear: "off"}
 
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest
 # and tests use the settings above unchanged. Empty = exactly STRATEGY.md.
 # 2026-10-01: Ali chose atr_2r for paper trading (DECISIONS.md #133, #135).
 # 2026-10-09: Ali chose ph_stage (atr_2r + Weinstein stage filter) for paper trading.
+# 2026-10-22: one system per price regime (regime_combo, DECISIONS.md #138-140).
 live:
-  variant: ph_stage
+  variant: regime_combo

@@ -37,6 +37,11 @@ class History:
             frames = [self.repo.get_candles(ex, symbol, tf) for ex, _ in pairs]
             df = max(frames, key=len) if frames else pd.DataFrame(
                 columns=["ts", "open", "high", "low", "close", "volume"])
+            start = self.cfg["backtest"].get("replay_start")
+            if start and tf in ("4h", "1h") and len(df):
+                # replaying one slice of a multi-year history: keep the warmup only
+                keep = 2 * (self.cfg["analysis"]["window_bars"] + self.cfg["storage"]["warmup_bars"])
+                df = df[df["ts"] >= start - keep * TF_MS[tf]]
             self._raw[key] = df.reset_index(drop=True)
         return self._raw[key]
 
