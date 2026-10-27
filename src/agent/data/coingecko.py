@@ -119,9 +119,13 @@ class CoinGecko:
 
     def top_universe(self, top_n: int | None = None) -> list[dict]:
         """Top N coins by market cap, without stablecoins and wrapped tokens."""
-        return filter_universe(self.markets(), self.excluded_ids(),
-                               set(self.universe_cfg["exclude_symbols"]),
-                               top_n or self.universe_cfg["top_n"])
+        n = top_n or self.universe_cfg["top_n"]
+        markets = self.markets()
+        # a page holds 250 coins, ~10% of them stables/wrapped: fetch a second page beyond ~200
+        for page in range(2, (n + 49) // 250 + 2):
+            markets = markets + self.markets(page=page)
+        return filter_universe(markets, self.excluded_ids(),
+                               set(self.universe_cfg["exclude_symbols"]), n)
 
 
 def filter_universe(markets: list[dict], excluded_ids: set[str], excluded_symbols: set[str],
