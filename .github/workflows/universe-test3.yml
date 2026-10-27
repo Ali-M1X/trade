@@ -1,4 +1,4 @@
-name: universe-test2
+name: universe-test3
 
 # Follow-up (2026-10-27): top 100 and system 2 with $8M on the same top-250 history.
 # Experiment (2026-10-27): a wider universe (top 250) and a lower volume floor ($8M) against
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   push:
     branches: [claude/universe-250]
-    paths: [".github/workflows/universe-test2.yml"]
+    paths: [".github/workflows/universe-test3.yml"]
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [combo_top100, combo_top100_vol8, s2_vol8]
+        variant: [s2_top100]
         year: [2021, 2022, 2023, 2024, 2025, 2026]
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +69,13 @@ jobs:
           path: results
           merge-multiple: true
           run-id: 40538875697
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: u250-*
+          path: results
+          merge-multiple: true
+          run-id: 40561617595
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Report
         run: |
