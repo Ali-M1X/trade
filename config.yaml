@@ -36,9 +36,10 @@ tvdatafeed:
 # ------------------------------------------------------------------ universe
 universe:
   top_n: 100                   # dominance (TOTAL, BTC.D, USDT.D) is rebuilt from this top list
-  # 2026-10-16: Ali chose 200 coins for both systems (more-trades backtest); the dominance
-  # list above stays at the top 100.
-  coins_top_n: 200
+  # 2026-10-16: Ali chose 200 coins for both systems (more-trades backtest).
+  # 2026-10-27: back to 100 (DECISIONS.md #141): on 2021-2026 the top 100 made +36.4 R
+  # against +18.3 R for the top 200 (system 1); system 2 unchanged (+1.7 against +1.4).
+  coins_top_n: 100
   min_volume_24h_usd: 10000000
   # Pulled from CoinGecko categories and removed from the universe.
   exclude_categories: [stablecoins, wrapped-tokens]
@@ -580,7 +581,7 @@ backtest:
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical: {classic: {stage: true}}
       regime: {source: price}
-    long_s2_trend:
+    long_s2_trend: &s2long
       trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
       technical:
         classic: {stage: true}
@@ -600,7 +601,7 @@ backtest:
       regime: {source: price, price: {systems: {range: {system: {kind: meanrev}}, bull: "off", bear: "off"}}}
     # assembled from the 2021-2026 split (DECISIONS: per-regime systems): the house system
     # (ph_stage) long-only in bull and range, system 2 (s2_trend) short-only in bear
-    regime_combo:
+    regime_combo: &combo
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical: {classic: {stage: true}}
       regime:
@@ -616,6 +617,44 @@ backtest:
         price:
           regimes: {bull: {bias: long}, range: {bias: long}}
           systems: {bear: "off"}
+
+    # Wider universe, lower volume floor (2026-10-27, Ali's experiment; live unchanged):
+    # one history of the top 250, replayed as today's top 200 / $10M (live) against 250 / $8M.
+    combo_top200:
+      <<: *combo
+      backtest: {universe_rank: 200}
+    combo_vol8:
+      <<: *combo
+      backtest: {universe_rank: 200}
+      universe: {min_volume_24h_usd: 8000000}
+    combo_top250:
+      <<: *combo
+      backtest: {universe_rank: 250}
+    combo_top250_vol8:
+      <<: *combo
+      backtest: {universe_rank: 250}
+      universe: {min_volume_24h_usd: 8000000}
+    s2_top200:
+      <<: *s2long
+      backtest: {universe_rank: 200}
+    s2_top250_vol8:
+      <<: *s2long
+      backtest: {universe_rank: 250}
+      universe: {min_volume_24h_usd: 8000000}
+    combo_top100:
+      <<: *combo
+      backtest: {universe_rank: 100}
+    combo_top100_vol8:
+      <<: *combo
+      backtest: {universe_rank: 100}
+      universe: {min_volume_24h_usd: 8000000}
+    s2_vol8:
+      <<: *s2long
+      backtest: {universe_rank: 200}
+      universe: {min_volume_24h_usd: 8000000}
+    s2_top100:
+      <<: *s2long
+      backtest: {universe_rank: 100}
 
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest

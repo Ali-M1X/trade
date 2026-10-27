@@ -1,0 +1,94 @@
+name: universe-test3
+
+# Follow-up (2026-10-27): top 100 and system 2 with $8M on the same top-250 history.
+# Experiment (2026-10-27): a wider universe (top 250) and a lower volume floor ($8M) against
+# the live list (top 200, $10M), 2021-2026 by price regime. Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/universe-250]
+    paths: [".github/workflows/universe-test3.yml"]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [s2_top100]
+        year: [2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-u250
+          path: data
+          run-id: 40538875697
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: gunzip data/backtest.db.gz
+      - name: Replay one year
+        run: |
+          next=$(( ${{ matrix.year }} + 1 ))
+          trade-agent -v backtest --variant ${{ matrix.variant }} --start ${{ matrix.year }}-01-01 \
+            --end ${next}-01-01 --json ${{ matrix.variant }}-${{ matrix.year }}.json 2>&1 | tail -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: u250-${{ matrix.variant }}-${{ matrix.year }}
+          path: ${{ matrix.variant }}-${{ matrix.year }}.json
+
+  report:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: u250-*
+          path: results
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: u250-*
+          path: results
+          merge-multiple: true
+          run-id: 40538875697
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: u250-*
+          path: results
+          merge-multiple: true
+          run-id: 40561617595
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Report
+        run: |
+          rm -f results/*_joined.json   # the first run's report artifact matches u250-* too
+          python scripts/long_report.py results/*.json
+          trade-agent backtest-robust combo_*_joined.json --baseline combo_top200 --out ROBUST_S1.md
+          trade-agent backtest-robust s2_*_joined.json --baseline s2_top200 --out ROBUST_S2.md
+          cat ROBUST_S1.md ROBUST_S2.md LONG_BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: u250b-report
+          path: |
+            LONG_BACKTEST.md
+            ROBUST_S1.md
+            ROBUST_S2.md
+            *_joined.json
