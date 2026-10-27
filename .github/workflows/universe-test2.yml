@@ -72,6 +72,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Report
         run: |
+          rm -f results/*_joined.json   # the first run's report artifact matches u250-* too
           python scripts/long_report.py results/*.json
           trade-agent backtest-robust combo_*_joined.json --baseline combo_top200 --out ROBUST_S1.md
           trade-agent backtest-robust s2_*_joined.json --baseline s2_top200 --out ROBUST_S2.md
