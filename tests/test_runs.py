@@ -171,7 +171,7 @@ def test_run_4h_then_1h(cfg):
     repo = Repository()
     cg = FakeCG()
     res = run_4h(cfg, repo, FakeMarket(), cg, NOW)
-    assert cg.top_n == cfg["universe"]["coins_top_n"] == 200      # dominance stays on top_n
+    assert cg.top_n == cfg["universe"]["coins_top_n"] == 100
     state = repo.get_state("funnel")
     assert res.regime.name == state["regime"]["name"] == "alt_season"
     assert res.watchlist["SOL"] == ["EARLY_TREND", "RS_LEADER", "HOT_SECTOR"]
