@@ -44,7 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         # must match backtest.variants in config.yaml (a test checks this)
-        variant: [baseline, swing_stop, min_stop, tp1_cap, cooldown, combined, atr_2r, confirm_level_atr, confirm_atr_2r, atr_2r_a_only, cl_exit, cl_vcp, cl_impulse, cl_adx, cl_all, ph_weekly, ph_stage, s2_research, s2_levels, s2_trend, s2_loose, s2_levels_loose, ph_dryup, ph_dmi, ph_er, ph_all, ph_all_vcp, ph_stage_top100, mt_list12, mt_list20, mt_list20_top100, mt_b60, s2_trend_top100, s2_trend_list20, long_ph_stage, long_s2_trend, bull_donchian, bull_pullback, bear_donchian, bear_rally_short, range_meanrev, regime_combo, regime_combo_bear_off, combo_top200, combo_vol8, combo_top250, combo_top250_vol8, s2_top200, s2_top250_vol8, combo_top100, combo_top100_vol8, s2_vol8]
+        variant: [baseline, swing_stop, min_stop, tp1_cap, cooldown, combined, atr_2r, confirm_level_atr, confirm_atr_2r, atr_2r_a_only, cl_exit, cl_vcp, cl_impulse, cl_adx, cl_all, ph_weekly, ph_stage, s2_research, s2_levels, s2_trend, s2_loose, s2_levels_loose, ph_dryup, ph_dmi, ph_er, ph_all, ph_all_vcp, ph_stage_top100, mt_list12, mt_list20, mt_list20_top100, mt_b60, s2_trend_top100, s2_trend_list20, long_ph_stage, long_s2_trend, bull_donchian, bull_pullback, bear_donchian, bear_rally_short, range_meanrev, regime_combo, regime_combo_bear_off, combo_top200, combo_vol8, combo_top250, combo_top250_vol8, s2_top200, s2_top250_vol8, combo_top100, combo_top100_vol8, s2_vol8, s2_top100]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

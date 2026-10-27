@@ -651,6 +651,9 @@ backtest:
       <<: *s2long
       backtest: {universe_rank: 200}
       universe: {min_volume_24h_usd: 8000000}
+    s2_top100:
+      <<: *s2long
+      backtest: {universe_rank: 100}
 
 # ------------------------------------------------------------- live settings
 # Live runs (run-*) apply this backtest variant on top of the settings above; the backtest
