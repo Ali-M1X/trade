@@ -37,14 +37,32 @@ def test_signal_message_matches_strategy_md(cfg):
     assert fmt.signal_message(signal_eval(), cfg) == strategy_signal_example()
 
 
-def test_signal_message_layout(cfg):
+def test_signal_message_is_an_instruction_one_figure_per_line(cfg):
     lines = fmt.signal_message(signal_eval(), cfg).split("\n")
-    row = parse(lines[0])
-    assert row == {"icon": "🟢", "coin": "SOLUSDT", "side": "LONG", "score": 82, "entry": "152.30",
-                   "sl": "148.90", "tp1": "158.10", "tp2": "163.20",
-                   "reason": "پولبک به حمایت 4H + انگالف 1H"}
-    assert lines[1] == "ریسک 1٪ | حجم 45٪ موجودی | لوریج 10x"
-    assert lines[2] == "" and lines[3] == fmt.score_explanation(cfg) and len(lines) == 4
+    assert lines == [
+        "🟢 اقدام: خرید SOLUSDT (LONG)",
+        "سفارش: لیمیت خرید در 152.30",
+        "اعتبار: اگر تا ۲۴ ساعت پر نشد، پیام لغو می‌آید",
+        "حد ضرر: 148.90 (2.2٪ فاصله)",
+        "TP1: 158.10 ← ۵۰٪ را ببند و حد ضرر را به ورود ببر",
+        "TP2: 163.20 ← ۳۰٪ دیگر را ببند",
+        "باقی ۲۰٪: نگه دار تا پیام خروج",
+        "ریسک: 1٪ موجودی",
+        "حجم پوزیشن: 45٪ موجودی (مارجین 4.5٪)",
+        "لوریج: 10x ایزوله",
+        "دلیل: پولبک به حمایت 4H + انگالف 1H",
+        "امتیاز: 82 (رده A)",
+    ]
+    assert "ℹ️" not in "\n".join(lines)
+
+
+def test_market_signal_says_enter_now_and_when_not_to(cfg):
+    ev = short_eval()
+    lines = fmt.signal_message(ev, cfg).split("\n")
+    assert lines[0] == "🟢 اقدام: فروش APTUSDT (SHORT)"
+    assert lines[1] == "سفارش: همین الان مارکت فروش (حدود 2.415)"
+    assert lines[2] == f"شرط: اگر قیمت زیر {fmt.fmt_price(ev.plan.entry_low)} است، وارد نشو"
+    assert lines[-1] == "امتیاز: 71 (رده B)"
 
 
 def test_every_coin_line_has_the_same_fields_in_order(cfg):
@@ -95,47 +113,6 @@ def test_every_flag_and_label_has_a_phrase(cfg):
     assert labels | flags | kinds <= set(fmt.REASON_FA)
 
 
-# -------------------------------------------------------- score explanation
-def test_score_explanation_thresholds_come_from_config(cfg):
-    text = fmt.score_explanation(cfg)
-    g = cfg["grades"]
-    to_fa = fmt.fa
-    assert f"{to_fa(g['A'])} به بالا رده A" in text
-    assert f"{to_fa(g['B'])} تا {to_fa(g['A'] - 1)} رده B" in text
-    assert f"{to_fa(g['watch'])} تا {to_fa(g['B'] - 1)} فقط Watch" in text
-    assert f"زیر {to_fa(g['watch'])} چیزی ارسال نمی‌شود" in text
-
-
-def test_score_explanation_follows_config_changes(cfg):
-    import copy
-    c = copy.deepcopy(cfg)
-    c["grades"].update(A=80, B=70, watch=60)
-    c["technical"]["phase"]["points_both"] = 12
-    text = fmt.score_explanation(c)
-    assert "۸۰ به بالا رده A" in text and "۷۰ تا ۷۹ رده B" in text and "۶۰ تا ۶۹ فقط Watch" in text
-    assert "فاز بازار ۱۲" in text
-
-
-def test_score_explanation_when_grade_b_is_off(cfg):
-    import copy
-    c = copy.deepcopy(cfg)
-    c["grades"]["min_signal"] = "A"
-    text = fmt.score_explanation(c)
-    assert "رده B که فعلاً خاموش است" in text and "با نصف ریسک" not in text
-
-
-def test_score_explanation_weights_add_up_to_the_l6_maximum(cfg):
-    t = cfg["technical"]
-    weights = [t["phase"]["points_both"], t["dow"]["points_both"], t["levels"]["points_strong"],
-               t["volume"]["max_points"], t["candles"]["max_points"],
-               t["cycles"]["points_all_aligned_fresh"], t["patterns"]["max_points"],
-               t["confirmation"]["max_points"]]
-    assert sum(weights) == 100
-    text = fmt.score_explanation(cfg)
-    for w in weights:
-        assert fmt.fa(w) in text
-
-
 @pytest.mark.parametrize("p, s", [(142.3, "142.30"), (83712.5, "83712.50"), (0.53124, "0.5312"),
                                   (0.0000123456, "0.00001235"), (1.5, "1.500")])
 def test_fmt_price(p, s):
@@ -144,12 +121,16 @@ def test_fmt_price(p, s):
 
 # ---------------------------------------------------------------- messages
 def test_watch_message(cfg):
-    msg = fmt.watch_message(watch_eval(), cfg)
-    first, blank, expl = msg.split("\n")
-    assert parse(first)["icon"] == "🟡" and blank == "" and expl == fmt.score_explanation(cfg)
+    lines = fmt.watch_message(watch_eval(), cfg).split("\n")
+    assert lines[0] == "🟡 زیر نظر: ARBUSDT (LONG) | فعلاً کاری نکن"
+    assert lines[1] == "اگر سیگنال شد: خرید حوالی 0.6810" and lines[-1] == "امتیاز: 66"
     no_plan = watch_eval()
     no_plan.plan = None
     assert fmt.watch_message(no_plan, cfg) is None
+
+
+def test_watch_alerts_are_off(cfg):
+    assert cfg["watch_alerts"]["enabled"] is False
 
 
 def test_daily_table_uses_l6_scores_only(cfg):
@@ -165,7 +146,7 @@ def test_daily_table_uses_l6_scores_only(cfg):
     # shortlisted without an L6 plan: names only, no score (their funnel scores were 96, 91, 74)
     assert lines[5] == "در گلچین بدون ستاپ: SOON, GRASS, PUMP"
     assert not any(s in msg for s in ("96", "91", " 80", "78"))
-    assert lines[6] == "" and lines[7] == fmt.score_explanation(cfg) and len(lines) == 8
+    assert len(lines) == 6 and "ℹ️" not in msg
 
 
 def test_daily_marks_ab_setups_that_were_not_sent(cfg):
@@ -181,45 +162,50 @@ def test_daily_without_setups_shows_no_score(cfg):
     assert "امتیاز" not in msg and "SOON, GRASS, ARB, SOL, PUMP" in msg
 
 
-def test_updates_are_one_line_without_score(cfg):
-    sig = {"symbol": "SOL", "side": "long"}
+def test_updates_say_what_to_do(cfg):
+    sig = {"symbol": "SOL", "side": "long",
+           "payload": {"lifecycle": {"entry": 152.3, "sl": 148.9, "tp1": 158.1}}}
     cases = {
-        Event("filled", 0, 152.30): "✅ SOLUSDT | ورود فعال شد | 152.30",
-        Event("tp1", 0, 158.10, 2.1): "🎯 SOLUSDT | TP1 | +2.1R | SL به ورود",
-        Event("tp2", 0, 163.20, 3.2): "🎯 SOLUSDT | TP2 | +3.2R | تریل روی MA25 4H",
-        Event("sl", 0, 148.90, -1.0): "🛑 SOLUSDT | SL | -1.0R",
-        Event("breakeven", 0, 152.3, 1.05): "⚪️ SOLUSDT | SL در ورود | +1.1R",
-        Event("tp3", 0, 160.0, 2.3, "ma25"): "🏁 SOLUSDT | خروج نهایی (MA25 4H) | +2.3R",
-        Event("expired", 0): "⌛️ SOLUSDT | منقضی شد | ورود در 24 ساعت فعال نشد",
-        Event("cancelled", 0, 158.1, 0, "tp1_before_entry"): "❌ SOLUSDT | لغو شد | TP1 قبل از ورود",
+        Event("filled", 0, 152.30): "✅ SOLUSDT | سفارش پر شد در 152.30\n"
+                                     "اقدام: مطمئن شو حد ضرر 148.90 و TP1 158.10 ثبت است",
+        Event("tp1", 0, 158.10, 2.1): "🎯 SOLUSDT | TP1 خورد | +2.1R\n"
+                                       "اقدام: ۵۰٪ را ببند و حد ضرر را به ورود (152.30) ببر",
+        Event("tp2", 0, 163.20, 3.2): "🎯 SOLUSDT | TP2 خورد | +3.2R\n"
+                                       "اقدام: ۳۰٪ دیگر را ببند؛ باقی را تا پیام خروج نگه دار",
+        Event("sl", 0, 148.90, -1.0): "🛑 SOLUSDT | حد ضرر خورد | -1.0R\n"
+                                       "اقدام: اگر پوزیشن هنوز باز است، ببندش",
+        Event("breakeven", 0, 152.3, 1.05): "⚪️ SOLUSDT | قیمت به ورود برگشت | +1.1R\n"
+                                             "اقدام: اگر باقی پوزیشن هنوز باز است، ببندش",
+        Event("tp3", 0, 160.0, 2.3, "ma25"): "🏁 SOLUSDT | خروج نهایی (کلوز 4H زیر MA25) | +2.3R\n"
+                                              "اقدام: باقی پوزیشن را همین الان ببند",
+        Event("expired", 0): "⌛️ SOLUSDT | در ۲۴ ساعت پر نشد\nاقدام: سفارش را لغو کن",
+        Event("cancelled", 0, 158.1, 0, "tp1_before_entry"):
+            "❌ SOLUSDT | لغو شد: قیمت قبل از ورود به TP1 رسید\nاقدام: سفارش را لغو کن و وارد نشو",
     }
     for e, expected in cases.items():
         msg = fmt.event_message(sig, e, cfg)
-        assert msg == expected and "\n" not in msg and "امتیاز" not in msg
+        assert msg == expected and "امتیاز" not in msg
     short = {"symbol": "APT", "side": "short"}
     assert fmt.event_message(short, Event("cancelled", 0, 2.5, 0, "closed_beyond_sl"), cfg) == \
-        "❌ APTUSDT | لغو شد | کلوز 4H بالای SL"
+        "❌ APTUSDT | لغو شد: کلوز 4H بالای حد ضرر\nاقدام: سفارش را لغو کن و وارد نشو"
 
 
-def test_confirm_4h_signal_line_is_one_honest_line(cfg):
-    msg = fmt.signal_message(confirm_eval(), cfg)
-    line = msg.split("\n")[0]
-    assert line == ("🟢 SOLUSDT | LONG | امتیاز 82 | ورود پس از تأیید 4H حوالی 152.30 | SL 148.90 | "
-                    "TP1 158.10 | TP2 163.20 (نهایی پس از فعال شدن) | پولبک به حمایت 4H + انگالف 1H")
-    assert line.count(" | ") == len(FIELDS)
+def test_confirm_4h_signal_says_wait(cfg):
+    lines = fmt.signal_message(confirm_eval(), cfg).split("\n")
+    assert lines[1] == "سفارش: هنوز وارد نشو؛ وقتی کندل 4H حوالی 152.30 تأیید داد پیام ورود می‌آید"
+    assert lines[3].endswith("(تقریبی؛ نهایی در پیام ورود)")
 
 
-def test_confirm_4h_fill_shows_the_actual_entry_sl_and_tp1(cfg):
+def test_confirm_4h_fill_says_enter_now_with_the_actual_sl_and_tps(cfg):
     sig = {"symbol": "SOL", "side": "long",
-           "payload": {"lifecycle": {"confirm": {}, "entry": 153.1, "sl": 150.1, "tp1": 159.1}}}
-    assert fmt.event_message(sig, Event("filled", 0, 153.1), cfg) == \
-        "✅ SOLUSDT | ورود فعال شد (تأیید 4H) | 153.10 | SL 150.10 | TP1 159.10"
-    # signals of the default entry mode keep the short line
-    plain = {"symbol": "SOL", "side": "long", "payload": {"lifecycle": {"entry": 152.3}}}
-    assert fmt.event_message(plain, Event("filled", 0, 152.30), cfg) == "✅ SOLUSDT | ورود فعال شد | 152.30"
+           "payload": {"lifecycle": {"confirm": {}, "entry": 153.1, "sl": 150.1, "tp1": 159.1,
+                                     "tp2": 162.1}}}
+    assert fmt.event_message(sig, Event("filled", 0, 153.1), cfg) == (
+        "✅ SOLUSDT | تأیید 4H آمد\nاقدام: همین الان مارکت خرید (حدود 153.10)\n"
+        "حد ضرر: 150.10\nTP1: 159.10\nTP2: 162.10")
     for reason in ("fill_rr", "fill_sl_too_wide", "fill_sl_too_tight", "fill_stop_wrong_side"):
         msg = fmt.event_message(sig, Event("cancelled", 0, 153.1, 0, reason), cfg)
-        assert msg.startswith("❌ SOLUSDT | لغو شد | پس از تأیید 4H") and "fill_" not in msg
+        assert msg.startswith("❌ SOLUSDT | لغو شد: پس از تأیید 4H") and "fill_" not in msg
 
 
 def test_dry_run_prints_exactly_what_is_sent(cfg):

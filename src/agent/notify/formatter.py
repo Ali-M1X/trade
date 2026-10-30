@@ -1,12 +1,15 @@
 """Persian Telegram messages.
 
-Every coin is shown as ONE line with the same fields in the same order, and the only score
-ever shown is the final L6 technical score:
+New signals and updates of open signals are instructions (2026-10-30, Ali): the first line
+says what to do now, then one line per figure (order, stop, targets, risk, size, leverage,
+expiry, reason, score). Updates say what to do with the open position. No score explanation.
+
+The daily report keeps one line per coin with the same fields in the same order:
 
     <icon> <COIN>USDT | <LONG|SHORT> | امتیاز <score> | ورود <entry> | SL <sl> | TP1 <tp1> | TP2 <tp2> | <reason>
 
-🟢 = signal (all gates passed, grade A/B), 🟡 = Watch (near setup). Messages that show a
-score end with SCORE_EXPLANATION. All text comes from templates and check results.
+🟢 = signal (all gates passed, grade A/B), 🟡 = Watch (near setup). All text comes from
+templates and check results.
 """
 from __future__ import annotations
 
@@ -124,53 +127,6 @@ def shown_score(score: float) -> int:
     return math.floor(score + 1e-9)
 
 
-# ------------------------------------------------------------ score explanation
-def _risk_words(share: float) -> str:
-    if share >= 1:
-        return "ریسک کامل"
-    if share == 0.5:
-        return "نصف ریسک"
-    return f"{fa(fmt_num(share * 100, 0))}٪ ریسک"
-
-
-def score_explanation(cfg: dict) -> str:
-    """One paragraph explaining the L6 score, built from the scoring config so it always
-    matches what the code does."""
-    t, g = cfg["technical"], cfg["grades"]
-    parts = [
-        ("فاز بازار", t["phase"]["points_both"], False),
-        ("ساختار سقف و کف", t["dow"]["points_both"], False),
-        ("حمایت و مقاومت", t["levels"]["points_strong"], False),
-        ("حجم", t["volume"]["max_points"], False),
-        ("کندل و پرایس‌اکشن", t["candles"]["max_points"], False),
-        ("سایکل‌ها", t["cycles"]["points_all_aligned_fresh"], False),
-        ("الگوها و سلامت روند", t["patterns"]["max_points"], True),
-        ("تأیید ورود", t["confirmation"]["max_points"], False),
-    ]
-    sections = "، ".join(f"{name} {'تا ' if upto else ''}{fa(fmt_num(pts, 1))}"
-                         for name, pts, upto in parts[:-1])
-    last_name, last_pts, _ = parts[-1]
-    sections += f" و {last_name} {fa(fmt_num(last_pts, 1))}"
-    rr = fa(fmt_num(cfg["trade"]["tp1_min_r"], 1))           # the R:R gate in build_trade
-    conf = t["confirmation"]["min_confirmations"]
-    conf_word = {1: "یک", 2: "دو", 3: "سه", 4: "چهار", 5: "پنج"}.get(conf, fa(conf))
-    a, b, w = g["A"], g["B"], g["watch"]
-    share = g["risk_share"]
-    return (
-        "ℹ️ امتیاز (۰ تا ۱۰۰): هر کوین بعد از عبور از قیف بازار، در تحلیل تکنیکال این "
-        f"بخش‌ها را می‌گیرد: {sections}. "
-        "امتیاز بالا به‌تنهایی کافی نیست: سیگنال فقط وقتی صادر می‌شود که چهار شرط اجباری "
-        f"برقرار باشد (هم‌جهت با رژیم بازار، فاز مجاز، ریسک به ریوارد حداقل ۱ به {rr} و "
-        f"حداقل {conf_word} تأیید ورود)؛ اگر شرطی هنوز کامل نیست، ستاپ با هر امتیازی فقط Watch است. "
-        f"بازه‌ها: {fa(a)} به بالا رده A با {_risk_words(share['A'])}، "
-        + (f"{fa(b)} تا {fa(a - 1)} رده B که فعلاً خاموش است و فقط Watch می‌آید، "
-           if g.get("min_signal", "B") == "A" else
-           f"{fa(b)} تا {fa(a - 1)} رده B با {_risk_words(share['B'])}، ") +
-        f"{fa(w)} تا {fa(b - 1)} فقط Watch (هشدار نزدیک ستاپ، بدون ورود) "
-        f"و زیر {fa(w)} چیزی ارسال نمی‌شود."
-    )
-
-
 # ------------------------------------------------------------------ coin line
 def reason(ev: dict, out_of_cap: bool = False) -> str:
     """Short reason (<= REASON_MAX characters) from the evaluation's checks, most
@@ -226,59 +182,117 @@ def coin_line(ev: dict, out_of_cap: bool = False) -> str:
     ])
 
 
-def with_explanation(text: str, cfg: dict) -> str:
-    return f"{text}\n\n{score_explanation(cfg)}"
-
-
 # ------------------------------------------------------------------- messages
+BUY_SELL = {1: ("خرید", "LONG"), -1: ("فروش", "SHORT")}
+
+
+def _pct(x: float) -> str:
+    return f"{fmt_num(x, 2 if x < 1 else 1)}٪"
+
+
+def _order_lines(p, cfg: dict) -> list[str]:
+    word = BUY_SELL[p.side][0]
+    hours = cfg["lifecycle"]["expiry_bars_4h"] * 4
+    if p.order == "market":
+        # the plan's zone edge: past it the entry is already late
+        edge, beyond = (p.entry_high, "بالای") if p.side == 1 else (p.entry_low, "زیر")
+        return [f"سفارش: همین الان مارکت {word} (حدود {fmt_price(p.entry)})",
+                f"شرط: اگر قیمت {beyond} {fmt_price(edge)} است، وارد نشو"]
+    if p.order == "confirm_4h":
+        return [f"سفارش: هنوز وارد نشو؛ وقتی کندل 4H حوالی {fmt_price(p.entry)} تأیید داد پیام ورود می‌آید",
+                f"اعتبار: {fa(hours)} ساعت"]
+    return [f"سفارش: لیمیت {word} در {fmt_price(p.entry)}",
+            f"اعتبار: اگر تا {fa(hours)} ساعت پر نشد، پیام لغو می‌آید"]
+
+
 def signal_message(ev, cfg: dict, out_of_cap: bool = False) -> str:
-    """New signal: the coin line, one risk line, then the score explanation."""
-    p = ev.plan
-    risk = (f"ریسک {fmt_num(p.risk_pct, 2)}٪ | حجم {round(p.size_pct)}٪ موجودی | "
-            f"لوریج {p.leverage}x")
-    return with_explanation(f"{coin_line(ev.to_dict(), out_of_cap)}\n{risk}", cfg)
+    """New signal as an instruction: what to do now, then one figure per line."""
+    p, t = ev.plan, cfg["trade"]
+    word, side = BUY_SELL[ev.side]
+    approx = " (تقریبی؛ نهایی در پیام ورود)" if p.order == "confirm_4h" else ""
+    tp1_pct, tp2_pct = t["tp1_close_pct"], t["tp2_close_pct"]
+    rest = 100 - tp1_pct - tp2_pct
+    lines = [f"{SIGNAL_ICON} اقدام: {word} {pair(ev.base)} ({side})",
+             *_order_lines(p, cfg),
+             f"حد ضرر: {fmt_price(p.sl)} ({_pct(p.sl_pct)} فاصله){approx}",
+             f"TP1: {fmt_price(p.tp1)} ← {fa(tp1_pct)}٪ را ببند و حد ضرر را به ورود ببر{approx}",
+             f"TP2: {fmt_price(p.tp2)} ← {fa(tp2_pct)}٪ دیگر را ببند"]
+    if rest > 0:
+        lines.append(f"باقی {fa(rest)}٪: نگه دار تا پیام خروج")
+    lines += [f"ریسک: {_pct(p.risk_pct)} موجودی",
+              f"حجم پوزیشن: {fmt_num(p.size_pct, 0)}٪ موجودی (مارجین {_pct(p.margin_pct)})",
+              f"لوریج: {p.leverage}x ایزوله",
+              f"دلیل: {reason(ev.to_dict(), out_of_cap)}",
+              f"امتیاز: {shown_score(ev.score)} (رده {ev.grade})"]
+    return "\n".join(lines)
 
 
 def watch_message(ev, cfg: dict) -> str | None:
-    """Near-setup alert. None when there is no trade plan to show."""
+    """Near-setup alert (off by default: watch_alerts.enabled). None without a trade plan."""
     if ev.plan is None:
         return None
-    return with_explanation(coin_line(ev.to_dict()), cfg)
+    p = ev.plan
+    word, side = BUY_SELL[ev.side]
+    return "\n".join([
+        f"{WATCH_ICON} زیر نظر: {pair(ev.base)} ({side}) | فعلاً کاری نکن",
+        f"اگر سیگنال شد: {word} حوالی {fmt_price(p.entry)}",
+        f"حد ضرر: {fmt_price(p.sl)}",
+        f"TP1: {fmt_price(p.tp1)}",
+        f"منتظر: {reason(ev.to_dict())}",
+        f"امتیاز: {shown_score(ev.score)}",
+    ])
+
+
+CANCEL_FA = {"tp1_before_entry": "قیمت قبل از ورود به TP1 رسید",
+             "fill_rr": "پس از تأیید 4H ریسک به ریوارد کافی نیست",
+             "fill_sl_too_wide": "پس از تأیید 4H حد ضرر بیش از حد دور است",
+             "fill_sl_too_tight": "پس از تأیید 4H حد ضرر بیش از حد نزدیک است",
+             "fill_stop_wrong_side": "پس از تأیید 4H حد ضرر نامعتبر است"}
 
 
 def event_message(sig: dict, e, cfg: dict) -> str:
-    """One line per update of an existing signal (no score)."""
+    """An update of an open signal: what happened, then what to do with the position."""
     head = pair(sig["symbol"])
     side = 1 if sig["side"] == "long" else -1
+    lc = (sig.get("payload") or {}).get("lifecycle") or {}
+    t = cfg["trade"]
     k = e.kind
     if k == "filled":
-        lc = (sig.get("payload") or {}).get("lifecycle") or {}
         if "confirm" in lc:                  # confirm_4h: SL/TP were rebuilt from this fill
-            return (f"✅ {head} | ورود فعال شد (تأیید 4H) | {fmt_price(e.price)} | "
-                    f"SL {fmt_price(lc['sl'])} | TP1 {fmt_price(lc['tp1'])}")
-        return f"✅ {head} | ورود فعال شد | {fmt_price(e.price)}"
+            return "\n".join([
+                f"✅ {head} | تأیید 4H آمد",
+                f"اقدام: همین الان مارکت {BUY_SELL[side][0]} (حدود {fmt_price(e.price)})",
+                f"حد ضرر: {fmt_price(lc['sl'])}",
+                f"TP1: {fmt_price(lc['tp1'])}",
+                f"TP2: {fmt_price(lc['tp2'])}" if lc.get("tp2") else ""]).rstrip("\n")
+        lines = [f"✅ {head} | سفارش پر شد در {fmt_price(e.price)}"]
+        if lc.get("sl") and lc.get("tp1"):
+            lines.append(f"اقدام: مطمئن شو حد ضرر {fmt_price(lc['sl'])} و TP1 {fmt_price(lc['tp1'])} ثبت است")
+        return "\n".join(lines)
     if k == "tp1":
-        return f"🎯 {head} | TP1 | {e.r:+.1f}R | SL به ورود"
+        entry = f" ({fmt_price(lc['entry'])})" if lc.get("entry") else ""
+        return (f"🎯 {head} | TP1 خورد | {e.r:+.1f}R\n"
+                f"اقدام: {fa(t['tp1_close_pct'])}٪ را ببند و حد ضرر را به ورود{entry} ببر")
     if k == "tp2":
-        return f"🎯 {head} | TP2 | {e.r:+.1f}R | تریل روی MA25 4H"
+        return (f"🎯 {head} | TP2 خورد | {e.r:+.1f}R\n"
+                f"اقدام: {fa(t['tp2_close_pct'])}٪ دیگر را ببند؛ باقی را تا پیام خروج نگه دار")
     if k == "tp3":
-        why = "MA25 4H" if e.reason == "ma25" else "شکست ساختار"
-        return f"🏁 {head} | خروج نهایی ({why}) | {e.r:+.1f}R"
+        why = (f"کلوز 4H {'زیر' if side == 1 else 'بالای'} MA25" if e.reason == "ma25"
+               else "شکست ساختار 4H")
+        return f"🏁 {head} | خروج نهایی ({why}) | {e.r:+.1f}R\nاقدام: باقی پوزیشن را همین الان ببند"
     if k == "sl":
-        return f"🛑 {head} | SL | {e.r:+.1f}R"
+        return f"🛑 {head} | حد ضرر خورد | {e.r:+.1f}R\nاقدام: اگر پوزیشن هنوز باز است، ببندش"
     if k == "breakeven":
-        return f"⚪️ {head} | SL در ورود | {e.r:+.1f}R"
+        return (f"⚪️ {head} | قیمت به ورود برگشت | {e.r:+.1f}R\n"
+                f"اقدام: اگر باقی پوزیشن هنوز باز است، ببندش")
     if k == "expired":
         hours = cfg["lifecycle"]["expiry_bars_4h"] * 4
-        return f"⌛️ {head} | منقضی شد | ورود در {hours} ساعت فعال نشد"
+        return f"⌛️ {head} | در {fa(hours)} ساعت پر نشد\nاقدام: سفارش را لغو کن"
     if k == "cancelled":
-        why = {"tp1_before_entry": "TP1 قبل از ورود",
-               "closed_beyond_sl": f"کلوز 4H {'زیر' if side == 1 else 'بالای'} SL",
-               "fill_rr": "پس از تأیید 4H ریسک به ریوارد کافی نیست",
-               "fill_sl_too_wide": "پس از تأیید 4H حد ضرر بیش از حد دور است",
-               "fill_sl_too_tight": "پس از تأیید 4H حد ضرر بیش از حد نزدیک است",
-               "fill_stop_wrong_side": "پس از تأیید 4H حد ضرر نامعتبر است"}.get(e.reason, e.reason)
-        return f"❌ {head} | لغو شد | {why}"
+        why = CANCEL_FA.get(e.reason) or (
+            f"کلوز 4H {'زیر' if side == 1 else 'بالای'} حد ضرر" if e.reason == "closed_beyond_sl"
+            else e.reason)
+        return f"❌ {head} | لغو شد: {why}\nاقدام: سفارش را لغو کن و وارد نشو"
     return f"{head} | {k}"
 
 
@@ -316,8 +330,7 @@ def daily_message(funnel: dict, open_signals: list[dict], evaluations: list[dict
     rest = [c["base"] for c in funnel.get("shortlist", []) if c["base"] not in rows]
     if rest:
         lines.append("در گلچین بدون ستاپ: " + ", ".join(rest))
-    text = "\n".join(lines)
-    return with_explanation(text, cfg) if ordered else text
+    return "\n".join(lines)
 
 
 def check(ok: bool) -> str:
