@@ -397,7 +397,8 @@ hold:
 
 # ------------------------------------------------------------ messages
 watch_alerts:
-  enabled: true
+  # 2026-10-30: off. Ali wants only messages he can act on; Watch setups stay in the daily report.
+  enabled: false
   repeat_hours: 24             # the same coin/side is announced once per this window
 
 # --------------------------------------------------------------- runtime

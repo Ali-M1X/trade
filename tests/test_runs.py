@@ -218,7 +218,7 @@ def test_run_1h_publishes_signals_and_respects_correlation(cfg):
     opened = SignalBook(repo, cfg).open_signals()
     # BTC, ETH and DOGE move identically in the fake data (correlation 1): only 2 per side
     assert len(signals) == 3 and len(opened) == cfg["lifecycle"]["max_correlated_same_side"]
-    assert all(m.startswith("🟢 ") and "USDT | LONG | امتیاز " in m for m in notifier.sent)
+    assert all(m.startswith("🟢 اقدام: خرید ") and "USDT (LONG)" in m for m in notifier.sent)
     assert "dry-run" in out.getvalue()
     # the same setups an hour later are duplicates, nothing new is sent
     notifier.sent.clear()
@@ -261,7 +261,9 @@ def test_manage_fills_hits_targets_and_reports(cfg):
     assert [e.kind for e in events] == ["filled", "tp1"]
     [sig] = book.open_signals()
     assert sig["status"] == "tp1" and sig["payload"]["lifecycle"]["sl_now"] == 100.0
-    assert notifier.sent[:2] == ["✅ SOLUSDT | ورود فعال شد | 100.00", "🎯 SOLUSDT | TP1 | +2.0R | SL به ورود"]
+    assert notifier.sent[:2] == [
+        "✅ SOLUSDT | سفارش پر شد در 100.00\nاقدام: مطمئن شو حد ضرر 95.00 و TP1 110.00 ثبت است",
+        "🎯 SOLUSDT | TP1 خورد | +2.0R\nاقدام: ۵۰٪ را ببند و حد ضرر را به ورود (100.00) ببر"]
     # re-running with the same candles changes nothing
     assert manage(cfg, repo, ScriptedMarket(m15, h4), notifier, NOW + 4 * q) == []
     # expiry does not apply once filled; the daily report lists the open signal
