@@ -330,3 +330,17 @@ def test_bear_regime_uses_its_own_system(cfg):
     assert system_cfg(live, "bull")["trade"]["base_risk_pct"] == 1.0
     assert system_cfg(live, "neutral") is live                                # older signals
     assert system_cfg(variant_cfg(cfg, "regime_combo_bear_off"), "bear") is None
+
+
+def test_hot_category_coins_skip_stablecoins(cfg):
+    from agent.runs import hot_category_coins
+
+    class CG:
+        def categories_list(self):
+            return [{"category_id": "perps", "name": "Perpetuals"}]
+
+        def markets(self, per_page=250, page=1, category=None):
+            return [{"id": "usd-coin", "symbol": "usdc"}, {"id": "hyperliquid", "symbol": "hype"}]
+
+    out = hot_category_coins(CG(), {"Perpetuals"}, {"USDC", "HYPE"}, set(), cfg)
+    assert [r["id"] for r in out] == ["hyperliquid"]
