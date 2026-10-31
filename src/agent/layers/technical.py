@@ -312,8 +312,8 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
     if majors.btc_weak and side == 1 and base != "BTC" and \
             ev.score < cfg["majors"]["btc_weak_min_score"]:
         ev.flags.append("btc_weak")
-    if regime.min_grade == "A" and grade == "B":
-        ev.flags.append("neutral_regime_needs_A")
+    if regime.min_grade_for(side) == "A" and grade == "B":
+        ev.flags.append("counter_trend_needs_A" if regime.counter(side) else "neutral_regime_needs_A")
     elif cfg["grades"].get("min_signal", "B") == "A" and grade == "B":
         ev.flags.append("grade_b_off")
     hard_fail = not (ev.gates["regime"] and ev.gates["phase"])

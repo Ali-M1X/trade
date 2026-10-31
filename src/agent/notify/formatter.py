@@ -63,6 +63,9 @@ REASON_FA = {
     "VOLUME_ANOMALY": "حجم غیرعادی",
     "HOT_SECTOR": "بخش داغ",
     "BREAKOUT_WATCH": "شکست اخیر",
+    "BREAKDOWN": "شکست کف رنج",
+    "RS_LAGGARD": "ضعیف‌تر از BTC",
+    "RALLY": "رالی به مقاومت",
     # chart patterns (notes "pattern:<name>")
     "pattern:double_bottom": "کف دوقلو", "pattern:double_top": "سقف دوقلو",
     "pattern:inverse_head_shoulders": "سر و شانه معکوس", "pattern:head_shoulders": "سر و شانه",
@@ -75,6 +78,7 @@ REASON_FA = {
     "chase": "منتظر پولبک",
     "btc_weak": "BTC ضعیف",
     "neutral_regime_needs_A": "رژیم خنثی فقط A",
+    "counter_trend_needs_A": "خلاف روند بالا فقط A",
     "grade_b_off": "فعلاً فقط رده A",
     "funding_crowded": "فاندینگ شلوغ",
     "out_of_cap": "خارج از سقف",

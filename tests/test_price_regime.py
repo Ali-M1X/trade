@@ -37,6 +37,13 @@ def test_market_is_range_when_btc_and_alts_disagree():
     assert st["state"].iloc[-1] == 0 and st["alts"].iloc[-1] == -1
 
 
+def test_alts_can_lead_the_regime():
+    up = daily(100 * np.exp(np.linspace(0, 1.5, 300)))
+    down = daily(100 * np.exp(-np.linspace(0, 1.5, 300)))
+    p = {"definition": "trend_adx", "hold_days": 3, "combine": "alts"}
+    assert market_states(up, down, p)["state"].iloc[-1] == -1
+
+
 def test_alt_index_averages_returns_of_coins_that_trade():
     a = daily([100, 110, 121])
     b = daily([50, 50], t0=DAY)                      # listed a day later
@@ -86,3 +93,15 @@ def test_each_regime_runs_its_own_system(cfg, monkeypatch):
     want = {"bull": 2.0, "range": 3.0}
     assert seen and all(want[n] == r for n, r in seen)
     assert all(t["regime"] != "bear" for t in res["trades"])
+
+
+def test_counter_trend_trades_get_less_risk_and_need_A(cfg):
+    import copy
+    c = copy.deepcopy(cfg)
+    c["regime"]["price"]["regimes"]["bull"].update(counter_risk=0.5, counter_min_grade="A")
+    bull = make_price_regime(1, 1, c)
+    assert bull.allows(1) and bull.allows(-1)
+    assert bull.risk_for(1) == 1.0 and bull.risk_for(-1) == 0.5
+    assert bull.min_grade_for(1) is None and bull.min_grade_for(-1) == "A"
+    plain = make_price_regime(1, 1, cfg)       # no counter keys: no difference by side
+    assert plain.trend == 0 and plain.risk_for(-1) == plain.risk_for(1)

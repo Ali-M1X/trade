@@ -172,6 +172,8 @@ scanners:
     period_days: 7
     min_coins: 2               # a category needs >= 2 universe coins to rank
     ignore_categories: []      # CoinGecko category names to skip when ranking
+  # mirrored short scanners (BREAKDOWN, RS_LAGGARD, RALLY), 2026-10-31
+  short_mirror: false
   # label quality used in the L5 score (0..1)
   label_quality:
     SQUEEZE: 0.7
@@ -184,6 +186,9 @@ scanners:
     VOLUME_ANOMALY: 0.6
     HOT_SECTOR: 0.6
     BREAKOUT_WATCH: 0.8        # a recent EARLY_TREND/RS_LEADER coin waiting for its retest
+    BREAKDOWN: 1.0
+    RS_LAGGARD: 1.0
+    RALLY: 1.0
 
 # ------------------------------------------------------------------ Layer 4
 pairs:
@@ -645,6 +650,48 @@ backtest:
     combo_top100:
       <<: *combo
       backtest: {universe_rank: 100}
+    # One system, long and short in every regime (2026-10-31, Ali): the price regime only
+    # weighs trades against the daily trend (less risk and/or grade A), it blocks nothing.
+    # House system (ph_stage), mirrored short scanners, top 100. Baseline: combo_top100.
+    uni_free: &uni
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical: {classic: {stage: true}}
+      backtest: {universe_rank: 100}
+      scanners: {short_mirror: true}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both}, range: {bias: both}, bear: {bias: both}}
+    uni_half:
+      <<: *uni
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both},
+                    bear: {bias: both, counter_risk: 0.5}}
+    uni_half_a:
+      <<: *uni
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5, counter_min_grade: A}, range: {bias: both},
+                    bear: {bias: both, counter_risk: 0.5, counter_min_grade: A}}
+    uni_a_range_a:             # also grade A only in range
+      <<: *uni
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5, counter_min_grade: A},
+                    range: {bias: both, min_grade: A},
+                    bear: {bias: both, counter_risk: 0.5, counter_min_grade: A}}
+    uni_half_a_nomirror:       # the same without the short scanners
+      <<: *uni
+      scanners: {short_mirror: false}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5, counter_min_grade: A}, range: {bias: both},
+                    bear: {bias: both, counter_risk: 0.5, counter_min_grade: A}}
     combo_top100_vol8:
       <<: *combo
       backtest: {universe_rank: 100}

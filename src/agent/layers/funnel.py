@@ -60,6 +60,7 @@ def run_funnel(dominance: pd.DataFrame, major_frames: dict[str, dict[str, Frame]
     total2_d = (dominance.assign(close=dominance["total2"])[["ts", "close"]]
                 .pipe(_daily_close))
     rs_cut = rs_thresholds(coins, btc_d, cfg)
+    rs_low = rs_thresholds(coins, btc_d, cfg, bottom=True) if cfg["scanners"].get("short_mirror") else None
     hot = hot_categories(markets, coin_categories, cfg) if hot is None else hot
     bw = cfg["breakout_watch"]
     now_ms = int(btc_d.df["ts"].iloc[-1]) + DAY if now_ms is None else now_ms
@@ -69,7 +70,7 @@ def run_funnel(dominance: pd.DataFrame, major_frames: dict[str, dict[str, Frame]
     for coin in coins:
         if not liquid(coin.info, cfg):
             continue
-        labels = scan_coin(coin, btc_d, rs_cut, hot, cfg)
+        labels = scan_coin(coin, btc_d, rs_cut, hot, cfg, rs_low)
         breakout = sorted({l.name for l in labels} & set(bw["labels"]))
         if breakout and coin.base not in watch:
             watch[coin.base] = {"since": now_ms, "labels": breakout,

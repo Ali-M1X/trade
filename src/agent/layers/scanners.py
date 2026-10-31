@@ -87,6 +87,33 @@ def pullback(d: Frame, s: dict, cfg: dict) -> bool:
     return bool((in_fib or near_ma) and falling)
 
 
+def breakdown(d: Frame, s: dict) -> bool:
+    """EARLY_TREND mirrored: close below the low of the previous range bars with volume."""
+    n = s["min_range_bars"]
+    if d.n <= n:
+        return False
+    prior_low = d.df["low"].iloc[-n - 1:-1].min()
+    return bool(d.close < prior_low and d.last["rvol"] >= s["min_rvol"])
+
+
+def rally(d: Frame, s: dict, cfg: dict) -> bool:
+    """PULLBACK mirrored: D down-trend (Dow down, price below MA99); price has rallied into
+    0.382-0.618 of the last down leg or up to MA25/MA99, on falling volume."""
+    ma_slow = f"ma{cfg['indicators']['ma_slow']}"
+    if d.dow != -1 or not d.close < d.last[ma_slow]:
+        return False
+    if len(d.swings) < 2 or d.swings[-1].kind != "L":
+        return False
+    high, low = d.swings[-2].price, d.swings[-1].price
+    retr = (d.close - low) / (high - low) if high > low else float("nan")
+    in_fib = s["fib_min"] <= retr <= s["fib_max"]
+    ind = cfg["indicators"]
+    near_ma = any(abs(d.close - d.last[f"ma{ind[k]}"]) <= s["ma_touch_atr"] * d.atr
+                  for k in ("ma_mid", "ma_slow"))
+    falling = d.col("rvol").iloc[-s["volume_falling_bars"]:].mean() < 1
+    return bool((in_fib or near_ma) and falling)
+
+
 def exhaustion(d: Frame, h4: Frame, s: dict, cfg: dict) -> int:
     """Direction of the expected counter-move, or 0."""
     mid = f"ma{cfg['indicators']['ma_mid']}"
@@ -138,13 +165,17 @@ def rs_values(coin: CoinData, btc_d: Frame, days: int) -> float:
     return period_return(coin.frames["1d"], days) - period_return(btc_d, days)
 
 
-def rs_thresholds(coins: list[CoinData], btc_d: Frame, cfg: dict) -> dict[int, float]:
-    """RS value at the top-percentile cut-off for each period."""
+def rs_thresholds(coins: list[CoinData], btc_d: Frame, cfg: dict,
+                  bottom: bool = False) -> dict[int, float]:
+    """RS value at the top-percentile cut-off for each period (bottom: the mirrored cut)."""
     s = cfg["scanners"]["rs_leader"]
     out = {}
     for days in s["periods_days"]:
         vals = [v for v in (rs_values(c, btc_d, days) for c in coins) if not np.isnan(v)]
-        out[days] = float(np.percentile(vals, 100 - s["top_percentile"])) if vals else float("inf")
+        if bottom:
+            out[days] = float(np.percentile(vals, s["top_percentile"])) if vals else float("-inf")
+        else:
+            out[days] = float(np.percentile(vals, 100 - s["top_percentile"])) if vals else float("inf")
     return out
 
 
@@ -155,6 +186,16 @@ def rs_leader(coin: CoinData, btc_d: Frame, thresholds: dict[int, float], s: dic
         return False
     ratio = coin.btc_frames["1d"].df["close"]
     return bool(ratio.iloc[-1] >= ratio.iloc[-s["new_high_lookback"]:].max())
+
+
+def rs_laggard(coin: CoinData, btc_d: Frame, thresholds: dict[int, float], s: dict) -> bool:
+    """RS_LEADER mirrored: both RS values in the bottom percentile and COIN/BTC at its low."""
+    if coin.is_btc or "1d" not in coin.btc_frames:
+        return False
+    if not all(rs_values(coin, btc_d, days) <= t for days, t in thresholds.items()):
+        return False
+    ratio = coin.btc_frames["1d"].df["close"]
+    return bool(ratio.iloc[-1] <= ratio.iloc[-s["new_high_lookback"]:].min())
 
 
 def category_growth(markets: list[dict], coin_categories: dict[str, list[str]], pct_key: str,
@@ -187,7 +228,7 @@ def hot_categories(markets, coin_categories, cfg) -> set[str]:
 
 # ------------------------------------------------------------------ labels
 def scan_coin(coin: CoinData, btc_d: Frame, rs_cut: dict[int, float], hot: set[str],
-              cfg: dict) -> list[Label]:
+              cfg: dict, rs_low: dict[int, float] | None = None) -> list[Label]:
     s = cfg["scanners"]
     d, h4 = coin.frames["1d"], coin.frames["4h"]
     labels = []
@@ -211,6 +252,14 @@ def scan_coin(coin: CoinData, btc_d: Frame, rs_cut: dict[int, float], hot: set[s
         labels.append(Label("VOLUME_ANOMALY", BOTH))
     if hot & set(coin.categories):
         labels.append(Label("HOT_SECTOR", LONG))
+    if s.get("short_mirror"):
+        # 2026-10-31: the long-only scanners mirrored, so a falling market has short setups
+        if breakdown(d, s["early_trend"]):
+            labels.append(Label("BREAKDOWN", SHORT))
+        if rs_low and rs_laggard(coin, btc_d, rs_low, s["rs_leader"]):
+            labels.append(Label("RS_LAGGARD", SHORT))
+        if rally(d, s["pullback"], cfg):
+            labels.append(Label("RALLY", SHORT))
     return labels
 
 

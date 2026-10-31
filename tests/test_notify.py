@@ -108,7 +108,7 @@ def test_reason_is_short_persian_and_without_codes(cfg):
 def test_every_flag_and_label_has_a_phrase(cfg):
     labels = set(cfg["scanners"]["label_quality"])
     flags = {"not_confirmed", "lower_cycle_correcting", "chase", "btc_weak",
-             "neutral_regime_needs_A", "funding_crowded", "grade_b_off"}
+             "neutral_regime_needs_A", "counter_trend_needs_A", "funding_crowded", "grade_b_off"}
     kinds = {f"level:{k}" for k in ("cluster", "flip", "prev_high", "prev_low", "round")}
     assert labels | flags | kinds <= set(fmt.REASON_FA)
 

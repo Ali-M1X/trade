@@ -20,6 +20,11 @@ class Regime:
     total2: int
     other_alts_risk: float | None = None
     min_grade: str | None = None
+    # unified system (2026-10-31): the higher-timeframe trend (+1 / -1, 0 none) and what a
+    # trade against it gets: a risk multiplier and/or a minimum grade. Unset: no difference.
+    trend: int = 0
+    counter_risk: float | None = None
+    counter_min_grade: str | None = None
 
     def allows(self, side: int) -> bool:
         return self.bias == "both" or (self.bias == "long" and side == 1) or \
@@ -30,9 +35,20 @@ class Regime:
         pair is rising on D get the full risk."""
         if not self.allows(side):
             return 0.0
+        if self.counter(side) and self.counter_risk is not None:
+            return self.risk * self.counter_risk
         if self.other_alts_risk is not None and side == 1 and not (is_btc or btc_pair_up):
             return self.other_alts_risk
         return self.risk
+
+    def counter(self, side: int) -> bool:
+        """The trade goes against the higher-timeframe trend."""
+        return self.trend != 0 and side != self.trend
+
+    def min_grade_for(self, side: int) -> str | None:
+        if self.counter(side) and self.counter_min_grade:
+            return self.counter_min_grade
+        return self.min_grade
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -72,8 +88,10 @@ def make_price_regime(state: int, alts_dir: int, cfg: dict) -> Regime:
     slot carries the alt index's own direction (majors read it for the BTC divergence)."""
     name = {1: "bull", 0: "range", -1: "bear"}[state]
     r = cfg["regime"]["price"]["regimes"][name]
+    counter = "counter_risk" in r or "counter_min_grade" in r
     return Regime(name, r["bias"], r["risk"], 0, 0, alts_dir, r.get("other_alts_risk"),
-                  r.get("min_grade"))
+                  r.get("min_grade"), state if counter else 0, r.get("counter_risk"),
+                  r.get("counter_min_grade"))
 
 
 def index_candles(series: pd.DataFrame, column: str, tf: str) -> pd.DataFrame:

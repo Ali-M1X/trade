@@ -86,7 +86,11 @@ def market_states(btc: pd.DataFrame, alts: pd.DataFrame, p: dict) -> pd.DataFram
     how = p.get("definition", "trend_adx")
     b = raw_state(btc, how, p)
     a = raw_state(alts, how, p).reindex(btc.index)
-    both = pd.Series(np.where(b == a, b, 0), index=btc.index).where(b.notna() & a.notna())
+    if p.get("combine", "both") == "alts":
+        # 2026-10-31 experiment: the alt index alone sets the regime (alts lead BTC)
+        both = a.where(b.notna() & a.notna())
+    else:
+        both = pd.Series(np.where(b == a, b, 0), index=btc.index).where(b.notna() & a.notna())
     return pd.DataFrame({"state": hold(both, p.get("hold_days", 3)), "alts": a})
 
 
