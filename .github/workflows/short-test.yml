@@ -1,0 +1,103 @@
+name: short-test
+
+# Experiment (2026-10-31): shorts in a falling market. Mirrored short scanners and a regime
+# led by the alt index, against the live setup (combo_top100 / s2_top100) on the stored
+# top-250 history (2021-2026). Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/short-scanners]
+    paths: [".github/workflows/short-test.yml"]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [combo_short, combo_alts, combo_short_alts, s2_top100_short]
+        year: [2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-u250
+          path: data
+          run-id: 40538875697
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: gunzip data/backtest.db.gz
+      - name: Replay one year
+        run: |
+          next=$(( ${{ matrix.year }} + 1 ))
+          trade-agent -v backtest --variant ${{ matrix.variant }} --start ${{ matrix.year }}-01-01 \
+            --end ${next}-01-01 --json ${{ matrix.variant }}-${{ matrix.year }}.json 2>&1 | tail -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: short-${{ matrix.variant }}-${{ matrix.year }}
+          path: ${{ matrix.variant }}-${{ matrix.year }}.json
+
+  report:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: short-*
+          path: results
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: u250-*
+          path: results
+          merge-multiple: true
+          run-id: 40538875697
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: u250-*
+          path: results
+          merge-multiple: true
+          run-id: 40561617595
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: u250-*
+          path: results
+          merge-multiple: true
+          run-id: 40571409875
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Report
+        run: |
+          rm -f results/*_joined.json
+          mkdir sel && for v in combo_top100 combo_short combo_alts combo_short_alts s2_top100 s2_top100_short; do cp results/${v}-*.json sel/; done
+          python scripts/long_report.py sel/*.json
+          trade-agent backtest-robust combo_*_joined.json --baseline combo_top100 --out ROBUST_S1.md
+          trade-agent backtest-robust s2_*_joined.json --baseline s2_top100 --out ROBUST_S2.md
+          cat ROBUST_S1.md ROBUST_S2.md LONG_BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
+          cat ROBUST_S1.md ROBUST_S2.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: short-report
+          path: |
+            LONG_BACKTEST.md
+            ROBUST_S1.md
+            ROBUST_S2.md
+            *_joined.json
