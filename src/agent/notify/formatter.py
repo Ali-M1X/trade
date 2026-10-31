@@ -63,6 +63,9 @@ REASON_FA = {
     "VOLUME_ANOMALY": "حجم غیرعادی",
     "HOT_SECTOR": "بخش داغ",
     "BREAKOUT_WATCH": "شکست اخیر",
+    "BREAKDOWN": "شکست کف رنج",
+    "RS_LAGGARD": "ضعیف‌تر از BTC",
+    "RALLY": "رالی به مقاومت",
     # chart patterns (notes "pattern:<name>")
     "pattern:double_bottom": "کف دوقلو", "pattern:double_top": "سقف دوقلو",
     "pattern:inverse_head_shoulders": "سر و شانه معکوس", "pattern:head_shoulders": "سر و شانه",

@@ -37,6 +37,13 @@ def test_market_is_range_when_btc_and_alts_disagree():
     assert st["state"].iloc[-1] == 0 and st["alts"].iloc[-1] == -1
 
 
+def test_alts_can_lead_the_regime():
+    up = daily(100 * np.exp(np.linspace(0, 1.5, 300)))
+    down = daily(100 * np.exp(-np.linspace(0, 1.5, 300)))
+    p = {"definition": "trend_adx", "hold_days": 3, "combine": "alts"}
+    assert market_states(up, down, p)["state"].iloc[-1] == -1
+
+
 def test_alt_index_averages_returns_of_coins_that_trade():
     a = daily([100, 110, 121])
     b = daily([50, 50], t0=DAY)                      # listed a day later

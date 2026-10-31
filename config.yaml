@@ -173,6 +173,8 @@ scanners:
     min_coins: 2               # a category needs >= 2 universe coins to rank
     ignore_categories: []      # CoinGecko category names to skip when ranking
   # label quality used in the L5 score (0..1)
+  # 2026-10-31 experiment: mirrored short scanners (BREAKDOWN, RS_LAGGARD, RALLY)
+  short_mirror: false
   label_quality:
     SQUEEZE: 0.7
     EARLY_TREND: 1.0
@@ -184,6 +186,9 @@ scanners:
     VOLUME_ANOMALY: 0.6
     HOT_SECTOR: 0.6
     BREAKOUT_WATCH: 0.8        # a recent EARLY_TREND/RS_LEADER coin waiting for its retest
+    BREAKDOWN: 1.0
+    RS_LAGGARD: 1.0
+    RALLY: 1.0
 
 # ------------------------------------------------------------------ Layer 4
 pairs:
@@ -645,6 +650,35 @@ backtest:
     combo_top100:
       <<: *combo
       backtest: {universe_rank: 100}
+    # Shorts in a falling market (2026-10-31): mirrored short scanners and/or a regime led by
+    # the alt index alone, on the live list (top 100). Baseline: combo_top100.
+    combo_short:
+      <<: *combo
+      backtest: {universe_rank: 100}
+      scanners: {short_mirror: true}
+    combo_alts:
+      <<: *combo
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          combine: alts
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+    combo_short_alts:
+      <<: *combo
+      backtest: {universe_rank: 100}
+      scanners: {short_mirror: true}
+      regime:
+        source: price
+        price:
+          combine: alts
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+    s2_top100_short:
+      <<: *s2long
+      backtest: {universe_rank: 100}
+      scanners: {short_mirror: true}
     combo_top100_vol8:
       <<: *combo
       backtest: {universe_rank: 100}

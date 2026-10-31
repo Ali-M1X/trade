@@ -92,8 +92,12 @@ def hot_category_coins(cg, hot: set[str], bases: set[str], known: set[str], cfg:
         except Exception as e:
             log.warning("category %s markets failed: %s", name, e)
             continue
+        u = cfg["universe"]
         for r in rows:
             if r["id"] in known or r["symbol"].upper() not in bases:
+                continue
+            # the top list drops stablecoins and wrapped tokens; category lists do not
+            if r["id"] in u["exclude_ids"] or r["symbol"].lower() in u["exclude_symbols"]:
                 continue
             out.setdefault(r["id"], {**r, "_hot": []})["_hot"].append(name)
     return list(out.values())
