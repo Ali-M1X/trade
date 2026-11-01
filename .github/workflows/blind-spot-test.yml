@@ -1,6 +1,6 @@
 name: blind-spot-test
 
-# Blind spots of the loss review (2026-11-01, Ali): one fix at a time (technical.avoid,
+# Blind spots of the loss review (2026-11-01, Ali): one fix at a time, then combinations (technical.avoid,
 # 3 confirmations, no BREAKOUT_WATCH) on both live systems, 2021-2026, top 100, against
 # combo_top100 / s2_top100 (from the loss-review run). Changes nothing live.
 on:
@@ -20,8 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [bs1_score85, bs1_btcext, bs1_cycle, bs1_conf3, bs1_strong, bs1_worn, bs1_nobw,
-                  bs2_score85, bs2_btcext, bs2_cycle, bs2_conf3, bs2_strong, bs2_worn, bs2_nobw]
+        variant: [bs1_c_worn_s85, bs1_c_worn_s85_btc, bs1_c_strong_worn, bs1_c_all4,
+                  bs2_c_cycle_worn, bs2_c_cycle_worn_strong]
         year: [2021, 2022, 2023, 2024, 2025, 2026]
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +70,13 @@ jobs:
           path: results
           merge-multiple: true
           run-id: 41325626419
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bs-*
+          path: results
+          merge-multiple: true
+          run-id: 41328921614
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Report
         run: |
