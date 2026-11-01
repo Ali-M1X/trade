@@ -322,6 +322,10 @@ technical:
     er_min: 0                  # Kaufman efficiency ratio (signed) >= er_min; 0 = off
     er_bars: 20
     er_tf: 1d
+  # setups to skip (sent as Watch). Loss review 2026-11-01, experiment: empty = off.
+  # max_score, btc_extended (BTC score in the trade's direction, -6..6), cycles (notes),
+  # max_touches (of the plan's level), levels (allowed "kind tf" of the plan's level)
+  avoid: {}
   confirmation:
     min_confirmations: 2
     points_per_extra: 2.5
@@ -645,6 +649,141 @@ backtest:
     combo_top100:
       <<: *combo
       backtest: {universe_rank: 100}
+    # Blind spots of the loss review (2026-11-01, Ali): one fix at a time on both live
+    # systems (top 100). Baselines: combo_top100 and s2_top100.
+    bs1_score85:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {max_score: 85}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+    bs1_btcext:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {btc_extended: 6}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+    bs1_cycle:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {cycles: [late, fresh_turn]}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+    bs1_conf3:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        confirmation: {min_confirmations: 3}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+    bs1_strong:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+    bs1_worn:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {max_touches: 6}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+    bs1_nobw:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+      breakout_watch: {labels: []}
+    bs2_score85:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_score: 85}
+      backtest: {universe_rank: 100}
+      regime: {source: price}
+    bs2_btcext:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {btc_extended: 6}
+      backtest: {universe_rank: 100}
+      regime: {source: price}
+    bs2_cycle:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {cycles: [late, fresh_turn]}
+      backtest: {universe_rank: 100}
+      regime: {source: price}
+    bs2_conf3:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        confirmation: {min_confirmations: 3}
+      backtest: {universe_rank: 100}
+      regime: {source: price}
+    bs2_strong:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      backtest: {universe_rank: 100}
+      regime: {source: price}
+    bs2_worn:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6}
+      backtest: {universe_rank: 100}
+      regime: {source: price}
+    bs2_nobw:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+      backtest: {universe_rank: 100}
+      regime: {source: price}
+      breakout_watch: {labels: []}
     combo_top100_vol8:
       <<: *combo
       backtest: {universe_rank: 100}

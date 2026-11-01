@@ -326,3 +326,22 @@ def test_section_weights_rescale_each_section(cfg, setup):
     assert e.sections["levels"] == pytest.approx(base.sections["levels"] * 2)
     assert e.sections["patterns"] == 0 and e.sections["dow"] == base.sections["dow"]
     assert e.score == pytest.approx(max(0.0, sum(e.sections.values())))
+
+
+def test_avoid_turns_listed_setups_into_watch(cfg, setup):
+    import copy
+    frames, majors, regime = setup
+    base = evaluate("SOL", 1, frames, regime, majors, cfg, funding=0.0001)
+    assert base.is_signal and not {"score_too_high", "weak_level", "level_worn"} & set(base.flags)
+    kind = f"{base.plan.support_kind} {base.plan.support_tf}"
+    for avoid, flag in (({"max_score": base.score}, "score_too_high"),
+                        ({"levels": ["cluster 1w"] if kind != "cluster 1w" else ["round round"]}, "weak_level"),
+                        ({"max_touches": base.plan.support_touches}, "level_worn"),
+                        ({"btc_extended": majors.btc}, "btc_extended")):
+        c = copy.deepcopy(cfg)
+        c["technical"]["avoid"] = avoid
+        e = evaluate("SOL", 1, frames, regime, majors, c, funding=0.0001)
+        assert e.grade == "Watch" and flag in e.flags, avoid
+    c = copy.deepcopy(cfg)
+    c["technical"]["avoid"] = {"levels": [kind], "max_score": 101}
+    assert evaluate("SOL", 1, frames, regime, majors, c, funding=0.0001).is_signal
