@@ -281,6 +281,10 @@ def test_system2_keeps_its_own_signals_and_labels_messages(cfg):
     from agent.config import load_secrets
     from agent.notify.telegram import Notifier
     from agent.signals.manager import SignalBook
+    assert system2.system2_config(cfg)["technical"]["avoid"]       # live s2_avoid skips weak setups
+    import copy
+    cfg = copy.deepcopy(cfg)
+    cfg["system2"]["variant"] = "s2_trend"     # the fake market's setup leans on a 4H level
     repo, repo2 = Repository(), Repository()
     run_4h(cfg, repo, FakeMarket(), FakeCG(), NOW)
     notifier = Notifier(cfg, load_secrets({}), out=io.StringIO())
