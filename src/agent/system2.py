@@ -38,8 +38,8 @@ def system2_config(cfg: dict) -> dict:
     if name not in variants:
         raise SystemExit(f"system2.variant {name!r} is not in backtest.variants")
     # system 2 stays on the dominance regime when system 1 trades by price regime
-    return merge(cfg, {**variants[name], "watch_alerts": {"enabled": False},
-                       "regime": {"source": "dominance"}})
+    regime = {**(variants[name].get("regime") or {}), "source": "dominance"}
+    return merge(cfg, {**variants[name], "watch_alerts": {"enabled": False}, "regime": regime})
 
 
 def run_system2(cfg: dict, repo, repo2, market, notifier, now_ms: int, tasks: list[str]) -> None:

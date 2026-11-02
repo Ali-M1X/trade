@@ -86,3 +86,25 @@ def test_each_regime_runs_its_own_system(cfg, monkeypatch):
     want = {"bull": 2.0, "range": 3.0}
     assert seen and all(want[n] == r for n, r in seen)
     assert all(t["regime"] != "bear" for t in res["trades"])
+
+
+def test_counter_trend_trades_get_less_risk_and_need_A(cfg):
+    import copy
+    c = copy.deepcopy(cfg)
+    c["regime"]["price"]["regimes"]["bull"].update(counter_risk=0.5, counter_min_grade="A")
+    bull = make_price_regime(1, 1, c)
+    assert bull.allows(1) and bull.allows(-1)
+    assert bull.risk_for(1) == 1.0 and bull.risk_for(-1) == 0.5
+    assert bull.min_grade_for(1) is None and bull.min_grade_for(-1) == "A"
+    plain = make_price_regime(1, 1, cfg)       # no counter keys: no difference by side
+    assert plain.trend == 0 and plain.risk_for(-1) == plain.risk_for(1)
+
+
+def test_dominance_phase_can_open_both_sides_with_a_trend(cfg):
+    import copy
+    from agent.layers.regime import make_regime
+    c = copy.deepcopy(cfg)
+    c["regime"]["regimes"]["risk_off"].update(bias="both", trend="short", counter_risk=0.5)
+    r = make_regime({"usdt_d": 1, "btc_d": 1, "total2": -1}, c)
+    assert r.name == "risk_off" and r.allows(1) and r.allows(-1)
+    assert r.risk_for(-1) == 1.0 and r.risk_for(1) == 0.5

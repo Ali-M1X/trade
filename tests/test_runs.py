@@ -359,3 +359,15 @@ def test_live_systems_skip_weak_setups(cfg):
     assert system_cfg(live, "bear")["technical"]["avoid"] == live["technical"]["avoid"]
     assert system2.system2_config(cfg)["technical"]["avoid"]["cycles"] == ["late", "fresh_turn"]
     assert not cfg["technical"]["avoid"]            # the base settings (backtest default) stay off
+
+
+def test_system2_trades_both_sides_in_every_phase(cfg):
+    from agent import system2
+    from agent.layers.regime import make_regime
+    cfg2 = system2.system2_config(cfg)
+    assert cfg2["regime"]["source"] == "dominance"
+    off = make_regime({"usdt_d": 1, "btc_d": 1, "total2": -1}, cfg2)      # risk-off
+    assert off.allows(1) and off.allows(-1) and off.risk_for(1) == 0.5 * off.risk_for(-1)
+    season = make_regime({"usdt_d": -1, "btc_d": -1, "total2": 1}, cfg2)  # alt season
+    assert season.risk_for(-1) == 0.5 * season.risk_for(1)
+    assert make_regime({"usdt_d": 1, "btc_d": 1, "total2": -1}, cfg).bias == "short"  # system 1 base
