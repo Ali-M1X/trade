@@ -91,7 +91,7 @@ def phase_flags(frames: dict[str, Frame], side: int, cfg: dict, phase_d: str = "
         e = frames["1w"].col("close").ewm(span=p["weekly_ema"], adjust=False, min_periods=p["weekly_ema"]).mean()
         if slope_with(e, 1, side) is False:
             flags.append("weekly_tide_against")
-    if p.get("stage") and stage_ok(frames["1d"], side, p["stage_ma"], p["stage_slope_bars"]) is False:
+    if p.get("stage") and side in p.get("stage_sides", (1, -1)) and stage_ok(frames["1d"], side, p["stage_ma"], p["stage_slope_bars"]) is False:
         flags.append("stage_against")
     if p.get("range_dryup"):
         for name, tf in ((phase_d, "1d"), (phase_4h, "4h")):

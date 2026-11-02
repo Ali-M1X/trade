@@ -32,6 +32,9 @@ def phase_section(d: Frame, h4: Frame, side: int, cfg: dict) -> tuple[float, boo
     if pd_.name == TREND[side] and \
             len(reversal_signs(d, side, cfg)) >= cfg["technical"]["patterns"]["reversal_signs_needed"]:
         allowed = False                                   # the trend itself is no longer valid
+    if not allowed and side in (p.get("from_4h_sides") or ()) and \
+            p4.name in (TREND[side], RANGE_PHASE[side]):
+        return float(p["points_d_only"]) / 2, True, pd_, p4   # the 4H turned first (sudden drop)
     if not allowed:
         return 0.0, False, pd_, p4
     if pd_.name == RANGE_PHASE[side] and pd_.event is None:

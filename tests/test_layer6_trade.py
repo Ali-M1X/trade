@@ -345,3 +345,20 @@ def test_avoid_turns_listed_setups_into_watch(cfg, setup):
     c = copy.deepcopy(cfg)
     c["technical"]["avoid"] = {"levels": [kind], "max_score": 101}
     assert evaluate("SOL", 1, frames, regime, majors, c, funding=0.0001).is_signal
+
+
+def test_stage_sides_limits_the_stage_filter_to_listed_sides(cfg):
+    import copy
+    import pandas as pd
+    from agent.analysis.classic import phase_flags
+    from agent.analysis.frame import make_frame
+    n = 300
+    up = pd.DataFrame({"ts": [i * 86_400_000 for i in range(n)], "open": [100 + i for i in range(n)],
+                       "high": [101 + i for i in range(n)], "low": [99 + i for i in range(n)],
+                       "close": [100 + i for i in range(n)], "volume": [1.0] * n})
+    frames = {"1d": make_frame(up, "1d", cfg, with_indicators=True)}
+    c = copy.deepcopy(cfg)
+    c["technical"]["classic"]["stage"] = True
+    assert "stage_against" in phase_flags(frames, -1, c)          # a short in stage 2
+    c["technical"]["classic"]["stage_sides"] = [1]
+    assert "stage_against" not in phase_flags(frames, -1, c)
