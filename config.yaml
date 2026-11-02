@@ -525,6 +525,14 @@ backtest:
         classic: {stage: true}
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
         avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      # 2026-11-02 (DECISIONS #145): long and short in every dominance phase; a trade against
+      # the phase's own side gets half the risk
+      regime:
+        regimes:
+          alt_season:   {bias: both, trend: long, counter_risk: 0.5}
+          btc_led:      {bias: both, trend: long, counter_risk: 0.5}
+          risk_off:     {bias: both, trend: short, counter_risk: 0.5}
+          capitulation: {bias: both, trend: short, counter_risk: 0.5}
     s2_loose:                  # current weights, A from 70, B from 60
       trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
       technical: {classic: {stage: true}}
