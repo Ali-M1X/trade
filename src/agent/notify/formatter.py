@@ -75,6 +75,7 @@ REASON_FA = {
     "chase": "منتظر پولبک",
     "btc_weak": "BTC ضعیف",
     "neutral_regime_needs_A": "رژیم خنثی فقط A",
+    "counter_trend_needs_A": "خلاف روند بالا فقط A",
     "grade_b_off": "فعلاً فقط رده A",
     "score_too_high": "نمره خیلی بالا (حرکت احتمالاً تمام شده)",
     "btc_extended": "BTC کشیده است",

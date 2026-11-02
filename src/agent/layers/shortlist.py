@@ -25,7 +25,7 @@ def regime_points(side: int, regime: Regime, majors: Majors, cfg: dict) -> float
     """Half from the regime bias (1 same side, 0.5 'both'), half from the BTC score."""
     if not regime.allows(side):
         return 0.0
-    regime_part = 0.5 if regime.bias == "both" else 1.0
+    regime_part = 0.5 if regime.bias == "both" and not regime.trend == side else 1.0
     btc_part = (majors.btc * side + 6) / 12
     return cfg["shortlist"]["weights"]["regime_alignment"] * (0.5 * regime_part + 0.5 * btc_part)
 

@@ -861,6 +861,66 @@ backtest:
         avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
       backtest: {universe_rank: 100}
       regime: {source: price}
+    # Both sides in every regime (2026-11-02, Ali): the regime no longer picks the side.
+    # Baselines: bs1_c_all4 (= live combo_avoid) and bs2_c_cycle_worn_strong (s2_avoid; the
+    # backtest of system 2 already opens both sides in every price regime).
+    both1_free:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both}, range: {bias: both}, bear: {bias: both}}
+          systems: {bear: s2_trend}
+    both1_half:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
+          systems: {bear: s2_trend}
+    both1_half_a:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5, counter_min_grade: A}, range: {bias: both},
+                    bear: {bias: both, counter_risk: 0.5, counter_min_grade: A}}
+          systems: {bear: s2_trend}
+    both2_half:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
+    both2_half_a:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5, counter_min_grade: A}, range: {bias: both},
+                    bear: {bias: both, counter_risk: 0.5, counter_min_grade: A}}
     combo_top100_vol8:
       <<: *combo
       backtest: {universe_rank: 100}
