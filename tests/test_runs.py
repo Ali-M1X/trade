@@ -348,3 +348,14 @@ def test_hot_category_coins_skip_stablecoins(cfg):
 
     out = hot_category_coins(CG(), {"Perpetuals"}, {"USDC", "HYPE"}, set(), cfg)
     assert [r["id"] for r in out] == ["hyperliquid"]
+
+
+def test_live_systems_skip_weak_setups(cfg):
+    from agent import system2
+    from agent.config import live_config
+    from agent.regime_systems import system_cfg
+    live = live_config(cfg)
+    assert live["technical"]["avoid"]["max_touches"] == 6 and "cluster 4h" not in live["technical"]["avoid"]["levels"]
+    assert system_cfg(live, "bear")["technical"]["avoid"] == live["technical"]["avoid"]
+    assert system2.system2_config(cfg)["technical"]["avoid"]["cycles"] == ["late", "fresh_turn"]
+    assert not cfg["technical"]["avoid"]            # the base settings (backtest default) stay off
