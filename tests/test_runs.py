@@ -281,6 +281,10 @@ def test_system2_keeps_its_own_signals_and_labels_messages(cfg):
     from agent.config import load_secrets
     from agent.notify.telegram import Notifier
     from agent.signals.manager import SignalBook
+    assert system2.system2_config(cfg)["technical"]["avoid"]       # live s2_avoid skips weak setups
+    import copy
+    cfg = copy.deepcopy(cfg)
+    cfg["system2"]["variant"] = "s2_trend"     # the fake market's setup leans on a 4H level
     repo, repo2 = Repository(), Repository()
     run_4h(cfg, repo, FakeMarket(), FakeCG(), NOW)
     notifier = Notifier(cfg, load_secrets({}), out=io.StringIO())
@@ -344,3 +348,14 @@ def test_hot_category_coins_skip_stablecoins(cfg):
 
     out = hot_category_coins(CG(), {"Perpetuals"}, {"USDC", "HYPE"}, set(), cfg)
     assert [r["id"] for r in out] == ["hyperliquid"]
+
+
+def test_live_systems_skip_weak_setups(cfg):
+    from agent import system2
+    from agent.config import live_config
+    from agent.regime_systems import system_cfg
+    live = live_config(cfg)
+    assert live["technical"]["avoid"]["max_touches"] == 6 and "cluster 4h" not in live["technical"]["avoid"]["levels"]
+    assert system_cfg(live, "bear")["technical"]["avoid"] == live["technical"]["avoid"]
+    assert system2.system2_config(cfg)["technical"]["avoid"]["cycles"] == ["late", "fresh_turn"]
+    assert not cfg["technical"]["avoid"]            # the base settings (backtest default) stay off

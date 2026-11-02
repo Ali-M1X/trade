@@ -252,6 +252,24 @@ class Evaluation:
         return d
 
 
+def avoid_flags(ev: "Evaluation", plan, side: int, base: str, majors: Majors, cfg: dict) -> list[str]:
+    """Setups the loss review (2026-11-01) found losing in both systems; `technical.avoid`
+    turns each into a Watch. Empty (the default): nothing changes."""
+    a, out = cfg["technical"].get("avoid") or {}, []
+    if a.get("max_score") is not None and ev.score >= a["max_score"]:
+        out.append("score_too_high")
+    if a.get("btc_extended") is not None and base != "BTC" and majors.btc * side >= a["btc_extended"]:
+        out.append("btc_extended")
+    if ev.cycle and ev.cycle in (a.get("cycles") or []):
+        out.append("cycle_avoided")
+    if plan is not None and a.get("max_touches") is not None and \
+            (plan.support_touches or 0) >= a["max_touches"]:
+        out.append("level_worn")
+    if plan is not None and a.get("levels") and f"{plan.support_kind} {plan.support_tf}" not in a["levels"]:
+        out.append("weak_level")
+    return out
+
+
 def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, majors: Majors,
              cfg: dict, funding: float | None = None, btc_pair_up: bool = False,
              extra_levels: list | None = None, labels: list[str] | None = None) -> Evaluation:
@@ -309,6 +327,7 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
     if not ev.gates["confirmation"]:
         ev.flags.append("not_confirmed")
     ev.flags += classic_flags(frames, side, cfg) + phase_flags(frames, side, cfg, ev.phase_d, ev.phase_4h)
+    ev.flags += avoid_flags(ev, plan, side, base, majors, cfg)
     if majors.btc_weak and side == 1 and base != "BTC" and \
             ev.score < cfg["majors"]["btc_weak_min_score"]:
         ev.flags.append("btc_weak")

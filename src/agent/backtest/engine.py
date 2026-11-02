@@ -268,8 +268,20 @@ class Backtest:
                 "filled_at": p["lifecycle"]["filled_at"], "closed_at": p["lifecycle"]["closed_at"],
                 "events": [(e["kind"], e["ts"], e["payload"].get("price"))
                            for e in self.book_repo.get_events(s["id"]) if e["kind"] != "created"],
+                "ctx": _context(p),
             })
         return out
+
+
+def _context(payload: dict) -> dict:
+    """What the signal knew when it was issued (for the loss review, scripts/loss_review.py)."""
+    ev, plan = payload.get("evaluation") or {}, payload.get("plan") or {}
+    keep_ev = ("sections", "flags", "confirmations", "phase_d", "phase_4h", "cycle", "cycle_w",
+               "cycle_d", "labels", "trigger", "funding_pct")
+    keep_plan = ("support_kind", "support_tf", "support_touches", "atr", "sl_pct", "tp1_r",
+                 "tp2_r", "leverage")
+    return {**{k: ev.get(k) for k in keep_ev}, **{k: plan.get(k) for k in keep_plan},
+            "majors": payload.get("majors")}
 
 
 def _tp1_r(payload: dict) -> float:

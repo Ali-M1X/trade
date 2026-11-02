@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from agent.backtest import engine as engine_mod
@@ -113,6 +115,17 @@ def test_engine_trades_flow_through_book_lifecycle_and_costs(cfg, monkeypatch):
     for c, _, base in opened:
         live = [b for c2, e2, b in opened if c2 <= c < e2]
         assert len(live) <= cfg["lifecycle"]["max_active"] and live.count(base) == 1
+    # the loss review follows the same trades on the stored 1H candles
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("loss_review", Path(__file__).parents[1] / "scripts" / "loss_review.py")
+    lr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lr)
+    assert all("ctx" in t and t["ctx"]["support_kind"] == "cluster" for t in trades)
+    md = "\n".join(lr.review("forced", trades, lr.Paths(cfg, repo)))
+    assert "closed trades" in md and "Score sections" in md
+    if sl:
+        assert "full stops" in md
+        assert all(t["path"]["mfe"] >= 0 or t["path"]["mae"] <= -0.9 for t in sl if t["path"])
 
 
 # ----------------------------------------------------------------- variants
