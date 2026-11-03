@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [s1s_nostage, s1s_nostage_4h]
+        variant: [s1s_mirror, s1s_mirror_4h]
         year: [2021, 2022, 2023, 2024, 2025, 2026]
     steps:
       - uses: actions/checkout@v4
@@ -77,12 +77,19 @@ jobs:
           merge-multiple: true
           run-id: 41468740379
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: s1s-s1s_nostage-20*
+          path: base
+          merge-multiple: true
+          run-id: 41475973934
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Report
         run: |
-          cp base/bs1_c_all4-*.json base/both1_half-*.json results/
+          cp base/bs1_c_all4-*.json base/s1s_nostage-*.json results/
           python scripts/long_report.py results/*.json > /dev/null
-          trade-agent backtest-robust bs1_c_all4_joined.json both1_half_joined.json s1s_*_joined.json --baseline bs1_c_all4 --out ROBUST_S1.md
-          trade-agent backtest-robust both1_half_joined.json s1s_*_joined.json --baseline both1_half --out ROBUST_S2.md
+          trade-agent backtest-robust bs1_c_all4_joined.json s1s_*_joined.json --baseline bs1_c_all4 --out ROBUST_S1.md
+          trade-agent backtest-robust s1s_nostage_joined.json s1s_mirror*_joined.json --baseline s1s_nostage --out ROBUST_S2.md
           cat ROBUST_S1.md ROBUST_S2.md LONG_BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
           cat ROBUST_S1.md ROBUST_S2.md
           grep -E '^### `|^\| all \||^\| (bull|range|bear) (long|short) \|' LONG_BACKTEST.md
