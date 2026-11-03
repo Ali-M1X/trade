@@ -673,6 +673,108 @@ backtest:
     combo_top100:
       <<: *combo
       backtest: {universe_rank: 100}
+    # Top 700 coins and a $4M volume floor (2026-11-03, Ali's experiment; live unchanged).
+    # Both live systems on one 2021-2026 history of the top 700.
+    u7s1_live:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+      backtest: {universe_rank: 100}
+    u7s1_vol4:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+      backtest: {universe_rank: 100}
+      universe: {min_volume_24h_usd: 4000000}
+    u7s1_top700:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+      backtest: {universe_rank: 700}
+    u7s1_top700_vol4:
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true}
+        avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+      backtest: {universe_rank: 700}
+      universe: {min_volume_24h_usd: 4000000}
+    u7s2_live:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        regimes:
+          alt_season:   {bias: both, trend: long, counter_risk: 0.5}
+          btc_led:      {bias: both, trend: long, counter_risk: 0.5}
+          risk_off:     {bias: both, trend: short, counter_risk: 0.5}
+          capitulation: {bias: both, trend: short, counter_risk: 0.5}
+      backtest: {universe_rank: 100}
+    u7s2_vol4:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        regimes:
+          alt_season:   {bias: both, trend: long, counter_risk: 0.5}
+          btc_led:      {bias: both, trend: long, counter_risk: 0.5}
+          risk_off:     {bias: both, trend: short, counter_risk: 0.5}
+          capitulation: {bias: both, trend: short, counter_risk: 0.5}
+      backtest: {universe_rank: 100}
+      universe: {min_volume_24h_usd: 4000000}
+    u7s2_top700:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        regimes:
+          alt_season:   {bias: both, trend: long, counter_risk: 0.5}
+          btc_led:      {bias: both, trend: long, counter_risk: 0.5}
+          risk_off:     {bias: both, trend: short, counter_risk: 0.5}
+          capitulation: {bias: both, trend: short, counter_risk: 0.5}
+      backtest: {universe_rank: 700}
+    u7s2_top700_vol4:
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        regimes:
+          alt_season:   {bias: both, trend: long, counter_risk: 0.5}
+          btc_led:      {bias: both, trend: long, counter_risk: 0.5}
+          risk_off:     {bias: both, trend: short, counter_risk: 0.5}
+          capitulation: {bias: both, trend: short, counter_risk: 0.5}
+      backtest: {universe_rank: 700}
+      universe: {min_volume_24h_usd: 4000000}
     # Blind spots of the loss review (2026-11-01, Ali): one fix at a time on both live
     # systems (top 100). Baselines: combo_top100 and s2_top100.
     bs1_score85:
