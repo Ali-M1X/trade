@@ -1,0 +1,52 @@
+name: perp-count
+
+# Counts USDT linear perpetuals per exchange (2026-11-03, Ali). Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/universe-700]
+    paths: [".github/workflows/perp-count.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - name: Count
+        run: |
+          python - <<'PY'
+          import os, ccxt
+          from agent.config import load_config
+          from agent.data.coingecko import CoinGecko
+          sets = {}
+          for n in ["okx", "gate", "bitget", "mexc", "kucoinfutures", "bitunix", "binanceusdm", "bybit"]:
+              try:
+                  ex = getattr(ccxt, n)({"timeout": 30000})
+                  ms = ex.load_markets()
+                  sets[n] = {m["base"].upper() for m in ms.values() if m.get("swap") and m.get("linear")
+                             and m.get("quote") == "USDT" and m.get("active") is not False}
+                  print(f"{n}: {len(sets[n])} USDT perpetuals")
+              except Exception as e:
+                  print(f"{n}: failed ({type(e).__name__})")
+          try:
+              cfg = load_config()
+              top = {c["symbol"].upper() for c in CoinGecko(cfg, api_key=os.environ.get('COINGECKO_API_KEY')).top_universe(700)}
+              print(f"top 700 (no stables/wrapped): {len(top)}")
+              for n, s in sets.items():
+                  print(f"  top 700 with a perpetual on {n}: {len(top & s)}")
+              union = set().union(*[s for n, s in sets.items() if n not in ("binanceusdm", "bybit")])
+              print(f"  on any reachable exchange: {len(top & union)}")
+          except Exception as e:
+              print("coingecko failed:", type(e).__name__, e)
+          PY
