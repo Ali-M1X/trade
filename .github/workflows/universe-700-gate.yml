@@ -25,7 +25,10 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -e .
-      - run: sed -i 's/^  primary: okx/  primary: gate/' config.yaml && grep -n '^  primary' config.yaml
+      - name: Fetch from Gate
+        run: |
+          sed -i 's/^  primary: okx/  primary: gate/' config.yaml
+          grep -n '^  primary' config.yaml
       - run: trade-agent -v backtest --fetch-only --since 2020-06-01 --top-n 700 2>&1 | grep -v " INFO .*HTTP" | tail -300
       - run: gzip -k data/backtest.db && ls -la data
       - uses: actions/upload-artifact@v4
