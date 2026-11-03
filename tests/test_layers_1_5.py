@@ -126,6 +126,35 @@ def test_pullback_needs_falling_volume(cfg):
     assert not sc.pullback(frame(cfg, closes), s, cfg)
 
 
+def test_breakdown_mirrors_early_trend(cfg):
+    closes = np.r_[100 + 0.5 * np.sin(np.arange(199)), 96]
+    vols = np.r_[np.full(199, 1000.0), 3000]
+    s = cfg["scanners"]["early_trend"]
+    assert sc.breakdown(frame(cfg, closes, volumes=vols), s)
+    assert not sc.breakdown(frame(cfg, closes), s)            # RVOL 1
+    assert not sc.early_trend(frame(cfg, closes, volumes=vols), s)
+
+
+def test_rally_mirrors_pullback(cfg):
+    closes = waypoints([(0, 70), (20, 60), (30, 64), (50, 50), (56, 56)], prefix=120, level=70)
+    vols = np.full(len(closes), 1000.0)
+    vols[-6:] = 600
+    s = cfg["scanners"]["pullback"]
+    assert sc.rally(frame(cfg, closes, volumes=vols), s, cfg)     # 43% retracement of 64->50
+    assert not sc.rally(frame(cfg, closes), s, cfg)
+    assert not sc.pullback(frame(cfg, closes, volumes=vols), s, cfg)
+
+
+def test_short_mirror_is_off_by_default(cfg):
+    closes = np.r_[100 + 0.5 * np.sin(np.arange(199)), 96]
+    vols = np.r_[np.full(199, 1000.0), 3000]
+    d = frame(cfg, closes, volumes=vols)
+    coin = CoinData("XYZ", {}, {"1d": d, "4h": d})
+    assert "BREAKDOWN" not in [l.name for l in sc.scan_coin(coin, d, {}, set(), cfg)]
+    on = {**cfg, "scanners": {**cfg["scanners"], "short_mirror": True}}
+    assert Label("BREAKDOWN", -1) in sc.scan_coin(coin, d, {}, set(), on)
+
+
 def test_exhaustion_short_after_parabolic_move(cfg):
     closes = np.r_[50 + 0.3 * np.sin(np.arange(150)), np.linspace(50, 90, 20)]
     h4 = frame(cfg, waypoints([(0, 50), (8, 60), (14, 56), (22, 61), (26, 59)]), "4h")

@@ -172,6 +172,8 @@ scanners:
     period_days: 7
     min_coins: 2               # a category needs >= 2 universe coins to rank
     ignore_categories: []      # CoinGecko category names to skip when ranking
+  # mirrored short scanners (BREAKDOWN, RS_LAGGARD, RALLY), experiment: off
+  short_mirror: false
   # label quality used in the L5 score (0..1)
   label_quality:
     SQUEEZE: 0.7
@@ -184,6 +186,9 @@ scanners:
     VOLUME_ANOMALY: 0.6
     HOT_SECTOR: 0.6
     BREAKOUT_WATCH: 0.8        # a recent EARLY_TREND/RS_LEADER coin waiting for its retest
+    BREAKDOWN: 1.0
+    RS_LAGGARD: 1.0
+    RALLY: 1.0
 
 # ------------------------------------------------------------------ Layer 4
 pairs:
@@ -950,6 +955,31 @@ backtest:
         classic: {stage: true, stage_sides: [1]}
         avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
         phase: {from_4h_sides: [-1]}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
+          systems: {bear: s2_trend}
+    s1s_mirror:                # s1s_nostage + the mirrored short scanners (2026-11-03, Ali)
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true, stage_sides: [1]}
+        avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      scanners: {short_mirror: true}
+      backtest: {universe_rank: 100}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
+          systems: {bear: s2_trend}
+    s1s_mirror_4h:             # the same + shorts when only the 4H phase turned down
+      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      technical:
+        classic: {stage: true, stage_sides: [1]}
+        avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+        phase: {from_4h_sides: [-1]}
+      scanners: {short_mirror: true}
       backtest: {universe_rank: 100}
       regime:
         source: price

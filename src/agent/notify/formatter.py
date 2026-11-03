@@ -62,6 +62,9 @@ REASON_FA = {
     "FUNDING_EXTREME": "فاندینگ افراطی",
     "VOLUME_ANOMALY": "حجم غیرعادی",
     "HOT_SECTOR": "بخش داغ",
+    "BREAKDOWN": "شکست کف رنج",
+    "RS_LAGGARD": "ضعیف‌تر از BTC",
+    "RALLY": "رالی به مقاومت",
     "BREAKOUT_WATCH": "شکست اخیر",
     # chart patterns (notes "pattern:<name>")
     "pattern:double_bottom": "کف دوقلو", "pattern:double_top": "سقف دوقلو",
