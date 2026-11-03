@@ -674,7 +674,8 @@ backtest:
       <<: *combo
       backtest: {universe_rank: 100}
     # Top 700 coins and a $4M volume floor (2026-11-03, Ali's experiment; live unchanged).
-    # Both live systems on one 2021-2026 history of the top 700.
+    # Both live systems on one 2021-2026 history of the top 700. System 2 replays on the price
+    # regime (as both2_half): the stored history has no dominance data, so it makes no trades.
     u7s1_live:
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical:
@@ -728,11 +729,9 @@ backtest:
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
         avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
       regime:
-        regimes:
-          alt_season:   {bias: both, trend: long, counter_risk: 0.5}
-          btc_led:      {bias: both, trend: long, counter_risk: 0.5}
-          risk_off:     {bias: both, trend: short, counter_risk: 0.5}
-          capitulation: {bias: both, trend: short, counter_risk: 0.5}
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
       backtest: {universe_rank: 100}
     u7s2_vol4:
       trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
@@ -741,11 +740,9 @@ backtest:
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
         avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
       regime:
-        regimes:
-          alt_season:   {bias: both, trend: long, counter_risk: 0.5}
-          btc_led:      {bias: both, trend: long, counter_risk: 0.5}
-          risk_off:     {bias: both, trend: short, counter_risk: 0.5}
-          capitulation: {bias: both, trend: short, counter_risk: 0.5}
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
       backtest: {universe_rank: 100}
       universe: {min_volume_24h_usd: 4000000}
     u7s2_top700:
@@ -755,11 +752,9 @@ backtest:
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
         avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
       regime:
-        regimes:
-          alt_season:   {bias: both, trend: long, counter_risk: 0.5}
-          btc_led:      {bias: both, trend: long, counter_risk: 0.5}
-          risk_off:     {bias: both, trend: short, counter_risk: 0.5}
-          capitulation: {bias: both, trend: short, counter_risk: 0.5}
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
       backtest: {universe_rank: 700}
     u7s2_top700_vol4:
       trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
@@ -768,11 +763,9 @@ backtest:
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
         avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
       regime:
-        regimes:
-          alt_season:   {bias: both, trend: long, counter_risk: 0.5}
-          btc_led:      {bias: both, trend: long, counter_risk: 0.5}
-          risk_off:     {bias: both, trend: short, counter_risk: 0.5}
-          capitulation: {bias: both, trend: short, counter_risk: 0.5}
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
       backtest: {universe_rank: 700}
       universe: {min_volume_24h_usd: 4000000}
     # Blind spots of the loss review (2026-11-01, Ali): one fix at a time on both live
