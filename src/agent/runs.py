@@ -141,7 +141,12 @@ def run_4h(cfg: dict, repo, market: LiveMarket, cg, now_ms: int) -> FunnelResult
     if price_source(cfg):
         # one system per price regime (regime_systems.py). System 2 keeps the dominance
         # regime: its funnel is stored apart (funnel_dominance).
+        # It shortlists with system 2's own phase rules (both sides since DECISIONS #145),
+        # not the base dominance table (risk-off = shorts only).
         dom_cfg = merge(cfg, {"regime": {"source": "dominance"}})
+        if (cfg.get("system2") or {}).get("enabled"):
+            from .system2 import system2_config
+            dom_cfg = merge(cfg, {"regime": system2_config(cfg)["regime"]})
         side = run_funnel(dom, majors, coins, rows, categories, dom_cfg, hot=hot,
                           breakout_watch=watch, now_ms=now_ms)
         repo.set_state("funnel_dominance", {**side.to_dict(), "ts": now_ms})

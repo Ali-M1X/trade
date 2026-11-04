@@ -315,7 +315,10 @@ def test_price_regime_runs_the_regime_system_and_keeps_system2_on_dominance(cfg)
     res = run_4h(live, repo, FakeMarket(), FakeCG(), NOW)
     assert res.regime.name == "bull" and res.regime.bias == "long"      # every series trends up
     assert all(c.side == 1 for c in res.shortlist)
-    assert repo.get_state("funnel_dominance")["regime"]["name"] == "alt_season"
+    dom = repo.get_state("funnel_dominance")["regime"]
+    assert dom["name"] == "alt_season"
+    # system 2's own phase table: both sides, the phase's side at full risk (DECISIONS #145)
+    assert dom["bias"] == ("both" if system2.enabled(live) else "long")
     notifier = Notifier(live, load_secrets({}), out=io.StringIO())
     run_1h(live, repo, FakeMarket(), NOW, notifier)
     sigs = SignalBook(repo, live).open_signals()
