@@ -5,10 +5,12 @@
 
 # ---------------------------------------------------------------- data sources
 exchange:
-  primary: okx
+  # 2026-11-04 (DECISIONS #146): Gate, the reachable exchange with the most USDT perpetuals
+  # (352 of the top 700 against 227 on OKX).
+  primary: gate
   # Tried in order when the primary fails. GitHub runners are in the US where
   # Binance/Bybit block requests. Names are ccxt ids ("gate" is Gate.io).
-  fallbacks: [gate, bitget, mexc, kucoinfutures, bitunix]
+  fallbacks: [okx, bitget, mexc, kucoinfutures, bitunix]
   market_type: swap            # USDT-margined perpetuals
   quote: USDT
   timeout_ms: 20000
@@ -39,8 +41,9 @@ universe:
   # 2026-10-16: Ali chose 200 coins for both systems (more-trades backtest).
   # 2026-10-27: back to 100 (DECISIONS.md #141): on 2021-2026 the top 100 made +36.4 R
   # against +18.3 R for the top 200 (system 1); system 2 unchanged (+1.7 against +1.4).
-  coins_top_n: 100
-  min_volume_24h_usd: 10000000
+  # 2026-11-04: Ali chose the top 700 on Gate with a $4M floor (DECISIONS #146).
+  coins_top_n: 700
+  min_volume_24h_usd: 4000000
   # Pulled from CoinGecko categories and removed from the universe.
   exclude_categories: [stablecoins, wrapped-tokens]
   # Always excluded, in case a category lookup fails or misses one.
