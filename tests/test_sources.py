@@ -53,6 +53,18 @@ def test_client_falls_back_in_order(cfg):
     assert name == "bitget" and rows[-1][4] == 1.8
 
 
+def test_client_falls_back_when_ccxt_breaks_parsing(cfg):
+    class Broken(FakeExchange):
+        def fetch_ohlcv(self, *a, **kw):
+            raise TypeError("unsupported operand type(s) for +: 'NoneType' and 'str'")
+
+    cfg["exchange"].update(primary="gate", fallbacks=["bitget", "mexc"])
+    client = ExchangeClient(cfg, factory=lambda name, c: Broken(name) if name == "bitget"
+                            else FakeExchange(name, fail=name == "gate"), sleep=lambda s: None)
+    name, rows = client.fetch_ohlcv("BTC/USDT:USDT", "4h")
+    assert name == "mexc" and rows[-1][4] == 1.8
+
+
 def test_client_raises_when_all_fail(cfg):
     cfg["exchange"].update(primary="okx", fallbacks=["bitget"])
     client = ExchangeClient(cfg, factory=factory_with({"okx", "bitget"}), sleep=lambda s: None)
