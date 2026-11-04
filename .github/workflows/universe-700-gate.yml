@@ -16,6 +16,10 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     env:
       COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
     steps:
@@ -25,12 +29,34 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -e .
-      - name: Fetch from Gate
+      - name: Fetch one shard from Gate
         run: |
           sed -i 's/^  primary: okx/  primary: gate/' config.yaml
           grep -n '^  primary' config.yaml
-      - run: trade-agent -v backtest --fetch-only --since 2020-06-01 --top-n 700 2>&1 | grep -v " INFO .*HTTP" | tail -300
-      - run: gzip -k data/backtest.db && ls -la data
+          trade-agent -v backtest --fetch-only --since 2020-06-01 --top-n 700 --shard ${{ matrix.shard }}/12 \
+            2>&1 | grep -v " INFO .*HTTP"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: u7g-shard-${{ matrix.shard }}
+          path: data/backtest.db
+          retention-days: 7
+
+  merge:
+    needs: fetch
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: u7g-shard-*
+          path: shards
+      - run: |
+          ls -la shards/*
+          parts=$(for i in $(seq 0 11); do f=shards/u7g-shard-$i/backtest.db; [ -f $f ] && echo $f || echo "missing shard $i" >&2; done)
+          mkdir -p data && python scripts/merge_db.py data/backtest.db $parts
+          gzip data/backtest.db
       - uses: actions/upload-artifact@v4
         with:
           name: backtest-db-u700g
@@ -38,7 +64,8 @@ jobs:
           retention-days: 30
 
   replay:
-    needs: fetch
+    needs: merge
+    if: always() && needs.merge.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 340
     strategy:
@@ -82,7 +109,7 @@ jobs:
       - run: pip install -e .
       - uses: actions/download-artifact@v4
         with:
-          pattern: u7g-*
+          pattern: u7g-u7*
           path: results
           merge-multiple: true
       - name: Report
