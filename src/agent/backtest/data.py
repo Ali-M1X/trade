@@ -99,7 +99,8 @@ def fetch_history(cfg: dict, repo, client, market, cg, now_ms: int) -> dict:
 CONTRACT_VOLUME = {"gate", "bitget", "mexc", "kucoinfutures"}
 
 
-def fetch_long_history(cfg: dict, repo, client, market, cg, now_ms: int, since_ms: int) -> dict:
+def fetch_long_history(cfg: dict, repo, client, market, cg, now_ms: int, since_ms: int,
+                       shard: tuple[int, int] = (0, 1)) -> dict:
     """Multi-year history without CoinGecko's 365-day charts (2026-10-22).
 
     Candles and funding as in fetch_history, from `since_ms` (1d first; the other timeframes
@@ -107,7 +108,8 @@ def fetch_long_history(cfg: dict, repo, client, market, cg, now_ms: int, since_m
     gets a synthetic one from its daily candles: volume in USD, and market cap = close x
     today's circulating supply (only the 7d/30d changes and category weights read it). No
     dominance is stored: run with regime.source = price. Trending coins are left out (not
-    known historically)."""
+    known historically). `shard` (i, n) fetches every n-th coin from the i-th; shards are
+    merged with scripts/merge_db.py and only shard 0 loads the categories."""
     b = cfg["backtest"]
     bases, _ = market.perp_bases_and_spreads()
     cfg_nt = {**cfg, "universe": {**cfg["universe"], "add_exchange_trending": False}}
@@ -116,6 +118,7 @@ def fetch_long_history(cfg: dict, repo, client, market, cg, now_ms: int, since_m
         rows = rows[:b["max_coins"]]
     basket = cfg["regime"]["price"]["basket"]
     targets = sorted({r["symbol"].upper() for r in rows} | {"BTC", "ETH"} | set(basket))
+    targets = targets[shard[0]::shard[1]]
     by_base = {r["symbol"].upper(): r for r in rows}
     window = cfg["analysis"]["window_bars"] + cfg["storage"]["warmup_bars"]
     tfs = ["1d"] + [tf for tf in b["timeframes"] if tf != "1d"]
@@ -149,7 +152,8 @@ def fetch_long_history(cfg: dict, repo, client, market, cg, now_ms: int, since_m
                  "-" if first is None else _day(first))
 
     repo.set_state("bt_universe", rows)
-    repo.set_state("bt_categories", load_categories(cg, rows))
+    if shard[0] == 0:
+        repo.set_state("bt_categories", load_categories(cg, rows))
     repo.set_state("bt_meta", {"start": since_ms, "end": now_ms, "exchange": client.names[0],
                                "long": True})
     return stats

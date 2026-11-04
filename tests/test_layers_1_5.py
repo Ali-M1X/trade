@@ -213,7 +213,8 @@ def test_high_correlation_needs_btc_alignment(cfg):
 
 # ------------------------------------------------------------------ L5
 def test_liquidity_points(cfg):
-    assert liquidity_points(10e6, 0.05, cfg) == pytest.approx(5)          # min volume, best spread
+    floor = cfg["universe"]["min_volume_24h_usd"]
+    assert liquidity_points(floor, 0.05, cfg) == pytest.approx(5)         # min volume, best spread
     assert liquidity_points(500e6, 0.05, cfg) == pytest.approx(15)
     assert liquidity_points(5e9, 0.5, cfg) == pytest.approx(10)
     assert 10 < liquidity_points(500e6, 0.175, cfg) < 15

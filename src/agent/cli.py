@@ -201,7 +201,8 @@ def cmd_backtest(args, cfg, secrets) -> int:
         cg = CoinGecko(cfg, repo=repo, api_key=secrets.coingecko_api_key)
         if args.since:
             from .backtest.data import fetch_long_history
-            stats = fetch_long_history(cfg, repo, client, market, cg, now, _ms(args.since))
+            shard = tuple(int(x) for x in args.shard.split("/")) if args.shard else (0, 1)
+            stats = fetch_long_history(cfg, repo, client, market, cg, now, _ms(args.since), shard)
         else:
             stats = fetch_history(cfg, repo, client, market, cg, now)
         print(f"fetched: {stats}")
@@ -282,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--json", help="with --variant: where to save the raw results")
             p.add_argument("--since", help="with --fetch: multi-year history from this date "
                            "(YYYY-MM-DD; no CoinGecko charts, needs regime.source price)")
+            p.add_argument("--shard", help="with --since: fetch only shard I of N coins (I/N, from 0)")
             p.add_argument("--start", help="replay from this date (YYYY-MM-DD)")
             p.add_argument("--end", help="replay until this date (YYYY-MM-DD)")
         if name == "run-news":

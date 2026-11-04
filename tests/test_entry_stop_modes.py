@@ -56,6 +56,8 @@ def snapshot(cfg) -> dict:
 
 def test_defaults_reproduce_the_previous_plans_and_trades(cfg):
     want = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    cfg = copy.deepcopy(cfg)
+    cfg["universe"]["min_volume_24h_usd"] = 10_000_000   # the floor the snapshot was taken with
     got = snapshot(cfg)
     assert len(got["plans"]) == len(want["plans"]) and got["plans"] == want["plans"]
     assert got["trades"] == want["trades"]

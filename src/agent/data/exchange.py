@@ -73,7 +73,9 @@ class ExchangeClient:
         for name in self.names:
             try:
                 return name, self._call_one(name, method, *args, **kwargs)
-            except (UnsupportedExchange, ccxt.BaseError) as e:
+            # TypeError: ccxt itself can fail parsing an exchange's market list (bitget,
+            # 2026-11-04); the next exchange should still be tried.
+            except (UnsupportedExchange, ccxt.BaseError, TypeError) as e:
                 log.warning("%s.%s failed: %s", name, method, e)
                 errors.append(f"{name}: {type(e).__name__}: {e}")
         raise AllExchangesFailed(f"{method} failed on all exchanges: " + " | ".join(errors))
@@ -122,7 +124,7 @@ class ExchangeClient:
         for name in self.names:
             try:
                 return name, self.fetch_ohlcv_range(name, symbol, timeframe, since, until, skip_gaps)
-            except (UnsupportedExchange, ccxt.BaseError) as e:
+            except (UnsupportedExchange, ccxt.BaseError, TypeError) as e:
                 log.warning("%s history %s %s failed: %s", name, symbol, timeframe, e)
                 errors.append(f"{name}: {type(e).__name__}: {e}")
         raise AllExchangesFailed(f"history {symbol} {timeframe}: " + " | ".join(errors))
