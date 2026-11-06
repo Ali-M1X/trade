@@ -920,6 +920,50 @@ backtest:
         source: price
         price:
           regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
+    # System 3 (2026-11-06, Ali): the same logic on 5m / 20m / 2h / 14h candles, replayed on
+    # a scaled-clock history (scripts/scaled_history.py, workflow system3-test.yml).
+    s3_trend:                  # system 2's rules (both sides, half risk against the trend)
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 0.5}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
+      # scaled clock (scripts/scaled_history.py): "1d" = 2 real hours, funding every 8 real hours
+      universe: {min_volume_24h_usd: 300000}
+      shortlist: {volume_full_usd: 40000000}
+      backtest: {funding_interval_h: 96}
+    s3_trend_maker:            # the same with limit (maker) fills: lower fee and slippage
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 0.5}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
+      # scaled clock (scripts/scaled_history.py): "1d" = 2 real hours, funding every 8 real hours
+      universe: {min_volume_24h_usd: 300000}
+      shortlist: {volume_full_usd: 40000000}
+      backtest: {funding_interval_h: 96, taker_fee_pct: 0.02, slippage_pct: 0.02}
+    s3_combo:                  # system 1's rules (combo_avoid)
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 0.5}
+      technical:
+        classic: {stage: true}
+        avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
+          systems: {bear: s2_trend}
+      # scaled clock (scripts/scaled_history.py): "1d" = 2 real hours, funding every 8 real hours
+      universe: {min_volume_24h_usd: 300000}
+      shortlist: {volume_full_usd: 40000000}
+      backtest: {funding_interval_h: 96}
     both2_half_a:
       trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
       technical:
