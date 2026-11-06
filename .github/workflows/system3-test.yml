@@ -1,0 +1,150 @@
+name: system3-test
+
+# System 3 (2026-11-06, Ali): systems 1 and 2's logic on 5m candles. One year of OKX 5m
+# history for the top 50 perpetuals by volume, replayed on a 12x scaled clock
+# (scripts/scaled_history.py: "1h" = 5m, "4h" = 20m, "1d" = 2h, "1w" = 14h). Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/system3-backtest]
+    paths: [".github/workflows/system3-test.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 8               # leave runners for the live agent
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - run: python scripts/scaled_history.py fetch --coins 50 --days 365 --shard ${{ matrix.shard }}/12 --db part.db
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s3-part-${{ matrix.shard }}
+          path: part.db
+          retention-days: 7
+
+  build:
+    needs: fetch
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: s3-part-*
+          path: parts
+      - run: |
+          mkdir -p data
+          python scripts/scaled_history.py build --out data/backtest.db parts/*/part.db
+          gzip data/backtest.db
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-db-s3
+          path: |
+            data/backtest.db.gz
+            data/s3_meta.json
+          retention-days: 30
+
+  replay:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 8               # leave runners for the live agent
+      matrix:
+        variant: [s3_trend, s3_trend_maker, s3_combo]
+        year: [2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-s3
+          path: data
+      - run: gunzip data/backtest.db.gz
+      - name: Replay one scaled year (= one real month)
+        run: |
+          next=$(( ${{ matrix.year }} + 1 ))
+          trade-agent -v backtest --variant ${{ matrix.variant }} --start ${{ matrix.year }}-01-01 \
+            --end ${next}-01-01 --json ${{ matrix.variant }}-${{ matrix.year }}.json 2>&1 | tail -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s3r-${{ matrix.variant }}-${{ matrix.year }}
+          path: ${{ matrix.variant }}-${{ matrix.year }}.json
+
+  report:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: s3r-*
+          path: results
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-s3
+          path: meta
+      - name: Report
+        run: |
+          python scripts/long_report.py results/*.json > /dev/null
+          trade-agent backtest-robust s3_*_joined.json --baseline s3_trend --out ROBUST_S3.md
+          cat ROBUST_S3.md LONG_BACKTEST.md >> "$GITHUB_STEP_SUMMARY"
+          cat ROBUST_S3.md
+          python - <<'PY'
+          import json, glob, collections, datetime as dt
+          m = json.load(open("meta/s3_meta.json"))
+          real = lambda t: m["real_start"] + (t - m["scaled_t0"]) // m["scale"]
+          for p in sorted(glob.glob("*_joined.json")):
+              d = json.load(open(p))
+              ts = [t for t in d["trades"] if t["status"] in ("sl", "breakeven", "tp3")]
+              by = collections.defaultdict(lambda: [0, 0.0, 0])
+              for t in ts:
+                  k = dt.datetime.fromtimestamp(real(t["created"]) / 1000, dt.UTC).strftime("%Y-%m")
+                  by[k][0] += 1; by[k][1] += t["net_r"]; by[k][2] += t["net_r"] > 0
+              tot = sum(t["net_r"] for t in ts)
+              wins = sum(t["net_r"] > 0 for t in ts)
+              gross = sum(t.get("gross_r", t["net_r"]) for t in ts)
+              print(f"\n{d['variant']}: {len(ts)} trades, {wins} winners, net {tot:+.1f}R, before costs {gross:+.1f}R")
+              for k in sorted(by):
+                  n, r, w = by[k]
+                  print(f"  {k}: {n} trades, {w} winners, {r:+.1f}R")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s3-report
+          path: |
+            LONG_BACKTEST.md
+            ROBUST_S3.md
+            *_joined.json
