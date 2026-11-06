@@ -102,7 +102,7 @@ def resample(h1: pd.DataFrame, rule: str) -> pd.DataFrame:
     x = h1.set_index(pd.to_datetime(h1["ts"], unit="ms", utc=True))
     agg = x.resample(rule, label="left", closed="left").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna()
-    agg["ts"] = (agg.index.view("int64") // 1_000_000).astype("int64")
+    agg["ts"] = agg.index.as_unit("ms").asi8          # index unit varies with pandas version
     return agg.reset_index(drop=True)[["ts", "open", "high", "low", "close", "volume"]]
 
 
