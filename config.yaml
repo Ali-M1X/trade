@@ -427,6 +427,7 @@ news:
   min_alert_level: 1           # 1 = positive and very positive (rules: src/agent/news/rules.json)
   alert_negative_for_open_signals: true
   max_age_min: 180             # older headlines are stored but not alerted
+  dedup_hours: 72              # 2026-11-06: one alert per coin and kind of news in this window
   timeout_s: 15
   context_file: news_context.json   # published next to the state on the data branch
   feeds:

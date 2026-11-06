@@ -96,7 +96,12 @@ def run_news(cfg: dict, repo, market, cg, notifier, now: int, session=None,
     first_run = repo.get_state("news_seeded") is None
     known = repo.news_known([i["id"] for i in items])
     ctx = context(repo, bases, now)
-    new = alerts = 0
+    # one alert per coin and kind of news (rule) within dedup_hours: several sites carry the
+    # same story (ZEC NU7 went out four times on 2026-11-06)
+    window = n_cfg.get("dedup_hours", 72) * 3_600_000
+    sent = {(c, n["rule"], n["level"]) for n in repo.get_news(since=now - window)
+            if n["alerted"] for c in n["coins"]}
+    new = alerts = dupes = 0
     for item in sorted((i for i in items if i["id"] not in known), key=lambda i: i["ts"] or 0):
         sc = classify(item["title"], item["source"])
         coins = (exchange_coins(item["title"]) if item["kind"] == "exchange"
@@ -107,13 +112,18 @@ def run_news(cfg: dict, repo, market, cg, notifier, now: int, session=None,
                  (sc.level >= n_cfg["min_alert_level"] or
                   (sc.level < 0 and n_cfg["alert_negative_for_open_signals"] and
                    any("signal" in ctx["coins"].get(c, {}) for c in coins))))
+        if alert and all(any(c == c2 and sc.rule == r and sc.level <= lv for c2, r, lv in sent)
+                         for c in coins):
+            alert = False                    # the same news for these coins already went out
+            dupes += 1
         if alert:
             notifier.send(news_message(item, sc, coins, ctx, now))
             alerts += 1
+            sent |= {(c, sc.rule, sc.level) for c in coins}
         repo.add_news({**item, "seen_at": now, "level": sc.level, "rule": sc.rule,
                        "coins": coins, "alerted": alert})
         new += 1
     if first_run:
         repo.set_state("news_seeded", now)
     fill_prices(repo, market.client, cfg["exchange"]["quote"], bases, now)
-    return {"new": new, "alerts": alerts, "failed": failed, "context": ctx}
+    return {"new": new, "alerts": alerts, "duplicates": dupes, "failed": failed, "context": ctx}

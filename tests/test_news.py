@@ -234,3 +234,28 @@ def test_fresh_headline_without_coins_is_stored_not_alerted(cfg):
     res = run_news(cfg, repo, market, NoCoins(), n, NOW, session=Session(NOW - 60_000))
     assert res["new"] == 3 and res["alerts"] == 0
     assert all(r["alerted"] is False for r in repo.get_news())
+
+
+def test_same_news_from_another_site_is_not_alerted_twice(cfg):
+    """2026-11-06: ZEC's NU7 upgrade went out four times, once per site."""
+    repo = Repository()
+    repo.set_state("news_seeded", 1)
+    now = 1791399600000 + 20 * 60_000
+    title = "Coinbase to list Hyperliquid's HYPE token"
+    sc = classify(title, "theblock")
+    repo.add_news({"id": "theblock:x", "source": "theblock", "kind": "media", "title": title,
+                   "ts": now - 3_600_000, "seen_at": now - 3_600_000, "level": sc.level,
+                   "rule": sc.rule, "coins": ["HYPE"], "alerted": True})
+    res, n = run(cfg, repo, now, Session(NOW - 10 * 60_000))
+    assert res["duplicates"] == 1
+    assert not any("HYPE" in m.split("\n")[0] for m in n.sent)       # already sent
+    assert any("SOL" in m.split("\n")[0] for m in n.sent)            # other news still go out
+    # outside the window it is news again
+    repo2 = Repository()
+    repo2.set_state("news_seeded", 1)
+    old = now - (cfg["news"]["dedup_hours"] + 1) * 3_600_000
+    repo2.add_news({"id": "theblock:x", "source": "theblock", "kind": "media", "title": title,
+                    "ts": old, "seen_at": old, "level": sc.level, "rule": sc.rule,
+                    "coins": ["HYPE"], "alerted": True})
+    res, n = run(cfg, repo2, now, Session(NOW - 10 * 60_000))
+    assert res["duplicates"] == 0 and any("HYPE" in m.split("\n")[0] for m in n.sent)
