@@ -48,6 +48,7 @@ class Backtest:
         if cfg["backtest"].get("universe_rank"):      # replay only the top N of a wider list
             self.rows = [r for r in self.rows if r.get("u_rank", 0) < cfg["backtest"]["universe_rank"]]
         self.categories = data_repo.get_state("bt_categories", {})
+        self.meta = data_repo.get_state("bt_meta", {}) or {}
         self.price = cfg["regime"].get("source") == "price"
         self.systems = self._systems() if self.price else {}
         self.dom = self._price_series() if self.price else dominance_series(merged_history(data_repo))
@@ -210,6 +211,9 @@ class Backtest:
                 self.stats[f"grade_{ev.grade}"] += 1
             if not ev.is_signal:
                 continue
+            if self._real_hour(t) in cfg["trade"].get("skip_entry_hours_utc", []):
+                self.stats["skipped_hour"] += 1
+                continue
             adm = self.book.admit(base, side, ev.score, t, self._corr(t))
             if not adm.ok:
                 self.stats[f"blocked_{adm.reason}"] += 1
@@ -219,6 +223,13 @@ class Backtest:
                                      "evaluation": ev.to_dict(), "out_of_cap": adm.out_of_cap})
             self.book.cfg = self.cfg
             self.stats["signals"] += 1
+
+    def _real_hour(self, t: int) -> int:
+        """UTC hour of t; on a scaled-clock history (scripts/scaled_history.py) the real one."""
+        m = self.meta
+        if m.get("scale"):
+            t = m["real_start"] + (t - m["start"]) // m["scale"]
+        return (t // HOUR) % 24
 
     def _corr(self, t: int):
         days = self.cfg["pairs"]["corr_days"]
