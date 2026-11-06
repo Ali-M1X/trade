@@ -5,15 +5,27 @@ name: system3-test
 # (scripts/scaled_history.py: "1h" = 5m, "4h" = 20m, "1d" = 2h, "1w" = 14h). Changes nothing live.
 on:
   workflow_dispatch:
+    inputs:
+      db_run:
+        description: "reuse the backtest-db-s3 artifact of this run id (skips the fetch)"
+        default: ""
+      variants:
+        description: "JSON list of variants to replay"
+        default: ""
   push:
     branches: [claude/system3-backtest]
     paths: [".github/workflows/system3-test.yml"]
 
 permissions:
   contents: read
+  actions: read
+
+env:
+  DB_RUN: ${{ inputs.db_run || github.run_id }}
 
 jobs:
   fetch:
+    if: ${{ !inputs.db_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:
@@ -37,7 +49,7 @@ jobs:
 
   build:
     needs: fetch
-    if: always()
+    if: ${{ always() && !inputs.db_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -65,13 +77,14 @@ jobs:
 
   replay:
     needs: build
+    if: ${{ always() && (needs.build.result == 'success' || inputs.db_run) }}
     runs-on: ubuntu-latest
     timeout-minutes: 340
     strategy:
       fail-fast: false
-      max-parallel: 8               # leave runners for the live agent
+      max-parallel: 12              # leave runners for the live agent
       matrix:
-        variant: [s3_trend, s3_trend_maker, s3_combo]
+        variant: ${{ fromJSON(inputs.variants || '["s3_trend", "s3_trend_maker", "s3_combo", "s3_fix_stop", "s3_fix_trend", "s3_donchian", "s3_pullback", "s3_meanrev", "s3_mix"]') }}
         year: [2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012]
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +97,8 @@ jobs:
         with:
           name: backtest-db-s3
           path: data
+          run-id: ${{ env.DB_RUN }}
+          github-token: ${{ github.token }}
       - run: gunzip data/backtest.db.gz
       - name: Replay one scaled year (= one real month)
         run: |
@@ -116,6 +131,8 @@ jobs:
         with:
           name: backtest-db-s3
           path: meta
+          run-id: ${{ env.DB_RUN }}
+          github-token: ${{ github.token }}
       - name: Report
         run: |
           python scripts/long_report.py results/*.json > /dev/null
@@ -141,10 +158,16 @@ jobs:
                   n, r, w = by[k]
                   print(f"  {k}: {n} trades, {w} winners, {r:+.1f}R")
           PY
+          python scripts/s3_review.py meta/s3_meta.json *_joined.json | tee S3_REVIEW.txt
+          gunzip -k meta/backtest.db.gz
+          python scripts/loss_review.py --db meta/backtest.db --out LOSS_REVIEW_S3.md s3_trend_joined.json s3_combo_joined.json > /dev/null || true
+          cat LOSS_REVIEW_S3.md || true
       - uses: actions/upload-artifact@v4
         with:
           name: s3-report
           path: |
             LONG_BACKTEST.md
             ROBUST_S3.md
+            S3_REVIEW.txt
+            LOSS_REVIEW_S3.md
             *_joined.json

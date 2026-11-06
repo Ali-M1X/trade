@@ -964,6 +964,70 @@ backtest:
       universe: {min_volume_24h_usd: 300000}
       shortlist: {volume_full_usd: 40000000}
       backtest: {funding_interval_h: 96}
+    # system 3 round 2 (2026-11-06): the loss fixes, and the classic short-timeframe systems
+    # (breakout, trend pullback, mean reversion) on the same scaled 5m history
+    s3_fix_stop:               # s3_trend without stops tighter than 0.8% (fees eat tight stops)
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 0.5, min_stop_pct: 0.8}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
+      universe: {min_volume_24h_usd: 300000}
+      shortlist: {volume_full_usd: 40000000}
+      backtest: {funding_interval_h: 96}
+    s3_fix_trend:              # the same, and only with the trend (no shorts in bull, no longs in bear)
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 0.5, min_stop_pct: 0.8}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: long}, range: {bias: both}, bear: {bias: short}}
+      universe: {min_volume_24h_usd: 300000}
+      shortlist: {volume_full_usd: 40000000}
+      backtest: {funding_interval_h: 96}
+    s3_donchian:               # 20-bar channel breakout on 2h candles, with the trend
+      trade: {base_risk_pct: 0.5}
+      regime:
+        source: price
+        price:
+          systems: {bull: {system: {kind: donchian, sides: [1], days: 20}}, bear: {system: {kind: donchian, sides: [-1], days: 20}}, range: "off"}
+      universe: {min_volume_24h_usd: 300000}
+      shortlist: {volume_full_usd: 40000000}
+      backtest: {funding_interval_h: 96}
+    s3_pullback:               # pullback to the 20 EMA in a trend, on 2h candles
+      trade: {base_risk_pct: 0.5}
+      regime:
+        source: price
+        price:
+          systems: {bull: {system: {kind: ma_pullback, sides: [1]}}, bear: {system: {kind: ma_pullback, sides: [-1]}}, range: "off"}
+      universe: {min_volume_24h_usd: 300000}
+      shortlist: {volume_full_usd: 40000000}
+      backtest: {funding_interval_h: 96}
+    s3_meanrev:                # Bollinger + RSI mean reversion, only in the range regime
+      trade: {base_risk_pct: 0.5}
+      regime:
+        source: price
+        price:
+          systems: {range: {system: {kind: meanrev}}, bull: "off", bear: "off"}
+      universe: {min_volume_24h_usd: 300000}
+      shortlist: {volume_full_usd: 40000000}
+      backtest: {funding_interval_h: 96}
+    s3_mix:                    # pullback in bull, breakout short in bear, mean reversion in range
+      trade: {base_risk_pct: 0.5}
+      regime:
+        source: price
+        price:
+          systems: {bull: {system: {kind: ma_pullback, sides: [1]}}, bear: {system: {kind: donchian, sides: [-1], days: 20}}, range: {system: {kind: meanrev}}}
+      universe: {min_volume_24h_usd: 300000}
+      shortlist: {volume_full_usd: 40000000}
+      backtest: {funding_interval_h: 96}
     both2_half_a:
       trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
       technical:
