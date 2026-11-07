@@ -1,0 +1,43 @@
+name: s3-research
+
+# System 3 research (2026-11-07, Ali): published short-timeframe strategies on the real 5m
+# history that system3-test.yml downloaded (scripts/s3_research.py). Changes nothing live.
+on:
+  workflow_dispatch:
+    inputs:
+      db_run:
+        description: "run id holding the backtest-db-s3 artifact"
+        default: "42217322350"
+  push:
+    branches: [claude/system3-backtest]
+    paths: [".github/workflows/s3-research.yml", "scripts/s3_research.py"]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-s3
+          path: data
+          run-id: ${{ inputs.db_run || '42217322350' }}
+          github-token: ${{ github.token }}
+      - run: gunzip data/backtest.db.gz
+      - run: |
+          python scripts/s3_research.py --db data/backtest.db --meta data/s3_meta.json --out S3_RESEARCH.md
+          cat S3_RESEARCH.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s3-research
+          path: S3_RESEARCH.md
