@@ -105,9 +105,13 @@ def on_candle(s: dict, ts: int, high: float, low: float, cfg: dict) -> list[Even
         return out
 
     if _adverse(s, s["sl_now"], high, low):
-        kind = "sl" if s["status"] == "active" else "breakeven"
+        kind = "sl" if s["status"] == "active" and not s.get("be_moved") else "breakeven"
         out.append(_close(s, kind, ts, s["sl_now"]))
         return out
+    be_r = t.get("breakeven_at_r")          # off by default (system 3 test only)
+    if be_r and s["status"] == "active" and not s.get("be_moved") and \
+            _favourable(s, s["entry"] + s["side"] * be_r * s["risk"], high, low):
+        s["sl_now"], s["be_moved"] = s["entry"], True
     if s["status"] == "active" and _favourable(s, s["tp1"], high, low):
         frac = t["tp1_close_pct"] / 100
         leg = r_at(s, s["tp1"])

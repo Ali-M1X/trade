@@ -371,6 +371,7 @@ trade:
   tp1_fixed_r: 2.0
   min_stop_pct: 0.0            # reject setups with a tighter stop (variant 2: 0.8)
   skip_entry_hours_utc: []     # backtest only: no new house signals in these UTC hours (system 3 test)
+  breakeven_at_r: null         # move the stop to entry at this R (null = off; system 3 test only)
   tp1_max_r: null              # cap TP1 at this many R (variant 3: 3)
   max_sl_atr: 3.0
   tp1_min_r: 2.0
@@ -1031,6 +1032,19 @@ backtest:
       backtest: {funding_interval_h: 96}
     s3_r3:                     # round 3: stop >= 0.8%, no entries 04-08 UTC, limit (maker) fills
       trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 0.5, min_stop_pct: 0.8, skip_entry_hours_utc: [4, 5, 6, 7]}
+      technical:
+        classic: {stage: true}
+        section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
+        avoid: {max_touches: 6, cycles: [late, fresh_turn], levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
+      regime:
+        source: price
+        price:
+          regimes: {bull: {bias: both, counter_risk: 0.5}, range: {bias: both}, bear: {bias: both, counter_risk: 0.5}}
+      universe: {min_volume_24h_usd: 300000}
+      shortlist: {volume_full_usd: 40000000}
+      backtest: {funding_interval_h: 96, taker_fee_pct: 0.02, slippage_pct: 0.02}
+    s3_r3_be:                  # s3_r3 with the stop moved to entry at 1R (Ali's card, 2026-11-07)
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 0.5, min_stop_pct: 0.8, skip_entry_hours_utc: [4, 5, 6, 7], breakeven_at_r: 1.0}
       technical:
         classic: {stage: true}
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
