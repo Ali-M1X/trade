@@ -1,8 +1,9 @@
 // On-time agent runs: GitHub's own cron can start hours late, so this worker starts the agent
-// workflow itself one minute after every 15m candle close (minutes 1, 16, 31 and 46 UTC).
+// workflow itself one minute after every 5m candle close (minutes 1, 6, 11, ... 56 UTC; every
+// 15 minutes until 2026-11-08, DECISIONS #150).
 // Needs the AGENT_DISPATCH_TOKEN secret (a GitHub token allowed to run Actions on the repo);
 // without it nothing is sent and the GitHub cron alone keeps running the agent.
-export const DISPATCH_MINUTES = [1, 16, 31, 46];
+export const DISPATCH_MINUTES = [1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, 56];
 
 export function dispatchDue(now) {
   return DISPATCH_MINUTES.includes(new Date(now).getUTCMinutes());

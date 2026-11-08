@@ -91,10 +91,10 @@ test("negative news is sent when the coin has an open signal", async () => {
   assert.ok(sent[0].startsWith("⛔️ خبر خیلی منفی | ABC"));
 });
 
-test("agent dispatch: only at minutes 1/16/31/46 and only with a token", async () => {
+test("agent dispatch: one minute after every 5m close and only with a token", async () => {
   const { dispatchAgent, dispatchDue } = await import("../src/dispatch.js");
   const at = (m) => Date.UTC(2026, 9, 11, 18, m, 3);
-  assert.deepEqual([0, 1, 15, 16, 31, 46, 47].map((m) => dispatchDue(at(m))), [false, true, false, true, true, true, false]);
+  assert.deepEqual([0, 1, 5, 6, 15, 16, 31, 46, 47, 56].map((m) => dispatchDue(at(m))), [false, true, false, true, false, true, true, true, false, true]);
   const calls = [];
   const fake = async (url, opts) => { calls.push([url, opts]); return { status: 204 }; };
   const env = { AGENT_REPO: "o/r", AGENT_WORKFLOW: "agent.yml", AGENT_DISPATCH_TOKEN: "t" };
