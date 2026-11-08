@@ -168,6 +168,18 @@ def run_4h(cfg: dict, repo, market: LiveMarket, cg, now_ms: int) -> FunnelResult
 
 def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None,
            book_repo=None, state_key: str = "funnel") -> list[Evaluation]:
+    """L6 on the shortlist. With `realtime.open_candle_tfs` (2026-11-08, Ali) those
+    timeframes include the candle that is still forming, so a setup is scored as it happens
+    instead of at the candle's close."""
+    market.open_tfs = set((cfg.get("realtime") or {}).get("open_candle_tfs") or [])
+    try:
+        return _run_1h(cfg, repo, market, now_ms, notifier, book_repo, state_key)
+    finally:
+        market.open_tfs = set()
+
+
+def _run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None,
+            book_repo=None, state_key: str = "funnel") -> list[Evaluation]:
     """book_repo: where the evaluations and signals go (system 2 keeps its own database);
     the funnel state is always read from repo (`state_key`)."""
     book_repo = book_repo or repo

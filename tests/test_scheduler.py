@@ -63,3 +63,11 @@ def test_run_scheduled_runs_due_tasks_and_records_them(cfg, monkeypatch):
     last = repo.get_state("last_runs")
     assert last["run-1h"] == now and last["run-4h"] == MON   # a failed task stays due
     assert storage.pushed == ["run-scheduled run-15m,run-4h,run-1h"]
+
+
+def test_realtime_periods_override():
+    last = {"run-4h": MON, "run-1h": MON, "run-daily": MON, "run-weekly": MON}
+    periods = {"run-4h": 60, "run-1h": 5}
+    assert due_tasks(MON + 4 * 60_000, last, periods) == ["run-15m"]
+    assert due_tasks(MON + 6 * 60_000, last, periods) == ["run-15m", "run-1h"]
+    assert due_tasks(MON + HOUR + 60_000, last, periods) == ["run-15m", "run-4h", "run-1h"]

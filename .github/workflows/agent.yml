@@ -5,7 +5,7 @@ name: agent
 # skipped cron runs catch up. Schedules only run from the default branch.
 on:
   schedule:
-    - cron: "*/15 * * * *"        # public repo. Private repo: "*/30 * * * *" (free minutes)
+    - cron: "*/5 * * * *"         # 2026-11-08: every 5 minutes, GitHub's shortest (public repo)
   workflow_dispatch:
     inputs:
       only:
