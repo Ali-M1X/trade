@@ -42,8 +42,9 @@ universe:
   # 2026-10-27: back to 100 (DECISIONS.md #141): on 2021-2026 the top 100 made +36.4 R
   # against +18.3 R for the top 200 (system 1); system 2 unchanged (+1.7 against +1.4).
   # 2026-11-04: Ali chose the top 700 on Gate with a $4M floor (DECISIONS #146).
-  coins_top_n: 700
-  min_volume_24h_usd: 4000000
+  # 2026-11-08: widened to the top 2000 with a $2M floor for more signals (DECISIONS #149).
+  coins_top_n: 2000
+  min_volume_24h_usd: 2000000
   # Pulled from CoinGecko categories and removed from the universe.
   exclude_categories: [stablecoins, wrapped-tokens]
   # Always excluded, in case a category lookup fails or misses one.
