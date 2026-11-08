@@ -78,6 +78,9 @@ def test_live_market_caches_and_filters(cfg):
     assert out["ts"].iloc[-1] + TF_MS["4h"] <= now
     assert len(out) <= cfg["analysis"]["window_bars"] + cfg["storage"]["warmup_bars"]
     assert m.candles("SOL", "4h") is out and client.calls == 1  # memoised within a run
+    m.open_tfs = {"4h"}                                         # realtime L6: keep the forming candle
+    live = m.candles("SOL", "4h")
+    assert live["ts"].iloc[-1] + TF_MS["4h"] > now and len(live) == len(out) + 1
 
 
 # ------------------------------------------------------------ end to end
@@ -230,7 +233,7 @@ class ScriptedMarket:
     """15m and 4H candles after a signal's creation, for run-15m."""
 
     def __init__(self, m15, h4):
-        self.data = {"15m": m15, "4h": h4}
+        self.data = {"15m": m15, "5m": m15, "4h": h4}      # either fast-trigger timeframe
 
     def candles(self, base, tf):
         return self.data[tf]

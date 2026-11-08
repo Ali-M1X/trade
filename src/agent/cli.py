@@ -104,7 +104,7 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
     storage, repo, market, cg, now = open_context(cfg, secrets)
     notifier = Notifier(cfg, secrets)
     last = repo.get_state("last_runs", {})
-    tasks = args.only.split(",") if args.only else due_tasks(now, last)
+    tasks = args.only.split(",") if args.only else due_tasks(now, last, (cfg.get("realtime") or {}).get("periods_min"))
     print(f"due: {', '.join(tasks)}")
     failed = []
     for task in tasks:

@@ -63,7 +63,7 @@ timeframes:
   context: 1d
   setup: 4h
   trigger: 1h
-  fast_trigger: 15m
+  fast_trigger: 5m             # 2026-11-08: fills, stops and targets on 5m candles (was 15m)
 
 # -------------------------------------------------------- shared indicators
 indicators:
@@ -953,5 +953,12 @@ backtest:
 # 2026-10-09: Ali chose ph_stage (atr_2r + Weinstein stage filter) for paper trading.
 # 2026-10-22: one system per price regime (regime_combo, DECISIONS.md #138-140).
 # 2026-11-02: combo_avoid (regime_combo + loss-review fixes, DECISIONS.md #144).
+# 2026-11-08 (Ali, DECISIONS #150): as close to real time as the free setup allows. The
+# cron runs every 5 minutes; L6 scores the shortlist on every run with the forming 4H and 1H
+# candles; the funnel (L1-L5) refreshes every hour.
+realtime:
+  open_candle_tfs: [4h, 1h]
+  periods_min: {run-4h: 60, run-1h: 5}
+
 live:
   variant: combo_avoid

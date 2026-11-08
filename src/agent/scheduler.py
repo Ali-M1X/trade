@@ -24,9 +24,12 @@ def boundary(now_ms: int, period: int, offset: int = 0) -> int:
     return (now_ms - offset) // period * period + offset
 
 
-def due_tasks(now_ms: int, last_runs: dict) -> list[str]:
+def due_tasks(now_ms: int, last_runs: dict, periods_min: dict | None = None) -> list[str]:
+    """periods_min: overrides of a task's period in minutes (config `realtime.periods_min`)."""
     out = []
     for name, period, offset in TASKS:
+        if periods_min and name in periods_min:
+            period, offset = periods_min[name] * 60_000, 0
         if period is None or last_runs.get(name, 0) < boundary(now_ms, period, offset):
             out.append(name)
     return out

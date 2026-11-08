@@ -10,7 +10,7 @@ from .synthetic import ratio_candles
 
 log = logging.getLogger(__name__)
 
-TF_MS = {"15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000,
+TF_MS = {"5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000,
          "1w": 604_800_000}
 
 
@@ -27,9 +27,10 @@ class LiveMarket:
         self.quote = cfg["exchange"]["quote"]
         self.bars = cfg["analysis"]["window_bars"] + cfg["storage"]["warmup_bars"]
         self._mem: dict = {}
+        self.open_tfs: set[str] = set()    # timeframes read with the still-forming candle
 
     def candles(self, base: str, tf: str) -> pd.DataFrame:
-        key = (base, tf)
+        key = (base, tf, tf in self.open_tfs)
         if key in self._mem:
             return self._mem[key]
         symbol = perp_symbol(base, self.quote)
@@ -46,7 +47,8 @@ class LiveMarket:
             self.repo.upsert_candles(name, symbol, tf, rows)
             self.repo.prune_candles(name, symbol, tf, self.cfg["storage"]["keep_bars"])
         df = self.repo.get_candles(name, symbol, tf, since=start)
-        df = closed_only(df, tf, self.now)
+        if tf not in self.open_tfs:
+            df = closed_only(df, tf, self.now)
         self._mem[key] = df
         return df
 
