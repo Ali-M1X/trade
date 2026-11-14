@@ -82,8 +82,10 @@ class GitBranchStorage:
 def make_storage(cfg: dict, repo_dir: str | Path = "."):
     s = cfg["storage"]
     backend = os.environ.get("AGENT_STORAGE") or s["backend"]
-    s2 = cfg.get("system2") or {}
+    s2, sh = cfg.get("system2") or {}, cfg.get("shadow") or {}
     extra_dbs = [s2["db_path"]] if s2.get("enabled") else []
+    if sh.get("enabled"):                       # Watch setups followed for the status panel
+        extra_dbs += [sh["db_path"]] + ([sh["s2_db_path"]] if s2.get("enabled") else [])
     if backend == "local":
         return LocalStorage(s["db_path"], extra_dbs)
     if backend == "git_branch":

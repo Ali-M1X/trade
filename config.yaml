@@ -448,6 +448,18 @@ system2:
   variant: s2_avoid            # 2026-11-01: s2_trend + loss-review fixes (was s2_trend)
   db_path: data/state_s2.db
 
+# Status panel (2026-11-14, Ali): Watch setups (scored with a plan, not sent) are followed
+# like signals in their own databases, never announced. Sized as grade B. signals/shadow.py
+shadow:
+  enabled: true
+  db_path: data/state_shadow.db
+  s2_db_path: data/state_s2_shadow.db
+
+panel:
+  start: "2026-11-06"          # the simulated account opens here
+  balance_usd: 100
+  backfill: panel/backfill.json   # replay of 2026-11-06 .. the shadow book's start (panel-backfill.yml)
+
 storage:
   backend: local               # local | git_branch
   db_path: data/state.db

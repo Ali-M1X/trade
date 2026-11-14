@@ -46,3 +46,17 @@ def record(cfg: dict, shadow_repo, evs: list, now_ms: int, state: dict) -> list[
     if not shadow_repo.get_state("shadow_since"):
         shadow_repo.set_state("shadow_since", now_ms)
     return created
+
+
+def run_pass(cfg: dict, repo, shadow_repo, market, now_ms: int, tasks: list[str], evs,
+             state_key: str) -> None:
+    """One live run: follow the open shadow trades on run-15m (like the real ones, without
+    messages), then open new ones from this run's Watch evaluations (`evs`, from run-1h)."""
+    from ..runs import manage
+    if not shadow_repo.get_state("shadow_since"):
+        shadow_repo.set_state("shadow_since", now_ms)
+    if "run-15m" in tasks:
+        print(f"shadow run-15m: {len(manage(cfg, shadow_repo, market, Silent(), now_ms))} events")
+    state = repo.get_state(state_key)
+    if evs and state:
+        print(f"shadow: {len(record(cfg, shadow_repo, evs, now_ms, state))} new Watch trades")

@@ -107,6 +107,7 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
     tasks = args.only.split(",") if args.only else due_tasks(now, last, (cfg.get("realtime") or {}).get("periods_min"))
     print(f"due: {', '.join(tasks)}")
     failed = []
+    evs = None
     for task in tasks:
         try:
             if task == "run-15m":
@@ -114,7 +115,8 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
             elif task == "run-4h":
                 print(summarize_funnel(run_4h(cfg, repo, market, cg, now)))
             elif task == "run-1h":
-                print(summarize_evaluations(run_1h(cfg, repo, market, now, notifier)))
+                evs = run_1h(cfg, repo, market, now, notifier)
+                print(summarize_evaluations(evs))
             elif task == "run-daily":
                 daily(cfg, repo, notifier, now)
                 hold_new_entrants(cfg, repo, market, cg, notifier, now)
@@ -126,14 +128,25 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
             logging.getLogger(__name__).exception("%s failed", task)
             failed.append(task)
     from . import system2
+    from .signals import shadow
+    from .store.repository import Repository
+    if shadow.enabled(cfg):
+        sh = Repository(cfg["shadow"]["db_path"])
+        try:                                    # status panel only: never blocks the live system
+            shadow.run_pass(cfg, repo, sh, market, now, tasks, evs, "funnel")
+        except Exception:
+            logging.getLogger(__name__).exception("shadow failed")
+        sh.close()
     if system2.enabled(cfg):
-        from .store.repository import Repository
         repo2 = Repository(cfg["system2"]["db_path"])
+        sh2 = Repository(cfg["shadow"]["s2_db_path"]) if shadow.enabled(cfg) else None
         try:
-            system2.run_system2(cfg, repo, repo2, market, notifier, now, tasks)
+            system2.run_system2(cfg, repo, repo2, market, notifier, now, tasks, shadow_repo=sh2)
         except Exception:                       # paper experiment: never blocks the live system
             logging.getLogger(__name__).exception("system2 failed")
         repo2.close()
+        if sh2 is not None:
+            sh2.close()
     extra = {}
     if cfg.get("news", {}).get("enabled"):
         try:
