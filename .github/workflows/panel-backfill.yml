@@ -3,6 +3,7 @@ name: panel-backfill
 # Status panel (2026-11-14, Ali): replays both live systems from 2026-11-06 with the shadow
 # book on (Watch setups followed like signals), then commits the trades to
 # panel/backfill.json on the branch it ran on. Changes nothing live.
+# rerun: 2026-11-14 after the CoinGecko quota fallback
 on:
   workflow_dispatch:
     inputs:
@@ -37,7 +38,7 @@ jobs:
           cache: pip
       - run: pip install -e .
       # 150 days: the regime's moving averages need ~100 days of history before START
-      - run: trade-agent -v backtest --fetch-only --days 150 2>&1 | grep -v " INFO .*HTTP" | tail -60
+      - run: set -o pipefail; trade-agent -v backtest --fetch-only --days 150 2>&1 | grep -v " INFO .*HTTP" | tail -60
       - run: gzip -k data/backtest.db && ls -la data
       - uses: actions/upload-artifact@v4
         with:
@@ -66,6 +67,7 @@ jobs:
           path: data
       - run: gunzip data/backtest.db.gz
       - run: |
+          set -o pipefail
           trade-agent -v backtest --variant ${{ matrix.variant }} --record-watch \
             --start "$START" --json ${{ matrix.variant }}.json 2>&1 | tail -8
       - uses: actions/upload-artifact@v4
@@ -85,6 +87,7 @@ jobs:
           path: results
           merge-multiple: true
       - run: |
+          set -o pipefail
           python scripts/panel_backfill.py panel/backfill.json \
             system1=results/combo_avoid.json system2=results/s2_avoid.json | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Commit panel/backfill.json
