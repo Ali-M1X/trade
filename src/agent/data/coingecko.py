@@ -23,10 +23,29 @@ class CoinGecko:
         self._sleep = sleep
         self._clock = clock
         self._last_call = None
+        self._interval = self.c["min_interval_s"]
+
+    def _drop_key_if_quota_used(self, r) -> bool:
+        """The Demo key's monthly call quota is used up (HTTP 429, error_code 10006; seen
+        2026-11-14): go on without the key on the public API, which is slower but free, until
+        the quota resets. True when the key was dropped (retry the call at once)."""
+        header = self.c["demo_header"]
+        if header not in self.session.headers:
+            return False
+        try:
+            code = ((r.json() or {}).get("status") or {}).get("error_code")
+        except Exception:
+            code = None
+        if code != 10006 and "calls limit" not in (getattr(r, "text", "") or ""):
+            return False
+        del self.session.headers[header]
+        self._interval = max(self._interval, self.c.get("public_min_interval_s", 6))
+        print("CoinGecko: the API key's monthly quota is used up; using the public API without it")
+        return True
 
     def _throttle(self) -> None:
         if self._last_call is not None:
-            wait = self.c["min_interval_s"] - (self._clock() - self._last_call)
+            wait = self._interval - (self._clock() - self._last_call)
             if wait > 0:
                 self._sleep(wait)
         self._last_call = self._clock()
@@ -48,6 +67,8 @@ class CoinGecko:
                     raise CoinGeckoError(f"{path}: {e}") from e
                 self._sleep(backoff * 2 ** attempt)
                 continue
+            if r.status_code == 429 and attempt < self.c["retries"] and self._drop_key_if_quota_used(r):
+                continue                                 # again at once, without the key
             if r.status_code == 429 or r.status_code >= 500:
                 if attempt == self.c["retries"]:
                     raise CoinGeckoError(f"{path}: HTTP {r.status_code}")

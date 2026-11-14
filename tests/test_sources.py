@@ -118,6 +118,20 @@ def test_coingecko_retries_429_then_caches(cfg):
     assert session.headers[cfg["coingecko"]["demo_header"]] == "k"
 
 
+def test_coingecko_drops_the_key_when_its_monthly_quota_is_used_up(cfg):
+    used_up = {"status": {"error_code": 10006, "error_message": "You've reached 10,000 calls limit."}}
+    sleeps = []
+    session = FakeSession([FakeResponse(429, used_up), FakeResponse(200, {"gecko_says": "ok"}),
+                           FakeResponse(429, {}), FakeResponse(200, {"gecko_says": "ok"})])
+    cg = CoinGecko(cfg, api_key="k", session=session, sleep=sleeps.append, clock=lambda: 0.0)
+    assert cg.ping() == {"gecko_says": "ok"}
+    assert cfg["coingecko"]["demo_header"] not in session.headers   # public API from now on
+    assert len(session.urls) == 2 and not [s for s in sleeps if s >= 15]  # no backoff wait
+    assert cg.ping() == {"gecko_says": "ok"}                        # a plain 429 still backs off
+    assert cfg["coingecko"]["retry_backoff_s"] in sleeps
+    assert cfg["coingecko"]["public_min_interval_s"] in sleeps         # slower without the key
+
+
 def test_coingecko_gives_up(cfg):
     cfg["coingecko"]["retries"] = 1
     cg = CoinGecko(cfg, session=FakeSession([FakeResponse(500), FakeResponse(500)]),
