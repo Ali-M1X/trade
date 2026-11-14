@@ -202,3 +202,29 @@ def test_universe_rank_replays_only_the_top_of_a_wider_list(cfg):
     cfg["backtest"]["universe_rank"] = 1
     assert len(Backtest(cfg, repo, meta["start"], meta["end"]).rows) == 1
     assert variant_cfg(cfg, "ph_stage_top100")["backtest"]["universe_rank"] == 100
+
+
+def test_record_watch_follows_watch_setups_in_a_shadow_book(cfg, monkeypatch):
+    """backtest.record_watch (status panel): Watch setups become approved=False trades with
+    their own lifecycle; nothing changes for the confirmed signals."""
+    def fake_evaluate(base, side, frames, regime, majors, cfg, **kw):
+        h4, h1 = frames["4h"], frames["1h"]
+        price = h1.close
+        plan = TradePlan(1, "market", price, price * 0.998, price * 1.002, price - 1.5 * h4.atr,
+                         price + 3 * h4.atr, price + 4.5 * h4.atr, 2, 3, False, price,
+                         "cluster", "4h", 2, h4.atr)
+        return Evaluation(base, 1, score=60, grade="Watch", plan=plan, labels=kw.get("labels") or [],
+                          gates={"regime": True, "phase": True, "rr": True, "confirmation": False})
+    monkeypatch.setattr(engine_mod, "evaluate", fake_evaluate)
+    repo = build(days=150)
+    _, plain = run_backtest(cfg, repo, days=30)
+    assert plain == []
+    cfg = {**cfg, "backtest": {**cfg["backtest"], "record_watch": True}}
+    _, trades = run_backtest(cfg, repo, days=30)
+    assert trades and not any(t["approved"] for t in trades)
+    want = cfg["trade"]["base_risk_pct"] * cfg["grades"]["risk_share"]["B"]
+    assert all(t["risk_pct"] == pytest.approx(want) for t in trades)
+    opened = sorted((t["created"], t["closed_at"] or 1e20, t["base"]) for t in trades)
+    for c, _, base in opened:                                   # one open shadow trade per coin
+        assert [b for c2, e2, b in opened if c2 <= c < e2].count(base) == 1
+    assert any(t["status"] in ("sl", "breakeven", "tp3") for t in trades)
