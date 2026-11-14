@@ -22,6 +22,7 @@ coingecko:
   base_url: https://api.coingecko.com/api/v3
   demo_header: x-cg-demo-api-key
   min_interval_s: 2.5          # free tier is ~30 calls/min; stay well under
+  public_min_interval_s: 6     # without the key (its monthly quota used up): public API, ~10/min
   retries: 4
   retry_backoff_s: 15          # waited after a 429, doubled each retry
   timeout_s: 30
