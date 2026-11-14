@@ -246,6 +246,13 @@ def cmd_backtest_robust(args, cfg, secrets) -> int:
     return 0
 
 
+def cmd_panel(args, cfg, secrets) -> int:
+    """Write the status panel page (read-only; for a web server on the VPS)."""
+    from .panel import build
+    print(build(live_config(cfg), args.out))
+    return 0
+
+
 COMMANDS = {
     "check-sources": cmd_check_sources,
     "run-4h": cmd_run_4h,
@@ -258,6 +265,7 @@ COMMANDS = {
     "backtest": cmd_backtest,
     "backtest-compare": cmd_backtest_compare,
     "backtest-robust": cmd_backtest_robust,
+    "panel": cmd_panel,
 }
 
 
@@ -289,6 +297,8 @@ def main(argv: list[str] | None = None) -> int:
         if name == "run-news":
             p.add_argument("--preview", action="store_true",
                            help="also alert headlines already out and exchange news (testing)")
+        if name == "panel":
+            p.add_argument("--out", default="panel", help="folder for index.html")
         if name == "run-scheduled":
             p.add_argument("--only", help="comma-separated tasks to force, e.g. run-4h,run-1h")
         if name == "backtest-compare":

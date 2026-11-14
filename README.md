@@ -146,6 +146,7 @@ ENV
 | `trade-agent run-scheduled` | اجرای هر کاری که سررسید شده (برای cron) |
 | `trade-agent run-4h` / `run-1h` / `run-15m` / `run-daily` / `run-weekly` | اجرای یک کار به‌تنهایی |
 | `trade-agent backtest` / `backtest-compare` | بک‌تست و مقایسه‌ی نسخه‌ها |
+| `trade-agent panel --out DIR` | ساختن صفحه‌ی پنل وضعیت (روی سرور، برای nginx) |
 
 ## توسعه
 ```bash

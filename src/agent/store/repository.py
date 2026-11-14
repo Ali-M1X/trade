@@ -62,6 +62,13 @@ class Repository:
         self.conn = sqlite3.connect(str(path))
         self.conn.executescript(SCHEMA)
 
+    @classmethod
+    def open_readonly(cls, path: str | Path) -> "Repository":
+        """Read an existing database without creating or changing anything (status panel)."""
+        repo = cls.__new__(cls)
+        repo.conn = sqlite3.connect(f"file:{Path(path).resolve()}?mode=ro", uri=True)
+        return repo
+
     def close(self) -> None:
         self.conn.close()
 
