@@ -131,3 +131,22 @@ def test_panel_does_not_create_missing_databases(cfg, tmp_path):
     c = _cfg(cfg, tmp_path)
     build(c, tmp_path / "panel", NOW)
     assert not (tmp_path / "state.db").exists() and not (tmp_path / "sh.db").exists()
+
+
+def test_panel_pull_takes_the_databases_from_the_data_branch(cfg, tmp_path, monkeypatch):
+    """Panel-only server (2026-11-15): `panel --pull` refreshes the databases first."""
+    import argparse
+    from agent import cli
+    from agent.store import storage
+    c = _cfg(cfg, tmp_path)
+    pulled = []
+
+    class FakeStorage:
+        def pull(self):
+            Repository(c["storage"]["db_path"]).close()
+            pulled.append(True)
+            return True
+    monkeypatch.setattr(storage, "make_storage", lambda cfg, repo_dir=".": FakeStorage())
+    monkeypatch.setattr(cli, "live_config", lambda cfg: cfg)
+    assert cli.cmd_panel(argparse.Namespace(out=str(tmp_path / "panel"), pull=True), c, None) == 0
+    assert pulled and (tmp_path / "panel" / "index.html").exists()

@@ -266,7 +266,14 @@ def cmd_backtest_robust(args, cfg, secrets) -> int:
 def cmd_panel(args, cfg, secrets) -> int:
     """Write the status panel page (read-only; for a web server on the VPS)."""
     from .panel import build
-    print(build(live_config(cfg), args.out))
+    cfg = live_config(cfg)
+    if getattr(args, "pull", False):
+        # panel-only server (2026-11-15, Ali): the agent keeps running on GitHub Actions and
+        # this machine only shows it, so take the latest databases from the data branch first
+        from .store.storage import make_storage
+        if not make_storage(cfg).pull():
+            print("data branch not found: building from the local databases")
+    print(build(cfg, args.out))
     return 0
 
 
@@ -321,6 +328,9 @@ def main(argv: list[str] | None = None) -> int:
                            help="also alert headlines already out and exchange news (testing)")
         if name == "panel":
             p.add_argument("--out", default="panel", help="folder for index.html")
+            p.add_argument("--pull", action="store_true",
+                           help="first download the databases from the data branch (the agent "
+                           "runs elsewhere, e.g. on GitHub Actions)")
         if name == "run-scheduled":
             p.add_argument("--only", help="comma-separated tasks to force, e.g. run-4h,run-1h")
         if name == "backtest-compare":
