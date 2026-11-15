@@ -4,12 +4,16 @@ LocalStorage: the file just stays on disk (VPS).
 GitBranchStorage: the file is gzipped and kept on a dedicated branch (GitHub Actions),
 optionally with small extra files such as the news context. Each push replaces the branch with a single commit so
 the repository does not grow with every run.
+GitBackupStorage: the agent on Ali's own server (2026-11-15). The file stays on disk and is the
+source of truth; the branch is only a backup (and the news worker's context), refreshed every few
+minutes, so runs every minute don't move ~30 MB through GitHub each time.
 """
 from __future__ import annotations
 
 import gzip
 import os
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -79,6 +83,42 @@ class GitBranchStorage:
         self._git("push", "--force", self.remote, f"{commit}:refs/heads/{self.branch}")
 
 
+class GitBackupStorage(GitBranchStorage):
+    STAMP = ".last_backup"
+
+    def __init__(self, *args, every_min: float = 15, **kw):
+        super().__init__(*args, **kw)
+        self.every_s = every_min * 60
+        self.stamp = self.db_path.parent / self.STAMP
+
+    def pull(self) -> bool:
+        """The local file wins; the branch is only read to start (a new server, a lost disk)."""
+        if self.db_path.exists():
+            return True
+        return super().pull()
+
+    def due(self) -> bool:
+        try:
+            return time.time() - float(self.stamp.read_text()) >= self.every_s
+        except (OSError, ValueError):
+            return True
+
+    def push(self, message: str = "Update state", extra: dict[str, bytes] | None = None,
+             force: bool = False) -> None:
+        for name, data in (extra or {}).items():        # the panel and later runs read them locally
+            (self.db_path.parent / name).write_bytes(data)
+        if not (force or self.due()):
+            return
+        try:
+            super().push(message, extra)
+        except subprocess.CalledProcessError as e:      # GitHub unreachable: retried on the next run
+            print(f"backup to the {self.branch} branch failed: {e.stderr.decode(errors='replace').strip()}")
+            if force:
+                raise
+            return
+        self.stamp.write_text(str(time.time()))
+
+
 def make_storage(cfg: dict, repo_dir: str | Path = "."):
     s = cfg["storage"]
     backend = os.environ.get("AGENT_STORAGE") or s["backend"]
@@ -90,4 +130,7 @@ def make_storage(cfg: dict, repo_dir: str | Path = "."):
         return LocalStorage(s["db_path"], extra_dbs)
     if backend == "git_branch":
         return GitBranchStorage(s["db_path"], s["git_branch"], s["git_remote"], repo_dir, extra_dbs)
+    if backend == "git_backup":
+        return GitBackupStorage(s["db_path"], s["git_branch"], s["git_remote"], repo_dir, extra_dbs,
+                                every_min=s.get("backup_min", 15))
     raise ValueError(f"unknown storage backend: {backend}")
