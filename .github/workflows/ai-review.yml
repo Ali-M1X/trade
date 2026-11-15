@@ -41,6 +41,7 @@ jobs:
       - name: Review
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
         run: trade-agent ai-review
       - name: Save to the ai branch

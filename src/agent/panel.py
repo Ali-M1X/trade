@@ -695,6 +695,15 @@ def insights(cfg: dict, pl: dict) -> None:
     pl["panel_api"] = bool((cfg.get("panel") or {}).get("api"))
 
 
+def _app_version() -> str:
+    """A fingerprint of the page's own code, so open pages reload themselves after an update."""
+    import hashlib
+    h = hashlib.sha1()
+    for name in ("index.html", "app.js", "style.css"):
+        h.update((WEB / name).read_bytes())
+    return h.hexdigest()[:12]
+
+
 def build(cfg: dict, out_dir: str | Path, now_ms: int | None = None) -> Path:
     now_ms = now_ms or int(datetime.now(timezone.utc).timestamp() * 1000)
     out = Path(out_dir)
@@ -704,7 +713,10 @@ def build(cfg: dict, out_dir: str | Path, now_ms: int | None = None) -> Path:
     insights(cfg, pl)
     fonts = _copy_assets(cfg, out)
     pl["candles"] = export_candles(cfg, pl, out)
+    pl["app"] = _app_version()
     _write(out / "data.json", _json_for_html(pl))
-    _write(out / "version.json", json.dumps({"now": pl["now"]}))   # polled often; data.json only when it changes
     _write(out / "index.html", render(cfg, pl, fonts))
+    # polled often: data.json only when "now" changes, the whole page when the panel's code does
+    # (written last, so a page that reloads finds the new index.html)
+    _write(out / "version.json", json.dumps({"now": pl["now"], "app": pl["app"]}))
     return out / "index.html"

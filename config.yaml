@@ -389,6 +389,7 @@ trade:
 lifecycle:
   expiry_bars_4h: 6
   max_active: 5
+  risk_free_outside_cap: true  # 2026-11-15 (Ali): trades past TP1 (stop at entry) don't count toward max_active
   max_correlated_same_side: 2
   correlation_threshold: 0.8
   loss_streak_pause: 3         # after 3 consecutive SLs pause until the next D close
@@ -488,6 +489,9 @@ ai:
        model: gemini-2.5-flash, key_env: GEMINI_API_KEY, budget: 6}
     - {key: gpt, name: "GPT (GitHub Models)", url: "https://models.github.ai/inference",
        model: openai/gpt-4.1-mini, key_env: GITHUB_TOKEN, budget: 6}
+    # 2026-11-15 (Ali): OpenRouter's free models; 50 requests a day per account without credit
+    - {key: deepseek, name: "DeepSeek (OpenRouter)", url: "https://openrouter.ai/api/v1",
+       model: "deepseek/deepseek-chat-v3-0324:free", key_env: OPENROUTER_API_KEY, budget: 4, daily: 45}
 
 storage:
   backend: local               # local | git_branch | git_backup (set by AGENT_STORAGE)

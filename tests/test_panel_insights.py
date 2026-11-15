@@ -196,4 +196,5 @@ def test_build_carries_the_insights(cfg, tmp_path):
     d = json.loads((tmp_path / "out" / "data.json").read_text())
     assert d["health"]["runs"][0]["dur"] == 40 and d["marks"]["S1-1"]["taken"] is True
     assert d["panel_api"] is True and d["market"] == {} and d["news_view"]["items"] == []
-    assert json.loads((tmp_path / "out" / "version.json").read_text()) == {"now": NOW}
+    v = json.loads((tmp_path / "out" / "version.json").read_text())
+    assert v["now"] == NOW and len(v["app"]) == 12 and d["app"] == v["app"]

@@ -15,6 +15,17 @@ class Admission:
     out_of_cap: bool = False
 
 
+def risk_free(sig: dict) -> bool:
+    """An open trade whose stop is at or beyond its entry (moved there at TP1)."""
+    lcy = (sig.get("payload") or {}).get("lifecycle") or {}
+    if sig.get("status") in ("tp1", "tp2"):
+        return True
+    entry, sl = lcy.get("entry"), lcy.get("sl_now")
+    if not entry or sl is None or not lcy.get("filled_at"):
+        return False
+    return sl >= entry if sig.get("side") == "long" else sl <= entry
+
+
 class SignalBook:
     def __init__(self, repo, cfg: dict):
         self.repo, self.cfg = repo, cfg
@@ -46,7 +57,10 @@ class SignalBook:
                      and (corr(base, s["symbol"]) or 0) > lc["correlation_threshold"]]
             if len(twins) >= lc["max_correlated_same_side"]:
                 return Admission(False, "correlated")
-        if len(open_) >= lc["max_active"]:
+        # 2026-11-15 (Ali): a trade past TP1 has its stop at entry and profit taken, so it risks
+        # nothing more and no longer takes one of the max_active places
+        at_risk = [x for x in open_ if not (lc.get("risk_free_outside_cap") and risk_free(x))]
+        if len(at_risk) >= lc["max_active"]:
             if score >= g["a_plus"]:
                 return Admission(True, out_of_cap=True)
             return Admission(False, "max_active")
