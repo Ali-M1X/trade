@@ -5,7 +5,10 @@ from agent.config import load_config
 
 @pytest.fixture
 def cfg():
-    return load_config()
+    c = load_config()
+    # tests never reach the network or the live panel: no chart links in messages, no market data
+    c.setdefault("panel", {}).update(url="", market_data=False)
+    return c
 
 
 from pathlib import Path

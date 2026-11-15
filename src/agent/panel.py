@@ -654,14 +654,51 @@ def _copy_assets(cfg: dict, out: Path) -> list[str]:
     return sorted(f.name for f in dst.glob("IRANSansWeb*.woff*"))
 
 
+def _market_bases(pl: dict) -> list[str]:
+    """Coins whose futures data the panel shows, most important first (the API is asked only
+    for a few per build)."""
+    out = ["BTC", "ETH"]
+    live = [t for t in pl["trades"] if t["open"] or t["status"] == "pending"]
+    for t in sorted(live, key=lambda t: -t["created"]):
+        out.append(t["base"])
+    for s in pl["systems"]:
+        for c in s["candidates"][:10]:
+            out.append(c["base"])
+    return list(dict.fromkeys(out))
+
+
+def insights(cfg: dict, pl: dict) -> None:
+    """Adds MAE/MFE, BTC beta, system health, taken marks and market data to the payload."""
+    from . import panel_insights as pi
+    now = pl["now"]
+    repo = _open(cfg["storage"]["db_path"])
+    try:
+        pi.excursions(repo, pl["trades"], now)
+        live = sorted({t["base"] for t in pl["trades"] if t["open"] or t["status"] == "pending"})
+        pl["beta"] = pi.beta_btc(repo, live, now)
+        pl["health"] = pi.health(cfg, repo, now)
+        if repo is not None:
+            pl["news_view"] = pi.news_view([repo], now)
+    except sqlite3.Error as e:                     # the panel still shows everything else
+        print(f"panel insights skipped: {e}")
+    finally:
+        if repo is not None:
+            repo.close()
+    pl["marks"] = pi.read_marks(cfg)
+    pl["market"] = pi.market_data(cfg, _market_bases(pl), now)
+    pl["panel_api"] = bool((cfg.get("panel") or {}).get("api"))
+
+
 def build(cfg: dict, out_dir: str | Path, now_ms: int | None = None) -> Path:
     now_ms = now_ms or int(datetime.now(timezone.utc).timestamp() * 1000)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     data = collect(cfg, now_ms)
     pl = payload(cfg, data)
+    insights(cfg, pl)
     fonts = _copy_assets(cfg, out)
     pl["candles"] = export_candles(cfg, pl, out)
     _write(out / "data.json", _json_for_html(pl))
+    _write(out / "version.json", json.dumps({"now": pl["now"]}))   # polled often; data.json only when it changes
     _write(out / "index.html", render(cfg, pl, fonts))
     return out / "index.html"

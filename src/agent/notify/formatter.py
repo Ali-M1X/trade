@@ -211,7 +211,17 @@ def _order_lines(p, cfg: dict) -> list[str]:
             f"اعتبار: اگر تا {fa(hours)} ساعت پر نشد، پیام لغو می‌آید"]
 
 
+def panel_link(cfg: dict, base: str) -> str:
+    """The coin's chart on the status panel (panel.url), as the last line of a message."""
+    url = ((cfg.get("panel") or {}).get("url") or "").rstrip("/")
+    return f"\nنمودار: {url}/#chart/{base}" if url.startswith("https://") else ""
+
+
 def signal_message(ev, cfg: dict, out_of_cap: bool = False) -> str:
+    return _signal_message(ev, cfg, out_of_cap) + panel_link(cfg, ev.base)
+
+
+def _signal_message(ev, cfg: dict, out_of_cap: bool = False) -> str:
     """New signal as an instruction: what to do now, then one figure per line."""
     p, t = ev.plan, cfg["trade"]
     word, side = BUY_SELL[ev.side]
@@ -257,6 +267,11 @@ CANCEL_FA = {"tp1_before_entry": "قیمت قبل از ورود به TP1 رسی�
 
 
 def event_message(sig: dict, e, cfg: dict) -> str:
+    text = _event_message(sig, e, cfg)
+    return text + panel_link(cfg, sig["symbol"]) if text else text
+
+
+def _event_message(sig: dict, e, cfg: dict) -> str:
     """An update of an open signal: what happened, then what to do with the position."""
     head = pair(sig["symbol"])
     side = 1 if sig["side"] == "long" else -1
