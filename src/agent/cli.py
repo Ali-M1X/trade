@@ -106,6 +106,8 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
     notifier = Notifier(cfg, secrets)
     last = repo.get_state("last_runs", {})
     tasks = args.only.split(",") if args.only else due_tasks(now, last, (cfg.get("realtime") or {}).get("periods_min"))
+    if not args.only and "run-4h" in tasks and funnel_worker_alive(cfg, repo, now):
+        tasks.remove("run-4h")                  # the funnel runs in its own process (run-funnel)
     print(f"due: {', '.join(tasks)}")
     failed = []
     evs = None
@@ -123,8 +125,7 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
                 hold_new_entrants(cfg, repo, market, cg, notifier, now)
             elif task == "run-weekly":
                 print(f"run-weekly: {len(weekly(cfg, repo, market, cg, notifier, now))} HOLD ideas")
-            last[task] = now
-            repo.set_state("last_runs", last)
+            mark_run(repo, task, now)
         except Exception:                       # one failing task must not block the others
             logging.getLogger(__name__).exception("%s failed", task)
             failed.append(task)
@@ -160,6 +161,52 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
         storage.push("run-scheduled " + ",".join(tasks), extra=extra)
     else:
         storage.push("run-scheduled " + ",".join(tasks))
+    return 1 if failed else 0
+
+
+def mark_run(repo, task: str, when: int) -> None:
+    """Record a task's run. Re-read first: the funnel process writes the same state."""
+    last = repo.get_state("last_runs", {}) or {}
+    last[task] = when
+    repo.set_state("last_runs", last)
+
+
+FUNNEL_HB = "funnel_worker"
+
+
+def funnel_worker_alive(cfg: dict, repo, now: int) -> bool:
+    """True while the separate funnel process (run-funnel, its own systemd timer) is running
+    the funnel, so the minute run leaves it out. Without that process the minute run keeps
+    running the funnel itself, as before."""
+    rt = cfg.get("realtime") or {}
+    hb = repo.get_state(FUNNEL_HB) or 0
+    return bool(rt.get("funnel_every_min")) and now - hb < float(rt.get("funnel_worker_stale_min", 45)) * 60_000
+
+
+def cmd_run_funnel(args, cfg, secrets) -> int:
+    """The funnel (run-4h: universe, dominance, majors, shortlist) in its own process, so
+    the minute runs never wait for it (2026-11-15: it took ~10 min and blocked them every
+    hour). Never pushes: the minute run backs the database up."""
+    import logging
+
+    from .runs import run_4h, summarize_funnel
+    storage, repo, market, cg, now = open_context(cfg, secrets)
+    every = float((cfg.get("realtime") or {}).get("funnel_every_min") or 15)
+    repo.set_state(FUNNEL_HB, now)
+    last = (repo.get_state("last_runs", {}) or {}).get("run-4h", 0)
+    if not args.force and now - last < every * 60_000:
+        repo.close()
+        return 0
+    try:
+        print(summarize_funnel(run_4h(cfg, repo, market, cg, now)))
+        mark_run(repo, "run-4h", now)
+        failed = []
+    except Exception:
+        logging.getLogger(__name__).exception("run-funnel failed")
+        failed = ["run-4h"]
+    repo.set_state(FUNNEL_HB, int(time.time() * 1000))
+    _log_run(repo, now, ["funnel"], failed, getattr(getattr(market, "client", None), "failures", {}))
+    repo.close()
     return 1 if failed else 0
 
 
@@ -283,7 +330,23 @@ def cmd_panel(args, cfg, secrets) -> int:
         from .store.storage import make_storage
         if not make_storage(cfg).pull():
             print("data branch not found: building from the local databases")
+    from .ai_review import pull_llm
+    pull_llm(cfg)                                   # the LLM reviewers' scores (GitHub Actions, branch ai)
     print(build(cfg, args.out))
+    return 0
+
+
+def cmd_ai_review(args, cfg, secrets) -> int:
+    """The LLM reviewers' pass (GitHub Actions, .github/workflows/ai-review.yml): scores for new
+    signals, lessons from closed trades, written to data/ai_llm.json. Local reviewers run in
+    every panel build instead."""
+    from . import ai_review
+    cfg = live_config(cfg)
+    now = int(time.time() * 1000)
+    cases = ai_review.cases(cfg, now)
+    store = ai_review.run_llm(cfg, cases, now)
+    n = {k: sum(1 for v in store["preds"].values() if k in v) for k in (store.get("ran") or {})}
+    print(f"ai-review: {len(cases)} trades, scored {n}, errors {store.get('errors')}")
     return 0
 
 
@@ -315,6 +378,7 @@ COMMANDS = {
     "run-daily": cmd_run_daily,
     "run-weekly": cmd_run_weekly,
     "run-scheduled": cmd_run_scheduled,
+    "run-funnel": cmd_run_funnel,
     "run-news": cmd_run_news,
     "backtest": cmd_backtest,
     "backtest-compare": cmd_backtest_compare,
@@ -322,6 +386,7 @@ COMMANDS = {
     "panel": cmd_panel,
     "backup": cmd_backup,
     "panel-api": cmd_panel_api,
+    "ai-review": cmd_ai_review,
 }
 
 
@@ -366,6 +431,8 @@ def main(argv: list[str] | None = None) -> int:
         if name == "panel-api":
             p.add_argument("--host", default="127.0.0.1")
             p.add_argument("--port", type=int, default=8787)
+        if name == "run-funnel":
+            p.add_argument("--force", action="store_true", help="run even if not due")
         if name == "run-scheduled":
             p.add_argument("--only", help="comma-separated tasks to force, e.g. run-4h,run-1h")
         if name == "backtest-compare":

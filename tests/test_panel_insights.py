@@ -35,14 +35,25 @@ def test_stats_summary_reads_both_gate_field_styles():
     assert pi.stats_summary([]) is None
 
 
-def test_calendar_keeps_important_usd_events_only():
+def test_calendar_keeps_every_country_with_kind_and_crypto_weight():
     data = [{"title": "CPI m/m", "country": "USD", "impact": "High", "date": "2026-11-13T08:30:00-05:00", "forecast": "0.3%"},
             {"title": "GDP", "country": "EUR", "impact": "High", "date": "2026-11-13T08:30:00-05:00"},
             {"title": "Bank Holiday", "country": "USD", "impact": "Holiday", "date": "2026-11-11T00:00:00-05:00"},
+            {"title": "Trade Balance", "country": "NZD", "impact": "Low", "date": "2026-11-12T00:00:00-05:00"},
             {"title": "Claims", "country": "USD", "impact": "Medium", "date": "bad"}]
     out = pi._calendar(data)
-    assert [e["title"] for e in out] == ["CPI m/m"]
-    assert out[0]["ts"] == 1_794_576_600_000 and out[0]["forecast"] == "0.3%"
+    assert [e["title"] for e in out] == ["Bank Holiday", "Trade Balance", "CPI m/m", "GDP"]
+    cpi = out[2]
+    assert cpi["ts"] == 1_794_576_600_000 and cpi["forecast"] == "0.3%" and cpi["kind"] == "cpi" and cpi["w"] == 5
+    assert out[3]["kind"] == "gdp" and out[3]["w"] == 3
+    assert out[0]["kind"] == "holiday" and out[0]["w"] == 1 and out[1]["w"] == 0
+    assert pi.event_kind("FOMC Statement") == "fomc" and pi.event_kind("Non-Farm Employment Change") == "nfp"
+
+
+def test_calendar_merges_this_and_next_week():
+    cache = {"calendar": {"v": [{"ts": NOW - 72 * HOUR, "title": "old"}, {"ts": NOW + HOUR, "title": "a", "country": "USD"}]},
+             "calendar_next": {"v": [{"ts": NOW + HOUR, "title": "a", "country": "USD"}, {"ts": NOW + 100 * HOUR, "title": "b"}]}}
+    assert [e["title"] for e in pi._merge_calendar(cache, NOW)] == ["a", "b"]
 
 
 class _Resp:

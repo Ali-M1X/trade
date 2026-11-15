@@ -24,6 +24,62 @@ def _get(session, url: str, timeout: float):
     return r
 
 
+# More exchanges (2026-11-15, Ali: "aggregators and more sources"): announcement APIs that answer
+# from Ali's server without a key. Their JSON differs, so the list is found by its fields.
+EXCHANGES = {
+    "upbit": ("https://api-manager.upbit.com/api/v1/announcements?os=web&page=1&per_page=20&category=trade",
+              "https://upbit.com/service_center/notice?id={id}"),
+    "kucoin": ("https://api.kucoin.com/api/v3/announcements?annType=new-listings&pageSize=20", ""),
+    "bybit": ("https://api.bybit.com/v5/announcements/index?locale=en-US&type=new_crypto&limit=20", ""),
+    "bitget": ("https://api.bitget.com/api/v2/public/annoucements?language=en_US&annType=coin_listings", ""),
+}
+_TITLE = ("title", "annTitle")
+_URL = ("url", "annUrl", "link")
+_TIME = ("publishTime", "dateTimestamp", "cTime", "first_listed_at", "listed_at", "created_at", "pTime")
+
+
+def _rows(data):
+    """The first list of dicts with a title anywhere in the JSON."""
+    if isinstance(data, list) and data and isinstance(data[0], dict) and any(k in data[0] for k in _TITLE):
+        return data
+    vals = data.values() if isinstance(data, dict) else data if isinstance(data, list) else []
+    for v in vals:
+        if isinstance(v, (dict, list)):
+            found = _rows(v)
+            if found:
+                return found
+    return []
+
+
+def _when(v) -> int | None:
+    if v in (None, ""):
+        return None
+    try:
+        x = float(v)
+        return int(x * 1000) if x < 1e11 else int(x)
+    except (TypeError, ValueError):
+        return _ts(str(v))
+
+
+def parse_exchange(data, source: str, link: str = "") -> list[dict]:
+    out = []
+    for a in _rows(data):
+        title = next((str(a[k]).strip() for k in _TITLE if a.get(k)), "")
+        if not title:
+            continue
+        url = next((str(a[k]) for k in _URL if a.get(k)), "") or (link.format(id=a.get("id")) if link and a.get("id") else "")
+        ts = next((_when(a[k]) for k in _TIME if a.get(k) not in (None, "")), None)
+        key = a.get("id") or a.get("annId") or url or title
+        out.append({"id": f"{source}:{key}", "source": source, "kind": "exchange", "title": " ".join(title.split()),
+                    "url": url, "ts": ts, "section": ""})
+    return out
+
+
+def exchange(source: str, session=None, timeout: float = 15) -> list[dict]:
+    url, link = EXCHANGES[source]
+    return parse_exchange(_get(session, url, timeout).json(), source, link)
+
+
 def binance(session=None, timeout: float = 15) -> list[dict]:
     data = _get(session, BINANCE_LIST, timeout).json()["data"]
     out = []
@@ -93,6 +149,8 @@ def fetch_all(cfg: dict, session=None) -> tuple[list[dict], list[str]]:
     items, failed = [], []
     jobs = [("binance", lambda: binance(session, n["timeout_s"])),
             ("okx", lambda: okx(session, n["timeout_s"]))]
+    jobs += [(name, (lambda name=name: exchange(name, session, n["timeout_s"])))
+             for name in n.get("exchanges") or [] if name in EXCHANGES]
     jobs += [(name, (lambda name=name, url=url: rss(name, url, session, n["timeout_s"])))
              for name, url in n["feeds"].items()]
     for name, job in jobs:

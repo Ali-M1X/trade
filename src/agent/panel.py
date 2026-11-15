@@ -684,6 +684,12 @@ def insights(cfg: dict, pl: dict) -> None:
     finally:
         if repo is not None:
             repo.close()
+    try:                                            # AI reviewers (2026-11-15): advisory, never blocks the build
+        from . import ai_review
+        pl["ai"] = ai_review.panel_view(cfg, now)
+    except Exception as e:                          # noqa: BLE001
+        print(f"panel ai skipped: {e}")
+        pl["ai"] = {}
     pl["marks"] = pi.read_marks(cfg)
     pl["market"] = pi.market_data(cfg, _market_bases(pl), now)
     pl["panel_api"] = bool((cfg.get("panel") or {}).get("api"))

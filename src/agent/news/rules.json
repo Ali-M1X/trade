@@ -15,6 +15,11 @@
     "network upgrade.*deposits? and withdrawals?"
   ],
   "rules": [
+    {"id": "upbit_listing", "source": ["upbit"], "pattern": "디지털 자산 추가|신규 거래지원|마켓 추가|market support for|new digital asset", "level": 2, "fa": "لیستینگ Upbit (کره)"},
+    {"id": "upbit_delist", "source": ["upbit"], "pattern": "거래지원 종료|end of trading support|delist", "level": -2, "fa": "دلیست Upbit"},
+    {"id": "upbit_warning", "source": ["upbit"], "pattern": "유의 종목|투자유의|caution|investment warning", "level": -1, "fa": "هشدار سرمایه‌گذاری Upbit"},
+    {"id": "exchange_delist", "source": ["upbit", "kucoin", "bybit", "bitget"], "pattern": "\\bdelist", "level": -2, "fa": "دلیست از صرافی"},
+    {"id": "exchange_spot_listing", "source": ["kucoin", "bybit", "bitget"], "pattern": "\\bwill list\\b|new listing|listing:|world premiere|\\bspot\\b.*\\blist", "level": 1, "fa": "لیستینگ صرافی دیگر"},
     {"id": "binance_delist", "source": ["binance", "okx"], "pattern": "\\bdelist", "level": -2, "fa": "دلیست از صرافی"},
     {"id": "binance_monitoring", "source": ["binance"], "pattern": "monitoring tag", "level": -1, "fa": "برچسب هشدار بایننس"},
     {"id": "binance_spot_listing", "source": ["binance"], "pattern": "^Binance Will List\\b", "level": 2, "fa": "لیستینگ اسپات بایننس"},

@@ -1,0 +1,51 @@
+name: ai-review
+
+# AI reviewers (2026-11-15, Ali): the LLM reviewers (Gemini, GPT through GitHub Models) score new
+# signals and write a lesson after every closed trade. They run here, not on the server, because
+# these APIs refuse Iranian servers. Reads the databases the server backs up to the data branch,
+# writes ai_llm.json to the ai branch, which the server's panel reads. Sends no messages and
+# changes nothing the systems trade.
+on:
+  schedule:
+    - cron: "4,19,34,49 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  models: read
+
+concurrency:
+  group: ai-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - name: Databases from the data branch, earlier reviews from the ai branch
+        run: |
+          mkdir -p data
+          git fetch --depth=1 origin data
+          for f in state state_s2 state_shadow state_s2_shadow; do
+            git show FETCH_HEAD:$f.db.gz > /tmp/$f.gz 2>/dev/null && gunzip -c /tmp/$f.gz > data/$f.db || echo "no $f"
+          done
+          if git fetch --depth=1 origin ai 2>/dev/null; then git show FETCH_HEAD:ai_llm.json > data/ai_llm.json || true; fi
+          ls -la data
+      - name: Review
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: trade-agent ai-review
+      - name: Save to the ai branch
+        run: |
+          blob=$(git hash-object -w data/ai_llm.json)
+          tree=$(printf '100644 blob %s\tai_llm.json\n' "$blob" | git mktree)
+          commit=$(git -c user.name=trade-ai -c user.email=agent@users.noreply.github.com commit-tree "$tree" -m "ai review")
+          git push --force origin "$commit:refs/heads/ai"

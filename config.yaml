@@ -45,7 +45,8 @@ universe:
   # 2026-11-04: Ali chose the top 700 on Gate with a $4M floor (DECISIONS #146).
   # 2026-11-08: widened to the top 2000 with a $2M floor for more signals (DECISIONS #149).
   coins_top_n: 2000
-  min_volume_24h_usd: 2000000
+  # 2026-11-15: Ali lowered the floor to $1M ("a bit more risk"); not backtested.
+  min_volume_24h_usd: 1000000
   # Pulled from CoinGecko categories and removed from the universe.
   exclude_categories: [stablecoins, wrapped-tokens]
   # Always excluded, in case a category lookup fails or misses one.
@@ -440,6 +441,17 @@ news:
     blockworks: https://blockworks.co/feed
     bitcoinmagazine: https://bitcoinmagazine.com/.rss/full/
     thedefiant: https://thedefiant.io/api/feed
+    # 2026-11-15 (Ali: "aggregators too"): reachable from the server (CryptoPanic is gone,
+    # CryptoCompare needs a key). Google News gathers every outlet's crypto headlines.
+    googlenews: "https://news.google.com/rss/search?q=crypto+OR+bitcoin+OR+ethereum+when:1d&hl=en-US&gl=US&ceid=US:en"
+    cryptoslate: https://cryptoslate.com/feed/
+    newsbtc: https://www.newsbtc.com/feed/
+    bitcoinist: https://bitcoinist.com/feed/
+    utoday: https://u.today/rss
+    bitcoincom: https://news.bitcoin.com/feed/
+  # exchange announcement APIs besides Binance and OKX (src/agent/news/sources.py EXCHANGES);
+  # Upbit (Korea) listings move prices most. Alerted by this run, not the Cloudflare worker.
+  exchanges: [upbit, kucoin, bybit, bitget]
 
 # High-risk system 2 (paper trading, Ali 2026-10-09): runs next to the live system on the same
 # shortlist with `variant` from backtest.variants, its own database, and messages headed
@@ -464,6 +476,18 @@ panel:
   url: https://signal.techfold.ir # Telegram messages link to the coin's chart here (empty: no link)
   market_data: true               # Gate futures stats, Fear & Greed, economic calendar (cached)
   api: true                       # "took it / skipped" buttons: trade-agent panel-api behind Caddy /api/
+
+# AI reviewers (2026-11-15, Ali): several reviewers score every signal (chance of profit), learn
+# from every closed trade and are graded themselves (panel tab "داوران هوش مصنوعی"). Advisory
+# only: nothing here changes what the systems trade. src/agent/ai_review.py
+ai:
+  enabled: true
+  llm_branch: ai               # the LLM reviewers run on GitHub Actions (ai-review.yml) and write here
+  llm:                         # OpenAI-compatible chat APIs; keys only in GitHub Secrets
+    - {key: gemini, name: Gemini, url: "https://generativelanguage.googleapis.com/v1beta/openai",
+       model: gemini-2.5-flash, key_env: GEMINI_API_KEY, budget: 6}
+    - {key: gpt, name: "GPT (GitHub Models)", url: "https://models.github.ai/inference",
+       model: openai/gpt-4.1-mini, key_env: GITHUB_TOKEN, budget: 6}
 
 storage:
   backend: local               # local | git_branch | git_backup (set by AGENT_STORAGE)
@@ -977,6 +1001,11 @@ backtest:
 realtime:
   open_candle_tfs: [4h, 1h]
   periods_min: {run-4h: 60, run-1h: 1}   # 2026-11-15: agent on Ali's server every minute (GitHub: every run)
+  # 2026-11-15 (Ali: "the market watched every moment"): the funnel runs in its own process
+  # (trade-agent run-funnel, systemd trade-funnel.timer) this often, so the minute run never
+  # waits ~10 min for it. Without that process the minute run keeps the funnel at run-4h above.
+  funnel_every_min: 15
+  funnel_worker_stale_min: 45
 
 live:
   variant: combo_avoid

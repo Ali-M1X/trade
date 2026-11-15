@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 
 RULES_PATH = Path(__file__).with_name("rules.json")
+EXCHANGE_SOURCES = ("binance", "okx", "upbit", "kucoin", "bybit", "bitget")
 LEVEL_FA = {2: "خیلی مثبت", 1: "مثبت", 0: "خنثی", -1: "منفی", -2: "خیلی منفی"}
 
 # tickers in exchange titles: "(HYPE)", "CTUSDT Perpetual", "AEON/USD", "for QNT crypto"
@@ -43,7 +44,7 @@ def classify(title: str, source: str) -> Score:
     rules = load_rules()
     if any(rx.search(title) for rx in rules["ignore"]):
         return Score(0, "ignored", "")
-    kind = source if source in ("binance", "okx") else "media"
+    kind = source if source in EXCHANGE_SOURCES else "media"
     for r in rules["rules"]:
         if kind in r.get("source", [kind]) and r["rx"].search(title):
             return Score(int(r["level"]), r["id"], r["fa"])

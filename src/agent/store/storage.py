@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import gzip
 import os
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
@@ -65,10 +66,10 @@ class GitBranchStorage:
     def push(self, message: str = "Update state", extra: dict[str, bytes] | None = None) -> None:
         """extra: small public files to keep next to the database (e.g. the news context
         the Cloudflare worker reads)."""
-        files = {self.FILE: gzip.compress(self.db_path.read_bytes(), mtime=0), **(extra or {})}
+        files = {self.FILE: gzip.compress(_snapshot(self.db_path), mtime=0), **(extra or {})}
         for path in self.extra_dbs:
             if path.exists():
-                files[f"{path.name}.gz"] = gzip.compress(path.read_bytes(), mtime=0)
+                files[f"{path.name}.gz"] = gzip.compress(_snapshot(path), mtime=0)
         lines = ""
         for name in sorted(files):
             blob = self._git("hash-object", "-w", "--stdin", input=files[name]).decode().strip()
@@ -81,6 +82,21 @@ class GitBranchStorage:
         env.setdefault("GIT_COMMITTER_EMAIL", env["GIT_AUTHOR_EMAIL"])
         commit = self._git("commit-tree", tree, "-m", message, env=env).decode().strip()
         self._git("push", "--force", self.remote, f"{commit}:refs/heads/{self.branch}")
+
+
+def _snapshot(path: Path) -> bytes:
+    """A consistent copy of a database another process may be writing (run-funnel):
+    SQLite's backup API, never the raw file mid-write."""
+    src = sqlite3.connect(f"file:{Path(path).resolve()}?mode=ro", uri=True, timeout=30)
+    dst = sqlite3.connect(":memory:")
+    try:
+        src.backup(dst)
+        return dst.serialize()
+    except sqlite3.DatabaseError:                   # not a database (a test file): as it is
+        return Path(path).read_bytes()
+    finally:
+        src.close()
+        dst.close()
 
 
 class GitBackupStorage(GitBranchStorage):
