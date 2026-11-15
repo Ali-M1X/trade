@@ -140,12 +140,12 @@
   }
 
   // ------------------------------------------------------------------ tabs
-  var TABS = {home: home, chart: chartTab, hist: histTab, perf: perf, cmp: compare, mkt: market, sys: health, news: news, cal: calendarTab, ai: aiTab, strat: strategy, how: method};
+  var TABS = {sum: summaryTab, home: home, chart: chartTab, hist: histTab, perf: perf, cmp: compare, mkt: market, sys: health, news: news, cal: calendarTab, ai: aiTab, strat: strategy, how: method};
   function show(tab, push) {
     if (!TABS[tab]) tab = "home";
     S.tab = tab;
     document.querySelectorAll("#tabs button").forEach(function (b) { b.classList.toggle("on", b.dataset.t === tab); });
-    try { localStorage.setItem("tab2", tab); } catch (e) {}
+    try { localStorage.setItem("tab3", tab); } catch (e) {}
     if (push !== false) {
       var h = "#" + tab + (tab === "chart" && S.sel ? "/" + encodeURIComponent(S.sel) : "");
       if (location.hash !== h) window.history.replaceState(null, "", h);
@@ -1830,6 +1830,126 @@
     var pts = vals.map(function (v, i) { return (i / (vals.length - 1) * W).toFixed(1) + "," + (H - (v - lo) / (hi - lo) * H).toFixed(1); }).join(" ");
     return '<svg class="spark" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none"><polyline points="' + pts + '"/></svg>';
   }
+  // ------------------------------------------------------------------ summary (2026-11-15, Ali: "one page with the most important
+  // things from every page and what is new, so I can decide from it")
+  var SEEN_KEY = "seen_at";
+  var seenAt = (function () { try { return Number(localStorage.getItem(SEEN_KEY)) || 0; } catch (e) { return 0; } })();
+  var EVFA = {created: "سیگنال جدید", filled: "ورود انجام شد", tp1: "TP1 خورد", tp2: "TP2 خورد", tp3: "بسته با سود (خروج دنباله‌رو)",
+    sl: "استاپ خورد", breakeven: "سر به سر بسته شد", expired: "منقضی شد", cancelled: "لغو شد"};
+  var EVCLS = {tp1: "pos", tp2: "pos", tp3: "pos", sl: "neg", breakeven: "muted", expired: "muted", cancelled: "muted", created: "acc", filled: ""};
+  function sumFeed(hours) {
+    var since = Date.now() - hours * 3600000, out = [];
+    trades().forEach(function (t) {
+      if (t.created >= since) out.push({ts: t.created, k: "created", t: t});
+      (t.events || []).forEach(function (e) { if (e[1] >= since && EVFA[e[0]]) out.push({ts: e[1], k: e[0], t: t, px: e[2]}); });
+    });
+    ((D.news_view || {}).items || []).forEach(function (n) {
+      if ((n.stars || 0) >= 3 && (n.pub || n.ts) >= since) out.push({ts: n.pub || n.ts, k: "news", n: n});
+    });
+    return out.sort(function (a, b) { return b.ts - a.ts; });
+  }
+  function feedLine(e) {
+    var isNew = e.ts > seenAt && seenAt ? ' <span class="badge new">جدید</span>' : "";
+    if (e.k === "news") {
+      var n = e.n;
+      return '<li><span class="ft">' + esc(jfmt(e.ts, "time")) + '</span><span class="stars">' + "★★★★★".slice(0, n.stars) + "</span> " +
+        (n.coins || []).slice(0, 3).map(function (c) { return "<b>" + esc(c) + "</b>"; }).join(" ") + " " + esc(n.title) + isNew + "</li>";
+    }
+    var t = e.t, r = e.k === "tp1" || e.k === "tp2" || e.k === "tp3" || e.k === "sl" || e.k === "breakeven" ? (e.k === "tp1" || e.k === "tp2" ? "" : " " + RU(t.net_r, t.pnl_usd)) : "";
+    return '<li class="click" data-open="' + esc(t.id) + '"><span class="ft">' + esc(jfmt(e.ts, "time")) + '</span><b class="' + (EVCLS[e.k] || "") + '">' + EVFA[e.k] + "</b> · <b>" + esc(t.base) + "</b> " +
+      side(t.side) + " " + kind(t) + ' <small class="muted">' + esc(sysShort(t.system)) + (e.k === "created" ? " · " + esc(t.grade) + " " + fa(Math.round(t.score || 0)) : "") + "</small>" + r + isNew + "</li>";
+  }
+  function sumAlerts() {
+    var out = [], now = Date.now();
+    // 1) system health
+    var s0 = (D.systems || [])[0] || {}, run = (s0.last_runs || {})["run-1h"] || (s0.last_runs || {})["run-15m"];
+    if (!run || now - run > 5 * 60000) out.push(["neg", "ربات " + esc(ago(run)) + " بررسی کرده؛ اجرا عقب افتاده است.", "sys"]);
+    (D.systems || []).forEach(function (s) { if (s.paused_until) out.push(["warn", esc(s.name) + ": بعد از ضررهای پشت‌سرهم تا " + esc(jfmt(s.paused_until)) + " سیگنال نمی‌دهد.", "mkt"]); });
+    // 2) economic events soon
+    upcomingEvents(3).forEach(function (e) {
+      out.push(["warn", "<b>" + esc(e.title) + "</b> (" + esc((CCY[e.country] || ["", e.country])[1]) + ") " + (e.ts > now ? '<span data-until="' + e.ts + '">' + esc(untilTxt(e.ts)) + "</span>" : "همین الان") +
+        "؛ ورود تازه را کوچک‌تر بگیرید یا صبر کنید.", "cal"]);
+    });
+    // 3) open positions close to their stop or target
+    openTrades().forEach(function (t) {
+      var r = openR(t);
+      if (r == null) return;
+      var curr = r - (t.gross_r || 0);                       // the part still open, in R
+      if (t.status === "active" && curr <= -0.7) out.push(["neg", "<b>" + esc(t.base) + "</b> " + side(t.side) + " نزدیک استاپ است (" + R(r) + ").", "chart/" + t.id]);
+      else if (t.status === "active" && r >= 1.6) out.push(["pos", "<b>" + esc(t.base) + "</b> " + side(t.side) + " نزدیک TP1 است (" + R(r) + ").", "chart/" + t.id]);
+    });
+    // 4) the AI reviewers disagree with an open signal
+    var ai = D.ai || {};
+    (ai.open || []).forEach(function (r) {
+      if (r.consensus != null && r.consensus <= 30 && r.approved) out.push(["warn", "داوران هوش مصنوعی به <b>" + esc(r.base) + "</b> " + side(r.side) + " فقط " + aiPill(r.consensus) + " داده‌اند (مشورتی).", "ai"]);
+    });
+    // 5) strong news on coins we hold or might trade
+    var held = {}; openTrades().concat(pendingTrades()).forEach(function (t) { held[t.base] = 1; });
+    ((D.news_view || {}).items || []).forEach(function (n) {
+      if ((n.pub || n.ts) < now - 6 * 3600000) return;
+      var mine = (n.coins || []).filter(function (c) { return held[c]; });
+      if (mine.length || n.stars >= 4) out.push([n.level < 0 ? "neg" : "acc", (mine.length ? "خبر درباره‌ی پوزیشن شما: " : "خبر مهم: ") + "<b>" + esc((n.coins || []).slice(0, 3).join(" ")) + "</b> " + esc(n.title), "news"]);
+    });
+    return out;
+  }
+  function sumDirection(s) {
+    var r = s.regime || {}, m = s.majors || {};
+    var trend = r.bias === "short" ? -1 : r.bias === "long" ? 1 : (r.trend || 0);
+    var maj = (m.btc || 0) + (m.eth || 0), dir = trend || (maj <= -4 ? -1 : maj >= 4 ? 1 : 0);
+    var best = (s.candidates || []).filter(function (c) { return dir && c.side === dir; })[0];
+    return '<div class="sdir"><span class="l">' + esc(s.name) + '</span><b class="' + (dir > 0 ? "pos" : dir < 0 ? "neg" : "muted") + '">' +
+      (dir > 0 ? "صعودی ▲ · لانگ در جهت روند" : dir < 0 ? "نزولی ▼ · شورت در جهت روند" : "بدون جهت روشن") + "</b>" +
+      '<small class="muted">' + esc(REG[r.name] || r.name || "—") + " · " + esc(BIAS[r.bias] || "") +
+      (best ? " · بهترین کاندید: " + esc(best.base) + " " + fa(Math.round(best.score)) : "") + "</small></div>";
+  }
+  function dayChange(key) {                   // the account's equity now against 24 h ago (closed trades only before now)
+    var a = D.accounts[key], c = a.curve || [], cut = Date.now() - 86400000, before = a.start;
+    c.forEach(function (p) { if (p[0] <= cut) before = p[1]; });
+    return accLive(key).equity - before;
+  }
+  function summaryTab() {
+    var now = Date.now(), open = openTrades(), pend = pendingTrades();
+    var openUsd = open.reduce(function (s, t) { var u = pnlUsd(t); return s + (u || 0); }, 0);
+    var atRisk = open.filter(function (t) { return t.status === "active"; }).length;
+    var feed = sumFeed(24), alerts = sumAlerts(), newN = feed.filter(function (e) { return seenAt && e.ts > seenAt; }).length;
+    var fng = (MK.fng || []).slice(-1)[0], btc = deriv("BTC");
+    var kpis = '<div class="grid g4">' +
+      ACC.map(function (x) {
+        var l = accLive(x[0]), ch = dayChange(x[0]);
+        return statCard(esc(x[1]), '<span class="ltr">$' + l.equity.toFixed(2) + "</span>", "۲۴ ساعت " + usd(ch) + " · از شروع " + pct((l.equity - D.accounts[x[0]].start) / D.accounts[x[0]].start * 100, 1));
+      }).join("") +
+      statCard("پوزیشن‌های باز", fa(open.length) + ' <small class="muted">· ' + fa(pend.length) + " سفارش در انتظار</small>", "سود/زیان باز " + usd(openUsd) + " · " + fa(atRisk) + " تا هنوز در ریسک") +
+      "</div>";
+    var mood = '<div class="grid g3 sumrow">' + (D.systems || []).map(sumDirection).join("") +
+      (fng || btc ? '<div class="sdir"><span class="l">حال بازار</span><b>' + (fng ? "ترس و طمع " + fa(fng[1]) : "") + "</b>" +
+        '<small class="muted">' + (btc && btc.change != null ? "BTC ۲۴ ساعت " + pct(btc.change, 1) : "") + (btc && btc.funding != null ? " · فاندینگ " + fpct(btc.funding * 100, 4) : "") + "</small></div>" : "") + "</div>";
+    var alertHtml = alerts.length ? '<ul class="alerts">' + alerts.slice(0, 10).map(function (a) {
+      return '<li class="' + a[0] + '"><a href="#' + esc(a[2]) + '">' + a[1] + "</a></li>";
+    }).join("") + "</ul>" : '<p class="pos">چیزی نیاز به اقدام فوری ندارد.</p>';
+    var posHtml = open.concat(pend).length ? '<div class="scroll"><table><thead><tr><th>کوین</th><th>جهت</th><th>نوع</th><th>وضعیت</th><th>سود/زیان</th><th>داوران AI</th></tr></thead><tbody>' +
+      open.concat(pend).map(function (t) {
+        var a = aiRow(t.id);
+        return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + "</b> <small class=\"muted\">" + esc(sysShort(t.system)) + "</small></td><td>" + side(t.side) + "</td><td>" + kind(t) +
+          "</td><td>" + esc(t.status_fa) + "</td><td>" + (t.filled_at ? RU(openR(t), pnlUsd(t)) : "—") + "</td><td>" + (a ? aiPill(a.consensus) : "—") + "</td></tr>";
+      }).join("") + "</tbody></table></div>" : '<div class="empty">الان پوزیشن یا سفارشی باز نیست.</div>';
+    var revs = ((D.ai || {}).reviewers || []).filter(function (r) { return r.key !== "base" && r.n; }).sort(function (a, b) { return (b.trust || 0) - (a.trust || 0); });
+    var aiLine = revs.length ? "معتبرترین داور: <b>" + esc(revs[0].name) + "</b> با اعتبار " + fa(revs[0].trust || 0) + " از ۱۰۰ (" + esc((AIV[revs[0].verdict] || AIV.few)[0]) + ")" : "داوران هنوز داده‌ی کافی ندارند.";
+    var cal = (MK.calendar || []).filter(function (e) { return e.ts > now && e.ts < now + 48 * 3600000 && e.w >= 4; }).slice(0, 4);
+    app.innerHTML = eventBanner() +
+      '<section><h2>خلاصه ' + qi("مهم‌ترین چیزهای همه‌ی تب‌ها در یک صفحه.\nردیف اول: موجودی سه حساب ۱۰۰ دلاری و تغییرشان در ۲۴ ساعت گذشته، و تعداد پوزیشن‌های باز.\nردیف دوم: جهتی که هر سیستم الان در بازار می‌بیند و حال کلی بازار.\nبرچسب «جدید» یعنی بعد از آخرین باری که این صفحه را باز کردید اتفاق افتاده است.") + ' <small>' + (seenAt ? "آخرین بازدید شما " + esc(ago(seenAt)) + (newN ? " · " + fa(newN) + " اتفاق تازه" : " · اتفاق تازه‌ای نیست") : "مهم‌ترین‌های همه‌ی صفحه‌ها") + "</small></h2>" +
+      kpis + mood + "</section>" +
+      '<div class="grid g2"><section><h2>نیاز به توجه ' + qi("چیزهایی که شاید الان تصمیمی بخواهند: ربات عقب افتاده، رویداد اقتصادی پراثر نزدیک است، پوزیشنی نزدیک استاپ یا TP1 است، داوران هوش مصنوعی به سیگنالی نمره‌ی پایین داده‌اند، یا خبر مهمی درباره‌ی کوینی آمده که در آن پوزیشن دارید.\nروی هر مورد بزنید تا به تب مربوط بروید.") + ' <small>' + fa(alerts.length) + "</small></h2>" + alertHtml + "</section>" +
+      "<section><h2>۲۴ ساعت گذشته " + qi("هر اتفاق ۲۴ ساعت گذشته به ترتیب زمان: سیگنال تازه، ورود، TP، استاپ و لغو، به‌علاوه‌ی خبرهای ۳ ستاره و بیشتر. روی هر معامله بزنید تا جزئیاتش باز شود.") + " <small>سیگنال‌ها، ورود و خروج‌ها، خبرهای ۳ ستاره به بالا</small></h2>" +
+      (feed.length ? '<ul class="feed">' + feed.slice(0, 18).map(feedLine).join("") + "</ul>" : '<div class="empty">در ۲۴ ساعت گذشته اتفاقی نیفتاده است.</div>') + "</section></div>" +
+      '<div class="grid g2"><section><h2>پوزیشن‌ها و سفارش‌ها ' + qi("همه‌ی پوزیشن‌های باز و سفارش‌های در انتظار هر دو سیستم، با سود و زیان زنده و جمع‌بندی نمره‌ی داوران هوش مصنوعی (شانس سود از ۰ تا ۱۰۰؛ فقط مشورتی).") + '</h2>' + posHtml + "</section>" +
+      "<section><h2>پیش رو " + qi("رویدادهای اقتصادی پراثر ۴۸ ساعت آینده و این‌که فعلاً کدام داور هوش مصنوعی معتبرتر بوده است.") + "</h2>" +
+      (cal.length ? "<h3>رویدادهای اقتصادی پراثر (۴۸ ساعت)</h3><ul class=\"feed\">" + cal.map(function (e) {
+        return '<li><span class="ft">' + esc(jfmt(e.ts, "dt")) + "</span>" + (CCY[e.country] || [""])[0] + " <b>" + esc(e.title) + '</b> <small data-until="' + e.ts + '">' + esc(untilTxt(e.ts)) + "</small></li>";
+      }).join("") + "</ul>" : "<p class=\"muted\">رویداد اقتصادی پراثری در ۴۸ ساعت آینده نیست.</p>") +
+      "<h3>هوش مصنوعی</h3><p>" + aiLine + "</p></section></div>";
+    try { localStorage.setItem(SEEN_KEY, String(now)); } catch (e) {}
+  }
+
   // ------------------------------------------------------------------ AI reviewers (2026-11-15, Ali: several AIs that score
   // every signal, learn from every closed trade, and are graded themselves: how far can we rely on them?)
   var AIV = {few: ["داده کم", "gray", "هنوز کمتر از ۲۰ معامله‌ی نتیجه‌دار نمره داده؛ هیچ قضاوتی درباره‌اش ممکن نیست."],
@@ -2107,9 +2227,9 @@
   // ------------------------------------------------------------------ start
   setTheme(theme());
   var h = (location.hash || "").replace(/^#/, "").split("/");
-  var saved = null; try { saved = localStorage.getItem("tab2"); } catch (e) {}
+  var saved = null; try { saved = localStorage.getItem("tab3"); } catch (e) {}
   if (h[1]) S.sel = decodeURIComponent(h[1]);
-  show(TABS[h[0]] ? h[0] : (saved && TABS[saved] ? saved : "home"), false);
+  show(TABS[h[0]] ? h[0] : (saved && TABS[saved] ? saved : "sum"), false);
   window.addEventListener("hashchange", function () {   // in-page links such as #chart/BTC or #cal
     var p = (location.hash || "").replace(/^#/, "").split("/");
     if (!TABS[p[0]]) return;
