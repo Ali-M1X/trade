@@ -5,6 +5,7 @@ import argparse
 import json
 import logging
 import sys
+import time
 
 from .config import live_config, load_config, load_secrets
 from .data.sources_check import as_dicts, check_sources, format_report, working_exchanges
@@ -153,12 +154,21 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
             extra = news_pass(cfg, repo, market, cg, notifier, now)
         except Exception:                       # experimental: never blocks or fails the signal runs
             logging.getLogger(__name__).exception("news failed")
+    _log_run(repo, now, tasks, failed, getattr(getattr(market, "client", None), "failures", {}))
     repo.close()
     if extra:
         storage.push("run-scheduled " + ",".join(tasks), extra=extra)
     else:
         storage.push("run-scheduled " + ",".join(tasks))
     return 1 if failed else 0
+
+
+def _log_run(repo, started: int, tasks: list[str], failed: list[str], ex_failures: dict) -> None:
+    """Last runs for the panel's system-health view: when, how long, what failed."""
+    log = repo.get_state("run_log", []) or []
+    log.append({"ts": started, "dur": round(time.time() - started / 1000, 1), "tasks": tasks,
+                "failed": failed, "ex": dict(ex_failures or {})})
+    repo.set_state("run_log", log[-300:])
 
 
 def news_pass(cfg, repo, market, cg, notifier, now) -> dict[str, bytes]:
@@ -289,6 +299,14 @@ def cmd_backup(args, cfg, secrets) -> int:
     return 0
 
 
+def cmd_panel_api(args, cfg, secrets) -> int:
+    """Serve the panel's "took it / skipped" marks (127.0.0.1 only; Caddy proxies /api/)."""
+    from .panel_api import serve
+    print(f"panel-api on {args.host}:{args.port}")
+    serve(cfg, args.host, args.port)
+    return 0
+
+
 COMMANDS = {
     "check-sources": cmd_check_sources,
     "run-4h": cmd_run_4h,
@@ -303,6 +321,7 @@ COMMANDS = {
     "backtest-robust": cmd_backtest_robust,
     "panel": cmd_panel,
     "backup": cmd_backup,
+    "panel-api": cmd_panel_api,
 }
 
 
@@ -344,6 +363,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--pull", action="store_true",
                            help="first download the databases from the data branch (the agent "
                            "runs elsewhere, e.g. on GitHub Actions)")
+        if name == "panel-api":
+            p.add_argument("--host", default="127.0.0.1")
+            p.add_argument("--port", type=int, default=8787)
         if name == "run-scheduled":
             p.add_argument("--only", help="comma-separated tasks to force, e.g. run-4h,run-1h")
         if name == "backtest-compare":

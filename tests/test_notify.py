@@ -278,3 +278,12 @@ def test_performance_message_counts_only_filled_trades():
     text = performance_message(sigs, now)
     assert "از ابتدا: 3 معامله" in text and "فقط 3 معامله" in text
     assert performance_message([], now).count("معامله‌ی بسته‌شده‌ای نبود") == 2
+
+
+def test_messages_link_to_the_coin_chart_on_the_panel(cfg):
+    from agent.notify.formatter import panel_link
+    assert panel_link(cfg, "SOL") == ""
+    cfg["panel"]["url"] = "https://signal.techfold.ir/"
+    assert panel_link(cfg, "SOL") == "\nنمودار: https://signal.techfold.ir/#chart/SOL"
+    cfg["panel"]["url"] = "http://insecure.example"
+    assert panel_link(cfg, "SOL") == ""

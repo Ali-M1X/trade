@@ -51,6 +51,7 @@ class ExchangeClient:
         self._factory = factory
         self._sleep = sleep
         self._instances: dict = {}
+        self.failures: dict[str, int] = {}      # per exchange, this run (status panel)
 
     def exchange(self, name: str):
         if name not in self._instances:
@@ -77,6 +78,7 @@ class ExchangeClient:
             # 2026-11-04); the next exchange should still be tried.
             except (UnsupportedExchange, ccxt.BaseError, TypeError) as e:
                 log.warning("%s.%s failed: %s", name, method, e)
+                self.failures[name] = self.failures.get(name, 0) + 1
                 errors.append(f"{name}: {type(e).__name__}: {e}")
         raise AllExchangesFailed(f"{method} failed on all exchanges: " + " | ".join(errors))
 

@@ -461,6 +461,9 @@ panel:
   balance_usd: 100
   backfill: panel/backfill.json   # replay of 2026-11-06 .. the shadow book's start (panel-backfill.yml)
   font_dir: /opt/trade/fonts      # put IRANSansWeb.woff2 / IRANSansWeb_Bold.woff2 here (licensed font); Vazirmatn otherwise
+  url: https://signal.techfold.ir # Telegram messages link to the coin's chart here (empty: no link)
+  market_data: true               # Gate futures stats, Fear & Greed, economic calendar (cached)
+  api: true                       # "took it / skipped" buttons: trade-agent panel-api behind Caddy /api/
 
 storage:
   backend: local               # local | git_branch | git_backup (set by AGENT_STORAGE)
