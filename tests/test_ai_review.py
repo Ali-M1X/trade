@@ -112,3 +112,22 @@ def test_panel_build_carries_the_reviewers(cfg, tmp_path):
     build(c, tmp_path / "out", NOW)
     d = json.loads((tmp_path / "out" / "data.json").read_text())
     assert [r["key"] for r in d["ai"]["reviewers"]] == ["base", "knn", "logit"] and d["ai"]["n_cases"] == 0
+
+
+def test_llm_daily_cap(cfg, tmp_path, monkeypatch):
+    c = copy.deepcopy(cfg)
+    c["storage"]["db_path"] = str(tmp_path / "state.db")
+    c["ai"] = {"llm": [{"key": "o", "url": "https://x.test", "model": "m", "key_env": "O_KEY", "budget": 5, "daily": 3}]}
+    monkeypatch.setenv("O_KEY", "k")
+    asked = []
+
+    def post(url, json=None, timeout=None, headers=None):
+        asked.append(1)
+        return _Resp('{"p_win": 40, "reason": ""}')
+
+    cases = [_case(i, False, NOW - i * HOUR) for i in range(6)]
+    ai.run_llm(c, cases, NOW, post)
+    st = ai.run_llm(c, cases, NOW + 60_000, post)
+    assert len(asked) == 3 and st["calls"]["o"]["n"] == 3 and st["errors"]["o"] == "daily limit"
+    ai.run_llm(c, cases, NOW + 86_400_000, post)                    # next day: allowed again
+    assert len(asked) == 6

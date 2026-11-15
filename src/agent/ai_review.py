@@ -312,6 +312,12 @@ def run_llm(cfg: dict, all_cases: list[dict], now: int, post=None) -> dict:
             store["errors"][k] = "no key"
             continue
         budget = int(rv.get("budget", 6))
+        day = time.strftime("%Y-%m-%d", time.gmtime(now / 1000))
+        calls = store.setdefault("calls", {}).get(k) or {}
+        used = calls.get("n", 0) if calls.get("day") == day else 0
+        if rv.get("daily"):                             # free tiers cap requests per day (OpenRouter: 50)
+            budget = min(budget, max(0, int(rv["daily"]) - used))
+        start_budget = budget
         mine, post_done = lessons.setdefault(k, []), done_ids.setdefault(k, [])
         failures = 0
         for c in [c for c in all_cases if c["done"] and c["id"] not in post_done and (preds.get(c["id"]) or {}).get(k)]:
@@ -340,7 +346,8 @@ def run_llm(cfg: dict, all_cases: list[dict], now: int, post=None) -> dict:
                 failures += 1
                 continue
             preds.setdefault(c["id"], {})[k] = [now if live else c["created"], round(res[0], 1), 0 if live else 1, res[1]]
-        store["errors"][k] = "API failed" if failures >= 2 else ""
+        store["calls"][k] = {"day": day, "n": used + start_budget - budget}
+        store["errors"][k] = "API failed" if failures >= 2 else ("daily limit" if rv.get("daily") and not start_budget else "")
         store.setdefault("ran", {})[k] = now
     store["ts"] = now
     _save(path, store)

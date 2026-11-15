@@ -111,6 +111,16 @@ def test_duplicate_and_cap_with_a_plus_override(cfg):
     assert book_with(cfg, 4).admit("NEW", 1, 70, T0).ok
 
 
+def test_trades_past_tp1_leave_the_cap(cfg):
+    book = book_with(cfg, 5)
+    s = book.open_signals()[0]
+    s["payload"]["lifecycle"].update(status="tp1", sl_now=s["payload"]["lifecycle"]["entry"])
+    book.save(s, [], T0)
+    assert book.admit("NEW", 1, 70, T0).ok                         # 4 trades still at risk
+    off = {**cfg, "lifecycle": {**cfg["lifecycle"], "risk_free_outside_cap": False}}
+    assert SignalBook(book.repo, off).admit("NEW", 1, 70, T0).reason == "max_active"
+
+
 def test_correlated_cap(cfg):
     book = book_with(cfg, 3)
     corr = lambda a, b: 0.9 if b in ("C0", "C1") else 0.2          # noqa: E731

@@ -1206,6 +1206,7 @@
   function refresh() {                      // version.json is tiny: data.json only when the build changed
     fetch("version.json?t=" + Date.now(), {cache: "no-store"}).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
       .then(function (v) {
+        if (v && v.app && D.app && v.app !== D.app) { location.reload(); return; }   // the panel itself was updated
         if (v && v.now === D.now) { status(); return; }
         return fetch("data.json?t=" + Date.now(), {cache: "no-store"}).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
           if (!j || j.now === D.now) { status(); return; }
@@ -1867,7 +1868,7 @@
     function num(x, d) { return x == null ? "—" : '<span class="ltr">' + Number(x).toFixed(d == null ? 2 : d) + "</span>"; }
     var cards = revs.map(function (r) {
       var v = AIV[r.verdict] || AIV.few, L = r.live || {};
-      var status = r.kind === "مدل زبانی" ? (r.error === "no key" ? '<span class="warn">کلید API ندارد</span>' : r.error ? '<span class="neg">' + esc(r.error) + "</span>" :
+      var status = r.kind === "مدل زبانی" ? (r.error === "no key" ? '<span class="warn">کلید API ندارد</span>' : r.error ? '<span class="neg">' + esc({"API failed": "API جواب نداد", "daily limit": "سقف روزانه‌ی درخواست پر شد"}[r.error] || r.error) + "</span>" :
         r.ran ? "آخرین اجرا " + esc(ago(r.ran)) : '<span class="muted">هنوز اجرا نشده</span>') : "هر دقیقه، روی سرور";
       return '<div class="aicard"><div class="aih"><b>' + esc(r.name) + '</b> <small class="muted">' + esc(r.kind) + '</small><span class="badge ' + v[1] + '">' + v[0] + "</span></div>" +
         '<div class="trust" title="اعتبار: چقدر بهتر از حدس ساده، چقدر مطمئن و با چند معامله"><i style="width:' + (r.trust || 0) + '%"></i></div>' +
