@@ -26,6 +26,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "agent.news" = ["rules.json"]
+"agent" = ["panel_web/*.html", "panel_web/*.css", "panel_web/*.js", "panel_web/vendor/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

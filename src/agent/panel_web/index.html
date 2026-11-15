@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="color-scheme" content="dark light">
+<title>پنل سیگنال‌ها</title>
+<script>try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<style>@@CSS@@</style>
+<script src="assets/lightweight-charts.standalone.production.js?v=4.2.3"></script>
+</head>
+<body>
+<header>
+  <div class="hin">
+    <div class="top">
+      <div class="brand"><span class="logo">◆</span><b>پنل سیستم سیگنال</b></div>
+      <div class="status" id="status"></div>
+      <button class="icon" id="theme" type="button" title="حالت روز / شب" aria-label="حالت روز / شب"></button>
+    </div>
+    <nav id="tabs">
+      <button data-t="home">نمای کلی</button>
+      <button data-t="chart">نمودار و پوزیشن‌ها</button>
+      <button data-t="hist">تاریخچه</button>
+      <button data-t="cmp">مقایسه‌ی سیستم‌ها</button>
+      <button data-t="mkt">بازار و سیگنال‌های بعدی</button>
+      <button data-t="news">اخبار</button>
+      <button data-t="strat">استراتژی</button>
+      <button data-t="how">روش محاسبه</button>
+    </nav>
+  </div>
+</header>
+<main id="app"><noscript>برای دیدن پنل، جاوااسکریپت مرورگر را روشن کنید.</noscript></main>
+<footer class="foot">نمودارها با <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts</a> · قیمت‌های زنده از Gate و OKX</footer>
+<div id="tip" class="tip" hidden></div>
+<script id="panel-data" type="application/json">@@DATA@@</script>
+<script>@@JS@@</script>
+</body>
+</html>
