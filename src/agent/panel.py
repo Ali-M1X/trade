@@ -156,8 +156,25 @@ def _db_trades(repo: Repository, system: str, approved: bool, since: int) -> lis
             "gross_r": lc["realized_r"], "open_frac": lc.get("open_frac", 1.0), "events": events,
             "leverage": (p.get("plan") or {}).get("leverage"),
             "why": [FLAG_FA.get(f, f) for f in (p.get("evaluation") or {}).get("flags") or []],
+            "detail": _detail(p),
         })
     return out
+
+
+EVAL_KEYS = ("sections", "gates", "flags", "confirmations", "notes", "phase_d", "phase_4h", "cycle",
+             "labels", "trigger", "trigger_1h", "funding_pct")
+PLAN_KEYS = ("support", "support_kind", "support_tf", "support_touches", "tp1_r", "tp2_r", "atr",
+             "sl_pct", "leverage", "order", "entry_low", "entry_high")
+
+
+def _detail(p: dict) -> dict:
+    """What the system saw when it opened the trade (shown next to the chart)."""
+    ev, plan = p.get("evaluation") or {}, p.get("plan") or {}
+    reg, maj = p.get("regime") or {}, p.get("majors") or {}
+    return {"eval": {k: ev.get(k) for k in EVAL_KEYS if ev.get(k) is not None},
+            "plan": {k: plan.get(k) for k in PLAN_KEYS if plan.get(k) is not None},
+            "regime": reg.get("name"), "bias": reg.get("bias"), "sub_system": p.get("system"),
+            "majors": {k: maj.get(k) for k in ("btc", "eth", "ethbtc", "btc_weak") if k in maj}}
 
 
 def _backfill(cfg: dict, since: int, watch_until: dict[str, int | None]) -> tuple[list[dict], dict]:
@@ -187,7 +204,7 @@ def _backfill(cfg: dict, since: int, watch_until: dict[str, int | None]) -> tupl
             "filled_at": t["filled_at"], "closed_at": t["closed_at"], "status": t["status"],
             "entry": t["entry"], "sl": t["sl"], "sl_now": t["sl"], "tp1": t.get("tp1"), "tp2": t.get("tp2"),
             "risk_pct": t.get("risk_pct") or 0.0, "gross_r": t["gross_r"], "open_frac": max(0.0, left),
-            "events": events, "leverage": None, "why": [],
+            "events": events, "leverage": None, "why": [], "detail": {},
             "costs": {k: t.get(k) for k in ("fee_r", "slippage_r", "funding_r", "net_r")},
         })
     meta = data.get("meta", {})
@@ -317,248 +334,7 @@ def collect(cfg: dict, now_ms: int) -> dict:
     return out
 
 
-# ------------------------------------------------------------------- render
-def _equity_svg(data: dict) -> str:
-    series = [(label, color, data["accounts"][key]["curve"]) for key, label, _, color in ACCOUNTS]
-    if not any(len(c) > 2 for _, _, c in series):
-        return '<p class="muted">هنوز معامله‌ی بسته‌شده‌ای نیست.</p>'
-    w, h, pad, right = 720, 240, 18, 56
-    t0, t1 = data["start"], data["now"]
-    lo = min(v for _, _, c in series for _, v in c)
-    hi = max(v for _, _, c in series for _, v in c)
-    base = series[0][2][0][1]
-    lo, hi = min(lo, base), max(hi, base)
-    span = (hi - lo) or 1
-    lo, hi = lo - span * 0.08, hi + span * 0.08
-    span = hi - lo
-
-    def x(ts):
-        return pad + (ts - t0) / ((t1 - t0) or 1) * (w - pad - right)
-
-    def y(v):
-        return pad + (hi - v) / span * (h - 2 * pad)
-
-    parts = [f'<svg viewBox="0 0 {w} {h}" class="chart" role="img" aria-label="منحنی موجودی">',
-             f'<line x1="{pad}" x2="{w - right}" y1="{y(base):.1f}" y2="{y(base):.1f}" class="zero"/>',
-             f'<text x="{w - right + 6}" y="{y(base) + 4:.1f}" class="axis">${base:,.0f}</text>']
-    for v in (hi - span * 0.08, lo + span * 0.08):
-        if abs(y(v) - y(base)) < 14:                # would overlap the start balance label
-            continue
-        parts.append(f'<text x="{w - right + 6}" y="{y(v) + 4:.1f}" class="axis">${v:,.1f}</text>')
-    day = t0
-    while day <= t1:
-        parts.append(f'<text x="{x(day):.1f}" y="{h - 2}" class="axis" text-anchor="middle">'
-                     f'{_t(day, "%m/%d")}</text>')
-        day += 2 * DAY
-    for _, color, c in series:
-        pts, prev = [], None
-        for ts, v in c:                          # step line: the balance changes at each close
-            if prev is not None:
-                pts.append(f"{x(ts):.1f},{y(prev):.1f}")
-            pts.append(f"{x(ts):.1f},{y(v):.1f}")
-            prev = v
-        parts.append(f'<polyline points="{" ".join(pts)}" fill="none" stroke="{color}" stroke-width="2.2"/>')
-        parts.append(f'<circle cx="{x(c[-1][0]):.1f}" cy="{y(c[-1][1]):.1f}" r="4" fill="{color}"/>')
-    parts.append("</svg>")
-    legend = " ".join(f'<span class="legend"><i style="background:{c}"></i>{_e(lb)}: ${cv[-1][1]:,.2f}</span>'
-                      for lb, c, cv in series)
-    return "".join(parts) + f'<div class="legends">{legend}</div>'
-
-
-def _account_cards(data: dict) -> str:
-    out = []
-    for key, label, hint, color in ACCOUNTS:
-        a = data["accounts"][key]
-        n = len(a["closed"])
-        ret = a["pnl"] / a["start_balance"] * 100 if a["start_balance"] else 0
-        wr = f"{a['wins'] / n * 100:.0f}٪" if n else "—"
-        pf = "—" if a["pf"] is None else f"{a['pf']:.2f}"
-        out.append(
-            f'<div class="acct" style="border-top-color:{color}"><div class="acct-h">{_e(label)}'
-            f'<small>{_e(hint)}</small></div>'
-            f'<div class="big">{_usd(a["equity"], sign=False)}</div>'
-            f'<div class="muted">موجودی بسته‌شده {_usd(a["balance"], sign=False)} · باز {_usd(a["unrealized"])}</div>'
-            f'<div class="grid4"><div><span class="l">سود/زیان</span>{_usd(a["pnl"])} {_pct(ret)}</div>'
-            f'<div><span class="l">معامله‌ی بسته</span>{n} <small>برد {wr}</small></div>'
-            f'<div><span class="l">بیشترین افت</span>{a["max_dd"]:.1f}٪</div>'
-            f'<div><span class="l">ضریب سود</span>{pf}</div>'
-            f'<div><span class="l">کارمزد پرداختی</span>{_usd(-a["fees"])}</div>'
-            f'<div><span class="l">پوزیشن باز</span>{len(a["open"])} <small>+ {len(a["pending"])} سفارش در انتظار</small></div>'
-            '</div></div>')
-    return '<div class="accts">' + "".join(out) + "</div>"
-
-
-def _by_system(data: dict) -> str:
-    rows = []
-    for key, label, _, _ in ACCOUNTS[:2]:
-        a = data["accounts"][key]
-        for sname in sorted({t["system"] for t in a["rows"]}):
-            closed = [t for t in a["closed"] if t["system"] == sname]
-            n = len(closed)
-            if not n and not any(t["system"] == sname for t in a["rows"]):
-                continue
-            wins = sum(t["pnl_usd"] > 0 for t in closed)
-            rows.append(f"<tr><td>{_e(label)}</td><td>{_e(sname)}</td><td>{n}</td>"
-                        f"<td>{f'{wins / n * 100:.0f}٪' if n else '—'}</td>"
-                        f"<td>{_r(sum(t['net_r'] for t in closed) if n else None)}</td>"
-                        f"<td>{_usd(sum(t['pnl_usd'] for t in closed) if n else None)}</td></tr>")
-    if not rows:
-        return ""
-    return ('<div class="scroll"><table><thead><tr><th>نوع</th><th>سیستم</th><th>بسته</th><th>برد</th>'
-            '<th>مجموع R خالص</th><th>سود/زیان</th></tr></thead><tbody>' + "".join(rows) + "</tbody></table></div>")
-
-
-def _regime(s: dict, now: int) -> str:
-    f = (s["funnel_dom"] or s["funnel"]) if s["name"] == "سیستم ۲" else s["funnel"]
-    reg, maj = f.get("regime") or {}, f.get("majors") or {}
-    bias = {"long": "فقط لانگ", "short": "فقط شورت", "both": "هر دو طرف"}.get(reg.get("bias"), reg.get("bias") or "—")
-    bits = [f'رژیم: <b>{_e(reg.get("name", "—"))}</b> ({_e(bias)})']
-    if maj:
-        bits.append(f'امتیاز BTC: {_e(maj.get("btc"))} | ETH: {_e(maj.get("eth"))} | ETH/BTC: {_e(maj.get("ethbtc"))}')
-        if maj.get("btc_weak"):
-            bits.append('<span class="warn">BTC ضعیف است (لانگ آلت‌ها امتیاز بالاتر لازم دارد)</span>')
-    ls = s["loss_streak"]
-    if ls.get("paused_until") and ls["paused_until"] > now:
-        bits.append(f'<span class="warn">توقف بعد از ضررهای پشت‌سرهم تا {_t(ls["paused_until"])}</span>')
-    return " · ".join(bits)
-
-
-def _runs(s: dict, now_ms: int) -> str:
-    rows = []
-    for task, label in TASK_FA.items():
-        ts = s["last_runs"].get(task)
-        stale = task in ("run-1h", "run-15m") and (not ts or now_ms - ts > STALE_MIN * 60_000)
-        rows.append(f'<span class="run {"bad" if stale else ""}">{label}: {_ago(ts, now_ms)}</span>')
-    return " ".join(rows)
-
-
-def _attrs(t: dict) -> str:
-    return f'data-k="{"approved" if t["approved"] else "watch"}" data-s="{_e(t["system"])}"'
-
-
-def _positions(data: dict) -> str:
-    acc = {id(t): t for t in data["accounts"]["all"]["open"]}
-    rows = []
-    for t in sorted(acc.values(), key=lambda t: -t["created"]):
-        rows.append(
-            f"<tr {_attrs(t)}><td>{_kind(t['approved'])}</td><td>{_e(t['system'])}</td>"
-            f"<td><b>{_e(t['base'])}</b>/USDT</td><td>{_side(t['side'])}</td>"
-            f"<td>{_e(t['grade'])} <small>{t['score']:.0f}</small></td>"
-            f"<td>{_price(t['entry'])}</td><td>{_price(t['price'])}</td>"
-            f"<td>{_price(t['sl_now'])}</td><td>{_price(t['tp1'])}</td><td>{_price(t['tp2'])}</td>"
-            f"<td>{_usd(t.get('size_usd'), sign=False)}</td><td>{_usd(t['risk_usd'], sign=False)}</td>"
-            f"<td>{_usd(t['risk_usd'] * t['open_r'] if t.get('open_r') is not None else None)}</td>"
-            f"<td>{_r(t.get('open_r'))}</td><td>{_e(STATUS_FA.get(t['status'], t['status']))}</td>"
-            f"<td>{_t(t['filled_at'])}</td></tr>")
-    if not rows:
-        return '<p class="muted">الان پوزیشن بازی نیست.</p>'
-    return ('<p class="muted">اعداد دلاری از حساب «همه با هم» است. ریسک هر پوزیشن درصدی از موجودی همان لحظه است.</p>'
-            '<div class="scroll"><table class="f"><thead><tr><th>نوع</th><th>سیستم</th><th>جفت‌ارز</th>'
-            '<th>جهت</th><th>رده</th><th>ورود</th><th>قیمت فعلی</th><th>استاپ</th><th>TP1</th><th>TP2</th>'
-            '<th>حجم</th><th>ریسک</th><th>سود/زیان باز</th><th>R</th><th>وضعیت</th><th>زمان ورود</th>'
-            '</tr></thead><tbody>' + "".join(rows) + "</tbody></table></div>")
-
-
-def _pending(data: dict) -> str:
-    rows = []
-    for t in sorted(data["accounts"]["all"]["pending"], key=lambda t: -t["created"]):
-        rows.append(
-            f"<tr {_attrs(t)}><td>{_kind(t['approved'])}</td><td>{_e(t['system'])}</td>"
-            f"<td><b>{_e(t['base'])}</b></td><td>{_side(t['side'])}</td>"
-            f"<td>{_e(t['grade'])} <small>{t['score']:.0f}</small></td><td>{_price(t['entry'])}</td>"
-            f"<td>{_price(t['price'])}</td><td>{_price(t['sl'])}</td><td>{_price(t['tp1'])}</td>"
-            f"<td>{t['risk_pct']:.2f}٪</td><td>{_t(t['created'])}</td></tr>")
-    if not rows:
-        return '<p class="muted">سفارش در انتظاری نیست.</p>'
-    return ('<div class="scroll"><table class="f"><thead><tr><th>نوع</th><th>سیستم</th><th>کوین</th><th>جهت</th>'
-            '<th>رده</th><th>قیمت سفارش</th><th>قیمت فعلی</th><th>استاپ</th><th>TP1</th><th>ریسک</th>'
-            '<th>زمان سیگنال</th></tr></thead><tbody>' + "".join(rows) + "</tbody></table></div>")
-
-
-def _history(data: dict) -> str:
-    acc = data["accounts"]
-    own = {}
-    for key in ("approved", "watch"):
-        for t in acc[key]["closed"]:
-            own[(t["system"], t["base"], t["created"], t["approved"])] = t
-    rows = []
-    every = acc["all"]["rows"]
-    for t in sorted(every, key=lambda t: -(t["closed_at"] or t["created"])):
-        if t["status"] not in CLOSED + UNFILLED:
-            continue
-        mine = own.get((t["system"], t["base"], t["created"], t["approved"]), {})
-        rows.append(
-            f"<tr {_attrs(t)}><td>{_t(t['created'])}</td><td>{_t(t['closed_at'])}</td>"
-            f"<td>{_kind(t['approved'])}</td><td>{_e(t['system'])}</td><td><b>{_e(t['base'])}</b></td>"
-            f"<td>{_side(t['side'])}</td><td>{_e(t['grade'])} <small>{t['score']:.0f}</small></td>"
-            f"<td>{_e(STATUS_FA.get(t['status'], t['status']))}</td>"
-            f"<td>{_r(t['gross_r'] if t['filled_at'] else None)}</td>"
-            f"<td>{_r(t['net_r'] if t['filled_at'] else None)}</td>"
-            f"<td>{_usd(t.get('pnl_usd'))}</td><td>{_usd(mine.get('pnl_usd'))}</td>"
-            f"<td>{_usd(mine.get('balance_after'), sign=False)}</td>"
-            f"<td><small>{'بازسازی' if t['source'] == 'replay' else 'زنده'}</small></td></tr>")
-    if not rows:
-        return '<p class="muted">هنوز معامله‌ای بسته نشده است.</p>'
-    return ('<p class="muted">«سود/زیان (همه)» در حساب مشترک است؛ «در حساب خودش» در حساب تأییدشده یا Watch.</p>'
-            '<div class="scroll"><table class="f"><thead><tr><th>سیگنال</th><th>بسته شدن</th><th>نوع</th>'
-            '<th>سیستم</th><th>کوین</th><th>جهت</th><th>رده</th><th>نتیجه</th><th>R خام</th><th>R خالص</th>'
-            '<th>سود/زیان (همه)</th><th>در حساب خودش</th><th>موجودی بعد</th><th>منبع</th></tr></thead><tbody>'
-            + "".join(rows) + "</tbody></table></div>")
-
-
-def _candidates(systems: list[dict], limit: int = 20) -> str:
-    items = []
-    for s in systems:
-        for it in (s["evaluations"].get("items") or []):
-            items.append((s["name"], it))
-    items.sort(key=lambda x: -(x[1].get("score") or 0))
-    rows = []
-    for name, it in items[:limit]:
-        failed = [GATE_FA.get(g, g) for g, ok in (it.get("gates") or {}).items() if not ok]
-        flags = [FLAG_FA.get(f, f) for f in it.get("flags") or []]
-        why = "، ".join(dict.fromkeys(failed + flags)) or ("" if it.get("grade") in ("A", "B") else "امتیاز کم")
-        plan = it.get("plan") or {}
-        rows.append(
-            f"<tr><td>{_e(name)}</td><td><b>{_e(it.get('base'))}</b></td><td>{_side(it.get('side'))}</td>"
-            f"<td>{(it.get('score') or 0):.0f}</td><td>{_e(it.get('grade') or '—')}</td>"
-            f"<td>{_price(it.get('price'))}</td><td>{_price(plan.get('entry'))}</td><td>{_price(plan.get('sl'))}</td>"
-            f"<td>{_price(plan.get('tp1'))}</td><td>{_e(why) or '—'}</td></tr>")
-    if not rows:
-        return '<p class="muted">در آخرین بررسی کاندیدی نبود.</p>'
-    ts = max((s["evaluations"].get("ts") or 0) for s in systems)
-    return (f'<p class="muted">آخرین بررسی: {_t(ts)} · سیگنال = رده‌ی A یا B بدون مانع؛ Watch = ستاپ نزدیک که فقط دنبال می‌شود</p>'
-            '<div class="scroll"><table><thead><tr><th>سیستم</th><th>کوین</th><th>جهت</th><th>امتیاز</th>'
-            '<th>رده</th><th>قیمت</th><th>ورود</th><th>استاپ</th><th>TP1</th><th>چرا سیگنال نشد</th></tr></thead><tbody>'
-            + "".join(rows) + "</tbody></table></div>")
-
-
-def _watchlists(s: dict) -> str:
-    f = s["funnel"]
-    short = f.get("shortlist") or []
-    watch = f.get("watchlist") or {}
-    chips = "".join(f'<span class="chip">{_e(x.get("base"))} {_side(x.get("side"))}</span>' for x in short)
-    wl = "".join(f'<span class="chip">{_e(b)} <small>{_e(", ".join(v) if isinstance(v, list) else v)}</small></span>'
-                 for b, v in list(watch.items())[:80])
-    return (f'<p><b>شورت‌لیست ({len(short)}):</b> {chips or "—"}</p>'
-            f'<p><b>واچ‌لیست ({len(watch)}):</b> {wl or "—"}</p>'
-            f'<p class="muted">به‌روزرسانی قیف: {_t(int(f["ts"])) if f.get("ts") else "—"}</p>')
-
-
-def _news(systems: list[dict], limit: int = 25) -> str:
-    news = sorted((n for s in systems for n in s["news"]), key=lambda n: -n["seen_at"])[:limit]
-    if not news:
-        return '<p class="muted">در ۱۴ روز اخیر هشدار خبری نبود.</p>'
-    rows = []
-    for n in news:
-        title = _e(n["title"])
-        if (n.get("url") or "").startswith(("http://", "https://")):
-            title = f'<a href="{_e(n["url"])}" target="_blank" rel="noopener noreferrer">{title}</a>'
-        rows.append(f"<tr><td>{_t(n['seen_at'])}</td><td>{_e(', '.join(n['coins']))}</td>"
-                    f"<td>{'⭐' * int(n['level'] or 0)}</td><td>{title}</td><td>{_e(n['source'])}</td></tr>")
-    return ('<div class="scroll"><table><thead><tr><th>زمان</th><th>کوین</th><th>اهمیت</th><th>خبر</th>'
-            '<th>منبع</th></tr></thead><tbody>' + "".join(rows) + "</tbody></table></div>")
-
-
+# ------------------------------------------------------------------- page
 def _method(cfg: dict, data: dict) -> str:
     b = cfg["backtest"]
     since = data["shadow_since"]
@@ -585,121 +361,307 @@ def _method(cfg: dict, data: dict) -> str:
 <li>این حساب واقعی نیست؛ شبیه‌سازی کاغذی است.</li></ul>"""
 
 
-CSS = """
-:root{--bg:#f4f5f7;--card:#fff;--fg:#1b1f24;--muted:#6b7280;--line:#e5e7eb;--pos:#0f9d58;--neg:#d93025;
---warn:#b45309;--long:#e7f6ee;--short:#fdecec;--acc:#2f7de1;--chip:#f1f3f5}
-@media (prefers-color-scheme:dark){:root{--bg:#0d1014;--card:#151a20;--fg:#e6e8eb;--muted:#9aa3ad;
---line:#262d36;--pos:#34c77b;--neg:#ff6b6b;--warn:#f0a94b;--long:#11301f;--short:#3a1717;--chip:#1d242c}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);
-font:14px/1.6 Vazirmatn,Tahoma,system-ui,sans-serif}
-header{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
-.hin{max-width:1280px;margin:auto;padding:10px 16px 0}h1{font-size:18px;margin:0}
-nav{display:flex;gap:4px;overflow-x:auto;margin-top:6px}nav button{background:none;border:0;
-border-bottom:2px solid transparent;color:var(--muted);padding:8px 12px;font:inherit;cursor:pointer;white-space:nowrap}
-nav button.on{color:var(--fg);border-bottom-color:var(--acc);font-weight:600}
-main{max-width:1280px;margin:auto;padding:12px 16px}h2{font-size:16px;margin:0 0 10px}
-section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0}
-.tab{display:none}.tab.on{display:block}.muted{color:var(--muted)}small{color:var(--muted)}
-.accts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
-.acct{border:1px solid var(--line);border-top:3px solid var(--acc);border-radius:10px;padding:12px;background:var(--card)}
-.acct-h{font-weight:600}.acct-h small{display:block;font-weight:400}.big{font-size:26px;font-weight:700;margin:4px 0}
-.grid4{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:8px}.grid4 .l{display:block;color:var(--muted);font-size:12px}
-.pos{color:var(--pos);font-weight:600}.neg{color:var(--neg);font-weight:600}.warn{color:var(--warn)}
-.badge{padding:1px 8px;border-radius:10px;font-size:12px;white-space:nowrap}
-.badge.long{background:var(--long);color:var(--pos)}.badge.short{background:var(--short);color:var(--neg)}
-.badge.ok{background:var(--long);color:var(--pos)}.badge.watch{background:var(--chip);color:var(--warn)}
-.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;white-space:nowrap}
-th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right}th{color:var(--muted);font-weight:500;font-size:12px}
-td{unicode-bidi:plaintext}.run{display:inline-block;margin:2px 6px 2px 0;padding:2px 8px;
-border-radius:6px;border:1px solid var(--line)}.run.bad{border-color:var(--neg);color:var(--neg)}
-.chip{display:inline-block;background:var(--chip);border-radius:14px;padding:1px 8px;margin:2px}
-.chart{width:100%;height:auto;direction:ltr}.chart .zero{stroke:var(--line);stroke-dasharray:4 4}
-.chart .axis{fill:var(--muted);font-size:11px}.legends{margin-top:6px}.legend{margin-left:14px;white-space:nowrap}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-left:4px}a{color:inherit}
-.filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.filters button{border:1px solid var(--line);
-background:var(--card);color:var(--fg);border-radius:14px;padding:2px 12px;font:inherit;cursor:pointer}
-.filters button.on{background:var(--acc);border-color:var(--acc);color:#fff}
-.sys{border-top:1px dashed var(--line);padding-top:8px;margin-top:8px}.sys:first-of-type{border:0;margin:0;padding:0}
-.method li{margin:6px 0}
-"""
-
-JS = """
-(function(){
-  var tabs=document.querySelectorAll('nav button'), pages=document.querySelectorAll('.tab');
-  function show(id){tabs.forEach(function(b){b.classList.toggle('on',b.dataset.t===id)});
-    pages.forEach(function(p){p.classList.toggle('on',p.id===id)});
-    try{localStorage.setItem('tab',id)}catch(e){}}
-  tabs.forEach(function(b){b.addEventListener('click',function(){show(b.dataset.t)})});
-  var saved=null;try{saved=localStorage.getItem('tab')}catch(e){}
-  show(saved&&document.getElementById(saved)?saved:'t-home');
-  var f={k:'',s:''};
-  function apply(){document.querySelectorAll('table.f tbody tr').forEach(function(r){
-    r.style.display=((!f.k||r.dataset.k===f.k)&&(!f.s||r.dataset.s===f.s))?'':'none'})}
-  document.querySelectorAll('.filters button').forEach(function(b){b.addEventListener('click',function(){
-    var g=b.dataset.g; f[g]=b.dataset.v;
-    document.querySelectorAll('.filters button[data-g="'+g+'"]').forEach(function(x){
-      x.classList.toggle('on',x.dataset.v===f[g])}); apply()})});
-})();
-"""
+WEB = Path(__file__).with_name("panel_web")
+TF_SEC = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
+CANDLE_BARS = {"5m": 400, "1h": 600, "4h": 400, "1d": 300}
 
 
-def _filters(systems: list[str]) -> str:
-    kinds = [("", "همه"), ("approved", "تأییدشده"), ("watch", "Watch")]
-    sys_ = [("", "همه‌ی سیستم‌ها")] + [(s, s) for s in systems]
-    b = "".join(f'<button data-g="k" data-v="{v}" class="{"on" if not v else ""}">{lb}</button>' for v, lb in kinds)
-    b += "".join(f'<button data-g="s" data-v="{_e(v)}" class="{"on" if not v else ""}">{_e(lb)}</button>' for v, lb in sys_)
-    return f'<div class="filters">{b}</div>'
+def _tid(t: dict) -> str:
+    kind = "ok" if t["approved"] else "w"
+    sysn = "s1" if t["system"] == "سیستم ۱" else "s2"
+    return f"{sysn}-{kind}-{t['base']}-{t['created']}"
 
 
-def render(cfg: dict, data: dict) -> str:
+def _num(x, nd: int = 8):
+    if x is None:
+        return None
+    try:
+        return float(f"{float(x):.{nd}g}")
+    except (TypeError, ValueError):
+        return None
+
+
+def _trade_rows(data: dict) -> list[dict]:
+    """Every trade once, with its dollar result in the shared account and in its own one."""
+    acc = data["accounts"]
+    own = {}
+    for key in ("approved", "watch"):
+        for t in acc[key]["rows"]:
+            own[_tid(t)] = t
+    rows = []
+    for t in acc["all"]["rows"]:
+        tid = _tid(t)
+        mine = own.get(tid, {})
+        rows.append({
+            "id": tid, "system": t["system"], "approved": t["approved"], "source": t["source"],
+            "base": t["base"], "side": 1 if t["side"] in (1, "long", "1") else -1,
+            "grade": t["grade"], "score": _num(t["score"], 4), "created": t["created"],
+            "filled_at": t["filled_at"], "closed_at": t["closed_at"], "status": t["status"],
+            "status_fa": STATUS_FA.get(t["status"], t["status"]), "open": t["open"],
+            "entry": _num(t["entry"]), "sl": _num(t["sl"]), "sl_now": _num(t["sl_now"]),
+            "tp1": _num(t["tp1"]), "tp2": _num(t["tp2"]), "price": _num(t["price"]),
+            "risk_pct": _num(t["risk_pct"], 4), "sl_pct": _num(t["sl_pct"], 4),
+            "gross_r": _num(t["gross_r"], 4), "net_r": _num(t["net_r"], 4), "cost_r": _num(t["cost_r"], 4),
+            "open_r": _num(t.get("open_r"), 4), "open_frac": _num(t.get("open_frac"), 4),
+            "events": [[k, ts, _num(px)] for k, ts, px in t["events"]],
+            "why": t["why"], "leverage": t.get("leverage"), "detail": t.get("detail") or {},
+            "risk_usd": _num(t.get("risk_usd"), 6), "size_usd": _num(t.get("size_usd"), 6),
+            "pnl_usd": _num(t.get("pnl_usd"), 6),
+            "own_risk_usd": _num(mine.get("risk_usd"), 6), "own_pnl_usd": _num(mine.get("pnl_usd"), 6),
+            "own_balance_after": _num(mine.get("balance_after"), 8),
+        })
+    return rows
+
+
+def _account_summary(a: dict) -> dict:
+    n = len(a["closed"])
+    return {"balance": _num(a["balance"]), "equity": _num(a["equity"]), "unrealized": _num(a["unrealized"]),
+            "start": a["start_balance"], "pnl": _num(a["pnl"]), "closed": n, "wins": a["wins"],
+            "max_dd": _num(a["max_dd"], 4), "pf": _num(a["pf"], 4), "fees": _num(a["fees"], 6),
+            "open": len(a["open"]), "pending": len(a["pending"]),
+            "curve": [[ts, _num(v)] for ts, v in a["curve"]]}
+
+
+def _stats(trades: list[dict]) -> dict:
+    """Results in R of a group of closed trades (the comparison tab)."""
+    closed = sorted([t for t in trades if t["status"] in CLOSED and t["filled_at"]],
+                    key=lambda t: t["closed_at"] or 0)
+    rs = [t["net_r"] for t in closed]
+    wins = [r for r in rs if r > 0]
+    loss = -sum(r for r in rs if r < 0)
+    cum, peak, mdd, curve = 0.0, 0.0, 0.0, []
+    for t in closed:
+        cum += t["net_r"]
+        peak = max(peak, cum)
+        mdd = max(mdd, peak - cum)
+        curve.append([t["closed_at"], round(cum, 4)])
+    held = [(t["closed_at"] - t["filled_at"]) / 3_600_000 for t in closed if t["closed_at"]]
+    opened = [t for t in trades if t["status"] not in UNFILLED]
+    return {"signals": len(trades), "filled": len([t for t in trades if t["filled_at"]]),
+            "unfilled": len([t for t in trades if t["status"] in UNFILLED]),
+            "open": len([t for t in opened if t["open"] and t["filled_at"]]), "closed": len(closed),
+            "wins": len(wins), "win_rate": len(wins) / len(closed) * 100 if closed else None,
+            "net_r": round(sum(rs), 4), "avg_r": round(sum(rs) / len(rs), 4) if rs else None,
+            "best": round(max(rs), 4) if rs else None, "worst": round(min(rs), 4) if rs else None,
+            "pf": round(sum(wins) / loss, 4) if loss else None, "max_dd_r": round(mdd, 4),
+            "avg_hold_h": round(sum(held) / len(held), 1) if held else None,
+            "longs": len([t for t in trades if t["side"] in (1, "long")]),
+            "shorts": len([t for t in trades if t["side"] not in (1, "long")]),
+            "open_r": round(sum(t.get("open_r") or 0 for t in opened if t["open"]), 4),
+            "curve": curve}
+
+
+def _compare(data: dict) -> dict:
+    out = {}
+    for s in sorted({t["system"] for t in data["trades"]} | {x["name"] for x in data["systems"]}):
+        mine = [t for t in data["trades"] if t["system"] == s]
+        out[s] = {"approved": _stats([t for t in mine if t["approved"]]),
+                  "watch": _stats([t for t in mine if not t["approved"]]),
+                  "all": _stats(mine)}
+    return out
+
+
+def _system_view(s: dict, now: int) -> dict:
+    f = (s["funnel_dom"] or s["funnel"]) if s["name"] == "سیستم ۲" else s["funnel"]
+    reg, maj = f.get("regime") or {}, f.get("majors") or {}
+    items = []
+    for it in (s["evaluations"].get("items") or []):
+        failed = [GATE_FA.get(g, g) for g, ok in (it.get("gates") or {}).items() if not ok]
+        flags = [FLAG_FA.get(x, x) for x in it.get("flags") or []]
+        why = list(dict.fromkeys(failed + flags))
+        if not why and it.get("grade") not in ("A", "B"):
+            why = ["امتیاز کم"]
+        plan = it.get("plan") or {}
+        items.append({
+            "base": it.get("base"), "side": it.get("side"), "score": _num(it.get("score"), 4),
+            "grade": it.get("grade"), "price": _num(it.get("price")), "why": why,
+            "sections": it.get("sections") or {}, "gates": it.get("gates") or {},
+            "confirmations": it.get("confirmations") or [], "notes": it.get("notes") or [],
+            "phase_d": it.get("phase_d"), "phase_4h": it.get("phase_4h"), "cycle": it.get("cycle"),
+            "labels": it.get("labels") or [], "trigger": it.get("trigger"), "rejected": it.get("rejected"),
+            "funding_pct": it.get("funding_pct"),
+            "plan": {k: _num(plan.get(k)) if isinstance(plan.get(k), (int, float)) else plan.get(k)
+                     for k in ("entry", "sl", "tp1", "tp2", "tp1_r", "tp2_r", "support", "support_kind",
+                               "support_tf", "order") if plan.get(k) is not None},
+        })
+    items.sort(key=lambda x: -(x["score"] or 0))
+    ls = s["loss_streak"] or {}
+    return {
+        "name": s["name"], "variant": s["variant"],
+        "regime": {k: reg.get(k) for k in ("name", "bias", "risk", "usdt_d", "btc_d", "total2", "trend",
+                                           "counter_risk", "min_grade") if k in reg},
+        "majors": maj, "last_runs": s["last_runs"], "evaluated_at": s["evaluations"].get("ts"),
+        "candidates": items[:40],
+        "shortlist": [{"base": x.get("base"), "side": x.get("side"), "score": _num(x.get("score"), 4),
+                       "labels": x.get("labels") or [], "parts": x.get("parts") or {},
+                       "level_atr": x.get("level_atr"),
+                       "pairs": {k: (x.get("pairs") or {}).get(k) for k in ("corr_btc", "beta", "rs")}}
+                      for x in f.get("shortlist") or []],
+        "watchlist": f.get("watchlist") or {}, "hot_categories": f.get("hot_categories") or [],
+        "breakout_watch": f.get("breakout_watch") or {}, "funnel_ts": f.get("ts"),
+        "paused_until": ls.get("paused_until") if (ls.get("paused_until") or 0) > now else None,
+    }
+
+
+def _dominance(cfg: dict) -> list:
+    repo = _open(cfg["storage"]["db_path"])
+    if repo is None:
+        return []
+    try:
+        from .data.dominance import dominance_series, merged_history
+        d = dominance_series(merged_history(repo))
+    except Exception:
+        return []
+    finally:
+        repo.close()
+    if d is None or d.empty:
+        return []
+    d = d.tail(400)
+    return [[int(r.ts), _num(r.usdt_d, 5), _num(r.btc_d, 5), _num(r.total2 / 1e9, 6)]
+            for r in d.itertuples()]
+
+
+def _strategy(cfg: dict) -> str:
+    from .panel_strategy import strategy_html
+    try:
+        return strategy_html(cfg)
+    except (Exception, SystemExit) as e:          # a config the page can't read must not stop the panel
+        print(f"strategy page skipped: {e}")
+        return '<section><h2>استراتژی</h2><div class="empty">توضیح استراتژی از تنظیمات ساخته نشد.</div></section>'
+
+
+def payload(cfg: dict, data: dict) -> dict:
     now = data["now"]
-    systems = data["systems"]
-    names = [s["name"] for s in systems]
-    head = "".join(f'<div class="sys"><b>{_e(s["name"])}</b> <small>({_e(s["variant"])})</small><br>'
-                   f'{_regime(s, now)}</div>' for s in systems)
-    runs = _runs(systems[0], now) if systems else "دیتابیسی پیدا نشد."
-    n_open = len(data["accounts"]["all"]["open"])
-    n_pend = len(data["accounts"]["all"]["pending"])
-    return f"""<!DOCTYPE html>
-<html lang="fa" dir="rtl"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="120"><meta name="robots" content="noindex,nofollow">
-<title>پنل سیگنال‌ها</title><style>{CSS}</style></head><body>
-<header><div class="hin"><h1>پنل سیستم سیگنال <small>· به‌روزرسانی {_t(now)} تهران</small></h1>
-<nav><button data-t="t-home">نمای کلی</button><button data-t="t-pos">پوزیشن‌ها ({n_open})</button>
-<button data-t="t-hist">تاریخچه</button><button data-t="t-next">سیگنال‌های بعدی و بازار</button>
-<button data-t="t-news">اخبار</button><button data-t="t-how">روش محاسبه</button></nav></div></header>
-<main>
-<div class="tab" id="t-home">
-<section><h2>حساب‌های شبیه‌سازی‌شده (شروع {_t(data['start'], '%Y-%m-%d')} با ${(cfg.get('panel') or {}).get('balance_usd', 100)})</h2>{_account_cards(data)}</section>
-<section><h2>منحنی موجودی</h2>{_equity_svg(data)}</section>
-<section><h2>به تفکیک سیستم</h2>{_by_system(data)}</section>
-<section><h2>آخرین اجراها</h2>{runs}</section>
-<section><h2>وضعیت بازار</h2>{head}</section>
-</div>
-<div class="tab" id="t-pos">
-<section><h2>پوزیشن‌های باز</h2>{_filters(names)}{_positions(data)}</section>
-<section><h2>سفارش‌های در انتظار ({n_pend})</h2>{_pending(data)}</section>
-</div>
-<div class="tab" id="t-hist"><section><h2>تاریخچه‌ی معاملات</h2>{_filters(names)}{_history(data)}</section></div>
-<div class="tab" id="t-next">
-<section><h2>وضعیت بازار</h2>{head}</section>
-<section><h2>نزدیک‌ترین کاندیدها به سیگنال</h2>{_candidates(systems)}</section>
-<section><h2>شورت‌لیست و واچ‌لیست</h2>{_watchlists(systems[0]) if systems else ""}</section>
-</div>
-<div class="tab" id="t-news"><section><h2>هشدارهای خبری</h2>{_news(systems)}</section></div>
-<div class="tab" id="t-how"><section><h2>روش محاسبه</h2>{_method(cfg, data)}</section></div>
-</main><script>{JS}</script></body></html>
-"""
+    systems = [_system_view(s, now) for s in data["systems"]]
+    trades = _trade_rows(data)
+    news = sorted((n for s in data["systems"] for n in s["news"]), key=lambda n: -n["seen_at"])[:40]
+    return {
+        "now": now, "start": data["start"], "balance": (cfg.get("panel") or {}).get("balance_usd", 100),
+        "accounts": {k: _account_summary(data["accounts"][k]) for k in ("approved", "watch", "all")},
+        "trades": trades, "systems": systems, "compare": _compare(data),
+        "dominance": _dominance(cfg), "shadow_since": data["shadow_since"],
+        "news": [{"ts": n["seen_at"], "coins": n["coins"], "level": n["level"], "title": n["title"],
+                  "url": n["url"] if (n.get("url") or "").startswith(("http://", "https://")) else None,
+                  "source": n["source"]} for n in news],
+        "labels": {"status": STATUS_FA, "gates": GATE_FA, "flags": FLAG_FA, "tasks": TASK_FA},
+        "strategy_html": _strategy(cfg),
+        "method_html": _method(cfg, data),
+        "stale_min": STALE_MIN,
+    }
+
+
+def _candle_symbols(pl: dict) -> dict[str, int]:
+    """Coin -> the earliest time its chart should show (trades from before their signal)."""
+    want: dict[str, int] = {}
+    now = pl["now"]
+    for t in pl["trades"]:
+        want[t["base"]] = min(want.get(t["base"], now), t["created"])
+    for s in pl["systems"]:
+        for c in s["candidates"][:25] + s["shortlist"]:
+            want.setdefault(c["base"], now)
+    for b in ("BTC", "ETH"):
+        want.setdefault(b, now)
+    return want
+
+
+def _safe_name(base: str) -> str:
+    return "".join(ch for ch in base if ch.isalnum() or ch in "-_") or "x"
+
+
+def export_candles(cfg: dict, pl: dict, out: Path) -> dict[str, str]:
+    """One small JSON per coin (loaded when its chart opens): {tf: [[t_sec, o, h, l, c, v], ...]}."""
+    repo = _open(cfg["storage"]["db_path"])
+    files: dict[str, str] = {}
+    if repo is None:
+        return files
+    folder = out / "candles"
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        for base, since in _candle_symbols(pl).items():
+            series = {}
+            for tf, bars in CANDLE_BARS.items():
+                lo = since - bars // 3 * TF_SEC[tf] * 1000
+                try:
+                    rows = repo.conn.execute(
+                        "SELECT ts, open, high, low, close, volume FROM candles WHERE symbol LIKE ? "
+                        "AND timeframe=? AND ts>=? GROUP BY ts ORDER BY ts DESC LIMIT ?",   # one bar per time (spot/swap, exchanges)
+                        (f"{base}/USDT%", tf, lo, bars)).fetchall()
+                except sqlite3.Error:
+                    rows = []
+                if rows:
+                    series[tf] = [[r[0] // 1000, _num(r[1]), _num(r[2]), _num(r[3]), _num(r[4]), _num(r[5], 6)]
+                                  for r in reversed(rows)]
+            if series:
+                name = _safe_name(base)
+                _write(folder / f"{name}.json", json.dumps(series, separators=(",", ":")))
+                files[base] = f"candles/{name}.json"
+    finally:
+        repo.close()
+    return files
+
+
+def _write(path: Path, text: str) -> None:
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)                          # the web server never sees a half-written file
+
+
+def _json_for_html(obj) -> str:
+    """JSON that is safe inside <script>: no </script>, no HTML from coin names or news."""
+    return (json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+            .replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
+
+
+def _font_faces(fonts: list[str]) -> str:
+    """@font-face rules for the IRANSansWeb files that are present (no 404s when they are not)."""
+    out = []
+    for weight, stem in ((400, "IRANSansWeb"), (700, "IRANSansWeb_Bold")):
+        src = [f'url(assets/{stem}{ext}) format("{fmt}")' for ext, fmt in ((".woff2", "woff2"), (".woff", "woff"))
+               if f"{stem}{ext}" in fonts]
+        if src:
+            out.append('@font-face{font-family:"IRANSansWeb";src:%s;font-weight:%d;font-display:swap}'
+                       % (",".join(src), weight))
+    return "\n".join(out)
+
+
+def render(cfg: dict, pl: dict, fonts: list[str] | None = None) -> str:
+    page = (WEB / "index.html").read_text(encoding="utf-8")
+    css = (WEB / "style.css").read_text(encoding="utf-8").replace("@@IRANSANS@@", _font_faces(fonts or []))
+    return (page.replace("@@CSS@@", css)
+            .replace("@@JS@@", (WEB / "app.js").read_text(encoding="utf-8"))
+            .replace("@@DATA@@", _json_for_html(pl)))
+
+
+def _copy_assets(cfg: dict, out: Path) -> list[str]:
+    import shutil
+    dst = out / "assets"
+    dst.mkdir(parents=True, exist_ok=True)
+    for f in (WEB / "vendor").iterdir():
+        target = dst / f.name
+        if not target.exists() or target.stat().st_size != f.stat().st_size:
+            shutil.copyfile(f, target)
+            os.chmod(target, 0o644)
+    # IRANSans is a licensed font: used when its files are put in panel.font_dir (Vazirmatn otherwise)
+    fdir = (cfg.get("panel") or {}).get("font_dir")
+    if fdir and Path(fdir).is_dir():
+        for f in Path(fdir).glob("*.woff*"):
+            target = dst / f.name
+            if not target.exists() or target.stat().st_size != f.stat().st_size:
+                shutil.copyfile(f, target)
+                os.chmod(target, 0o644)
+    return sorted(f.name for f in dst.glob("IRANSansWeb*.woff*"))
 
 
 def build(cfg: dict, out_dir: str | Path, now_ms: int | None = None) -> Path:
     now_ms = now_ms or int(datetime.now(timezone.utc).timestamp() * 1000)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    page = render(cfg, collect(cfg, now_ms))
-    tmp = out / ".index.html.tmp"
-    tmp.write_text(page, encoding="utf-8")
-    os.chmod(tmp, 0o644)
-    os.replace(tmp, out / "index.html")           # the web server never sees a half-written page
+    data = collect(cfg, now_ms)
+    pl = payload(cfg, data)
+    fonts = _copy_assets(cfg, out)
+    pl["candles"] = export_candles(cfg, pl, out)
+    _write(out / "data.json", _json_for_html(pl))
+    _write(out / "index.html", render(cfg, pl, fonts))
     return out / "index.html"

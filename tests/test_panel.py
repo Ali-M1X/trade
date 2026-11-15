@@ -79,12 +79,25 @@ def test_accounts_book_confirmed_and_watch_trades(cfg, tmp_path):
     (pos,) = acc["approved"]["open"]
     assert pos["base"] == "OPENCOIN" and pos["open_r"] == pytest.approx(1.0)   # (105-100)/5
 
-    page = build(c, tmp_path / "panel", NOW).read_text(encoding="utf-8")
-    assert "WINNER" in page and "WATCHED" in page and "OPENCOIN" in page and "BEFORE" not in page
-    assert "NEAR&lt;x&gt;" in page and "NEAR<x>" not in page                # names are escaped
-    assert "تأیید ورود ندارد" in page                                     # why it wasn't a signal
+    repo = Repository(c["storage"]["db_path"])                          # the same bar from spot and swap
+    for sym in ("OPENCOIN/USDT", "OPENCOIN/USDT:USDT"):
+        repo.upsert_candles("gate", sym, "1h", [[NOW - k * 3_600_000, 100, 106, 99, 105, 7] for k in range(3)])
+    repo.close()
+    out = tmp_path / "panel"
+    page = build(c, out, NOW).read_text(encoding="utf-8")
+    data = json.loads((out / "data.json").read_text(encoding="utf-8"))
+    bases = {t["base"] for t in data["trades"]}
+    assert {"WINNER", "WATCHED", "OPENCOIN"} <= bases and "BEFORE" not in bases
+    assert "NEAR<x>" not in page and "NEAR\\u003cx\\u003e" in page          # no raw HTML from coin names
+    cands = [x for s in data["systems"] for x in s["candidates"]]
+    assert any(x["base"] == "NEAR<x>" and "تأیید ورود ندارد" in x["why"] for x in cands)   # why not a signal
     assert "s2_test" in page and "bear" in page and "GUN" in page
-    assert not (tmp_path / "panel" / ".index.html.tmp").exists()
+    assert set(data["compare"]) == {"سیستم ۱", "سیستم ۲"}
+    bars = json.loads((out / data["candles"]["OPENCOIN"]).read_text())["1h"]
+    assert [b[0] for b in bars] == sorted({b[0] for b in bars}) and len(bars) == 3
+    assert (out / "assets" / "lightweight-charts.standalone.production.js").exists()
+    assert "IRANSansWeb.woff2" not in page                                # no licensed font, no 404
+    assert not list(out.glob(".*.tmp"))
 
 
 def test_backfill_fills_watch_trades_before_the_shadow_book(cfg, tmp_path):
@@ -122,9 +135,27 @@ def test_simulate_compounds_and_tracks_drawdown():
 def test_panel_with_empty_databases(cfg, tmp_path):
     c = _cfg(cfg, tmp_path)
     Repository(c["storage"]["db_path"]).close()
+    build(c, tmp_path / "panel", NOW)
+    data = json.loads((tmp_path / "panel" / "data.json").read_text(encoding="utf-8"))
+    assert data["trades"] == [] and data["accounts"]["all"]["balance"] == 100
+    assert "<section" in data["strategy_html"]
+
+
+def test_panel_uses_iransans_when_its_files_are_given(cfg, tmp_path):
+    c = _cfg(cfg, tmp_path)
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    (fonts / "IRANSansWeb.woff2").write_bytes(b"x")
+    c["panel"]["font_dir"] = str(fonts)
     page = build(c, tmp_path / "panel", NOW).read_text(encoding="utf-8")
-    assert "الان پوزیشن بازی نیست" in page
-    assert "هنوز معامله‌ی بسته‌شده‌ای نیست" in page
+    assert "url(assets/IRANSansWeb.woff2)" in page and "IRANSansWeb_Bold" not in page
+    assert (tmp_path / "panel" / "assets" / "IRANSansWeb.woff2").exists()
+
+
+def test_strategy_page_follows_the_live_config(cfg):
+    from agent.panel_strategy import strategy_html
+    page = strategy_html(cfg)
+    assert "سیستم ۱" in page and "سیستم ۲" in page and "MA25" in page
 
 
 def test_panel_does_not_create_missing_databases(cfg, tmp_path):
