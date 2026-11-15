@@ -67,6 +67,8 @@ def fill_prices(repo, client, quote: str, bases: set[str], now: int) -> int:
     n = 0
     for item in repo.get_news(since=now - 26 * HOUR, with_coins=True):
         t0 = item["ts"] or item["seen_at"]
+        if t0 < item["seen_at"] - 26 * HOUR:   # an old article found late: no reaction to measure,
+            continue                            # and exchanges refuse 5m candles that far back
         prices = item["prices"]
         changed = False
         for coin in item["coins"]:

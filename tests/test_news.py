@@ -177,6 +177,17 @@ def test_prices_filled_as_time_passes(cfg):
     assert set(repo.get_news()[0]["prices"]["HYPE"]) == {"p0", "1h", "4h", "24h"}
 
 
+def test_no_prices_for_old_articles_found_late(cfg):
+    repo = Repository()
+    repo.add_news({"id": "old", "source": "rss", "kind": "news", "title": "t", "ts": NOW - 90 * 24 * HOUR,
+                   "seen_at": NOW, "level": 2, "coins": ["HYPE"]})
+    m = Market()
+    asked = []
+    m.client.fetch_ohlcv = lambda *a, **k: asked.append(a) or ("gate", [])
+    assert fill_prices(repo, m.client, "USDT", {"HYPE"}, NOW + 2 * HOUR) == 0
+    assert asked == []                          # Gate refuses 5m candles from months ago
+
+
 def test_coin_status_lines():
     ctx = {"perp_bases": ["SOL", "ADA", "XRP"], "coins": {
         "SOL": {"signal": {"side": "long", "grade": "B", "status": "active"}},
