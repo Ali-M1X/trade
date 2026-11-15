@@ -140,7 +140,7 @@
   }
 
   // ------------------------------------------------------------------ tabs
-  var TABS = {home: home, chart: chartTab, hist: history, cmp: compare, mkt: market, news: news, strat: strategy, how: method};
+  var TABS = {home: home, chart: chartTab, hist: histTab, cmp: compare, mkt: market, news: news, strat: strategy, how: method};
   function show(tab, push) {
     if (!TABS[tab]) tab = "home";
     S.tab = tab;
@@ -148,7 +148,7 @@
     try { localStorage.setItem("tab2", tab); } catch (e) {}
     if (push !== false) {
       var h = "#" + tab + (tab === "chart" && S.sel ? "/" + encodeURIComponent(S.sel) : "");
-      if (location.hash !== h) history.replaceState(null, "", h);
+      if (location.hash !== h) window.history.replaceState(null, "", h);
     }
     render();
   }
@@ -480,7 +480,7 @@
   }
 
   // ------------------------------------------------------------------ history
-  function history() {
+  function histTab() {
     var f = S.hist;
     var names = uniqList(trades().map(function (t) { return t.system; }));
     function seg(g, opts) {
