@@ -382,7 +382,8 @@ def run_llm(cfg: dict, all_cases: list[dict], now: int, post=None, get=None) -> 
         for c in todo:
             if failures >= 2 and models and budget > 0:   # this free model is gone: the next one
                 log.warning("%s: %s failed, trying %s", k, rv["model"], models[0])
-                dead[rv["model"]] = now
+                if not LAST_ERR.get(k, "").startswith("HTTP 429"):   # busy is not withdrawn
+                    dead[rv["model"]] = now
                 rv, failures = {**rv, "model": models.pop(0)}, 0
             if budget <= 0 or failures >= 2:
                 break

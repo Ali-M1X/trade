@@ -159,6 +159,14 @@ def test_openrouter_picks_a_free_model_and_moves_on_when_one_is_gone(cfg, tmp_pa
     assert used[:2] == ["deepseek/v3:free"] * 2 and set(used[2:]) == {"qwen/qwen3:free"}
     assert st["model"]["o"] == "qwen/qwen3:free" and st["errors"]["o"] == "" and st["preds"]["c2"]["o"][1] == 55.0
     assert ai.run_llm(c, cases, NOW + 60_000, post, lambda url, timeout=None: _List())["preds"]["c0"]["o"][1] == 55.0   # retried next run
+    assert list(st["dead"]["o"]) == ["deepseek/v3:free"]
+
+    def busy(url, json=None, timeout=None, headers=None):
+        return _Resp('{"error": "rate-limited upstream"}', 429)
+    c["storage"]["db_path"] = str(tmp_path / "other" / "state.db")
+    (tmp_path / "other").mkdir()
+    st = ai.run_llm(c, cases, NOW, busy, lambda url, timeout=None: _List())
+    assert st["dead"]["o"] == {} and st["why"]["o"].startswith("HTTP 429")    # busy, not withdrawn
 
 
 def test_failure_reason_is_kept_for_the_panel(cfg, tmp_path, monkeypatch):
