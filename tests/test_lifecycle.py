@@ -172,3 +172,36 @@ def test_cooldown_after_stop(cfg):
     assert book.admit("SOL", 1, 90, T0 + 26 * 3_600_000).ok
     # without the switch, a stopped coin can be signalled again right away
     assert SignalBook(book.repo, cfg).admit("SOL", 1, 90, T0 + 2 * 3_600_000).ok
+
+
+def test_refused_signals_are_kept_once_per_coin_and_reason(cfg):
+    from types import SimpleNamespace
+    from agent.runs import SKIP_KEY, note_skip
+    repo = Repository()
+    ev = SimpleNamespace(base="SOL", side=1, grade="A", score=78.4)
+    note_skip(repo, ev, "duplicate", T0)                            # already open: not a missed signal
+    assert repo.get_state(SKIP_KEY, []) == []
+    note_skip(repo, ev, "max_active", T0)
+    note_skip(repo, ev, "max_active", T0 + 60_000)                  # refused again the next minute
+    note_skip(repo, ev, "correlated", T0 + 120_000)
+    note_skip(repo, ev, "max_active", T0 + 5 * 3_600_000)           # hours later: a new entry
+    s = repo.get_state(SKIP_KEY)
+    assert [(x["reason"], x["n"]) for x in s] == [("max_active", 2), ("correlated", 1), ("max_active", 1)]
+    assert s[0]["last"] == T0 + 60_000 and s[0]["score"] == 78.4
+
+
+def test_runners_past_tp2_from_both_systems(cfg, tmp_path):
+    from agent.runs import runners
+    c = {**cfg, "storage": {**cfg["storage"], "db_path": str(tmp_path / "s1.db")},
+         "system2": {"enabled": True, "db_path": str(tmp_path / "s2.db")}}
+    r1, r2 = Repository(tmp_path / "s1.db"), Repository(tmp_path / "s2.db")
+    for repo, names in ((r1, ["WIF", "BASED"]), (r2, ["CYS", "WIF"])):
+        book = SignalBook(repo, cfg)
+        for i, n in enumerate(names):
+            book.create(Ev(n), T0 + i, {})
+    for repo, n in ((r1, "WIF"), (r2, "CYS"), (r2, "WIF")):
+        s = [x for x in SignalBook(repo, cfg).open_signals() if x["symbol"] == n][0]
+        s["payload"]["lifecycle"]["status"] = "tp2"
+        SignalBook(repo, cfg).save(s, [], T0 + 10)
+    r2.close()
+    assert sorted(runners(c, r1)) == ["CYS", "WIF"]                # BASED is still at risk
