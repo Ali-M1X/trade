@@ -250,7 +250,7 @@ def test_funnel_end_to_end(cfg, up_frames, down_frames):
     coin = CoinData("SOL", {"id": "solana", "total_volume": 400e6, "market_cap": 1},
                     breakout, {"1d": up_frames["1d"], "4h": up_frames["4h"]},
                     {"1d": up_frames["1d"], "4h": up_frames["4h"]}, spread_pct=0.02)
-    thin = CoinData("THIN", {"id": "thin", "total_volume": 1e6}, breakout)
+    thin = CoinData("THIN", {"id": "thin", "total_volume": 0.9e6}, breakout)   # under the $1M floor
     res = run_funnel(dom, majors, [coin, thin], [], {}, cfg)
     assert res.regime.name == "alt_season"
     assert res.watchlist == {"SOL": ["EARLY_TREND"]}        # THIN fails the liquidity filter

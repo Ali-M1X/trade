@@ -278,3 +278,19 @@ svg.scatter rect{opacity:.9}svg.scatter rect:hover{opacity:1}
 @media (max-width:560px){.xhead{gap:6px 14px;padding:10px}.eqbox{height:280px}.eqv{font-size:20px}.kbig{font-size:22px}}
 .stat>.v{display:block}.stat>small{display:block;color:var(--muted);margin-top:2px}
 svg.scatter .pt{outline:none}
+.take{margin:10px 0 4px;padding:10px 12px;border-radius:10px;background:var(--chip);line-height:1.9}
+.take p{margin:0}.take a{color:var(--acc)}
+.caltab tr.day td{background:var(--chip);font-weight:700;padding-top:10px}
+.caltab tr.calrow{cursor:pointer}.caltab tr.calrow:hover td{background:rgba(127,127,127,.06)}
+.caltab tr.nextev td{background:rgba(240,185,11,.10)}
+.caltab tr.calx td{background:rgba(127,127,127,.05);line-height:1.9;font-size:13px}
+.caltab td small{font-size:11px}
+.hist tr.part td,tr.part td{background:rgba(240,185,11,.05)}
+.aibox{margin:8px 0;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.aibox .l{font-size:12px;color:var(--muted)}.aiv{display:flex;flex-wrap:wrap;gap:12px;margin:4px 0}
+.aip{display:inline-block;min-width:30px;text-align:center;padding:1px 6px;border-radius:6px;background:var(--chip)}
+.aicard{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--card, transparent)}
+.aih{display:flex;align-items:center;gap:8px}.aih .badge{margin-inline-start:auto}
+.trust{height:8px;border-radius:4px;background:var(--chip);margin:8px 0 4px;overflow:hidden}.trust i{display:block;height:100%;background:linear-gradient(90deg,var(--warn),var(--pos))}
+.aist{margin:8px 0;gap:8px}.aist>div{font-size:12px;color:var(--muted)}.aist .v{display:block;font-size:17px;color:var(--fg, inherit);text-align:right}.aist small{display:block;font-size:11px}
+.small{font-size:12px}.calib{font-size:12px;margin:6px 0}.lessons li{margin:4px 0;line-height:1.8}

@@ -25,7 +25,8 @@ TF_MS = {"5m": 300_000, "15m": 900_000, "1h": HOUR, "4h": 4 * HOUR}
 GATE = "https://api.gateio.ws/api/v4/futures/usdt"
 FNG = "https://api.alternative.me/fng/?limit=30"
 CALENDAR = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-TTL_S = {"tickers": 55, "stats": 300, "fng": 1800, "calendar": 3600}   # the panel is rebuilt every minute
+CALENDAR_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
+TTL_S = {"tickers": 55, "stats": 300, "fng": 1800, "calendar": 1800, "calendar_next": 6 * 3600}   # panel: every minute
 MAX_STATS_PER_BUILD = 8                # contract stats refreshed per build (each is one request)
 
 
@@ -223,17 +224,83 @@ def stats_summary(rows: list[dict]) -> dict | None:
     }
 
 
+# what each kind of release is, for the calendar's explanations (texts in app.js CALKIND)
+EVENT_KINDS = (
+    ("fomc", r"FOMC|Fed Chair|Powell|Monetary Policy (Statement|Report)|Fed.*Minutes|Beige Book"),
+    ("rate", r"Federal Funds Rate|Rate Decision|Cash Rate|Refinancing Rate|Policy Rate|Bank Rate|Interest Rate"),
+    ("cpi", r"\bCPI\b|Consumer Price|Inflation"),
+    ("ppi", r"\bPPI\b|Producer Price"),
+    ("pce", r"\bPCE\b|Personal Consumption|Personal (Income|Spending)"),
+    ("nfp", r"Non-Farm|\bNFP\b"),
+    ("adp", r"\bADP\b"),
+    ("claims", r"Jobless Claims|Unemployment Claims"),
+    ("unemp", r"Unemployment Rate|Claimant Count|Employment Change"),
+    ("jolts", r"JOLTS|Job Openings"),
+    ("wages", r"Earnings|Wage|Labor Cost"),
+    ("gdp", r"\bGDP\b"),
+    ("retail", r"Retail Sales"),
+    ("pmi", r"\bPMI\b|\bISM\b"),
+    ("sentiment", r"Sentiment|Confidence|Expectations"),
+    ("durable", r"Durable Goods|Factory Orders|Industrial Production"),
+    ("housing", r"Home Sales|Housing|Building Permits|Pending Home"),
+    ("trade", r"Trade Balance|Current Account"),
+    ("auction", r"Auction"),
+    ("speech", r"Speaks|Testifies|Speech"),
+)
+MAJOR_CCY = {"USD": 1, "EUR": 0, "CNY": 0, "JPY": 0, "GBP": 0}
+TOP_US = {"fomc", "rate", "cpi", "nfp", "pce", "ppi"}
+
+
+def event_kind(title: str, impact: str = "") -> str:
+    if impact == "Holiday" or "Holiday" in title:
+        return "holiday"
+    for kind, rx in EVENT_KINDS:
+        if re.search(rx, title, re.I):
+            return kind
+    return "other"
+
+
+def crypto_weight(country: str, impact: str, kind: str) -> int:
+    """0-5: how much a release usually moves crypto. US data moves it most (the dollar and
+    the Fed set the price of risk), the big US releases most of all; holidays mean thin markets."""
+    if impact == "Holiday":
+        return 1 if country == "USD" else 0
+    w = {"High": 3, "Medium": 2, "Low": 1}.get(impact, 0)
+    w += MAJOR_CCY.get(country, -1)
+    if country == "USD" and kind in TOP_US:
+        w += 1
+    return max(0, min(5, w))
+
+
 def _calendar(data) -> list[dict]:
+    """Every release of the week, all countries (2026-11-15, Ali: "a much fuller calendar")."""
     out = []
     for e in data or []:
-        if not isinstance(e, dict) or e.get("country") != "USD" or e.get("impact") not in ("High", "Medium"):
+        if not isinstance(e, dict):
             continue
         try:
             ts = int(datetime.fromisoformat(str(e["date"])).timestamp() * 1000)
         except (KeyError, ValueError):
             continue
-        out.append({"ts": ts, "title": str(e.get("title", ""))[:120], "impact": e["impact"],
-                    "forecast": str(e.get("forecast") or "")[:20], "previous": str(e.get("previous") or "")[:20]})
+        title, country = str(e.get("title", ""))[:120], str(e.get("country") or "")[:4]
+        impact = str(e.get("impact") or "")
+        kind = event_kind(title, impact)
+        out.append({"ts": ts, "title": title, "country": country, "impact": impact, "kind": kind,
+                    "w": crypto_weight(country, impact, kind),
+                    "forecast": str(e.get("forecast") or "")[:20], "previous": str(e.get("previous") or "")[:20],
+                    "actual": str(e.get("actual") or "")[:20]})
+    return sorted(out, key=lambda e: (e["ts"], -e["w"]))
+
+
+def _merge_calendar(cache: dict, now: int) -> list[dict]:
+    """This week and next, from 2 days back (past releases stay, with their actual values)."""
+    seen, out = set(), []
+    for key in ("calendar", "calendar_next"):
+        for e in (cache.get(key) or {}).get("v") or []:
+            k = (e["ts"], e["title"], e.get("country"))
+            if e["ts"] > now - 48 * HOUR and k not in seen:
+                seen.add(k)
+                out.append(e)
     return sorted(out, key=lambda e: e["ts"])
 
 
@@ -277,10 +344,13 @@ def market_data(cfg: dict, bases: list[str], now: int, net: _Net | None = None) 
         if rows:
             cache["fng"] = {"t": t, "v": [[int(_f(r.get("timestamp")) or 0) * 1000, int(_f(r.get("value")) or 0),
                                            str(r.get("value_classification", ""))] for r in rows][::-1]}
-    if not fresh("calendar", TTL_S["calendar"]):
-        data = net.json(CALENDAR)
-        if isinstance(data, list):
-            cache["calendar"] = {"t": t, "v": _calendar(data)}
+    for key, url in (("calendar", CALENDAR), ("calendar_next", CALENDAR_NEXT)):
+        if not fresh(key, TTL_S[key]) and not net.down:
+            data = net.json(url)
+            if isinstance(data, list):
+                cache[key] = {"t": t, "v": _calendar(data)}
+            else:                                   # the site allows few requests: retry in 10 min
+                cache[key] = {"t": t - TTL_S[key] + 600, "v": (cache.get(key) or {}).get("v") or []}
     try:
         tmp = path.with_name(f".{path.name}.tmp")
         tmp.write_text(json.dumps(cache), encoding="utf-8")
@@ -297,7 +367,7 @@ def market_data(cfg: dict, bases: list[str], now: int, net: _Net | None = None) 
         if d:
             deriv[base] = d
     return {"deriv": deriv, "fng": (cache.get("fng") or {}).get("v") or [],
-            "calendar": [e for e in (cache.get("calendar") or {}).get("v") or [] if e["ts"] > now - 12 * HOUR],
+            "calendar": _merge_calendar(cache, now),
             "fetched": {k: int(cache[k]["t"] * 1000) for k in ("tickers", "fng", "calendar") if k in cache}}
 
 

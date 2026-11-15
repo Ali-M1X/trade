@@ -135,7 +135,7 @@ def test_first_run_stores_without_alerting_then_alerts_new_media(cfg):
     t = NOW - 10 * 60_000
     res, n = run(cfg, repo, NOW, Session(t))
     assert res["new"] == 3 and res["alerts"] == 0 and not n.sent      # seeding run
-    assert len(res["failed"]) == len(cfg["news"]["feeds"]) - 1          # only cointelegraph answers
+    assert len(res["failed"]) == len(cfg["news"]["feeds"]) - 1 + len(cfg["news"]["exchanges"])   # only cointelegraph answers
     # a new headline later is alerted; the exchange one is left to the worker
     repo2 = Repository()
     repo2.set_state("news_seeded", 1)
@@ -259,3 +259,18 @@ def test_same_news_from_another_site_is_not_alerted_twice(cfg):
                     "coins": ["HYPE"], "alerted": True})
     res, n = run(cfg, repo2, now, Session(NOW - 10 * 60_000))
     assert res["duplicates"] == 0 and any("HYPE" in m.split("\n")[0] for m in n.sent)
+
+
+def test_other_exchanges_are_parsed_by_their_fields():
+    from agent.news.sources import parse_exchange
+    upbit = {"success": True, "data": {"notices": [{"id": 5, "title": "[거래] 레이어제로(ZRO) KRW 마켓 디지털 자산 추가",
+                                                   "listed_at": "2026-11-15T20:00:00+09:00"}]}}
+    [u] = parse_exchange(upbit, "upbit", "https://upbit.com/service_center/notice?id={id}")
+    assert u["id"] == "upbit:5" and u["url"].endswith("id=5") and u["ts"] == 1_794_740_400_000
+    kucoin = {"code": "200000", "data": {"items": [{"annId": 9, "annTitle": "KuCoin Will List Monad (MON)",
+                                                    "cTime": 1794744000000, "annUrl": "https://kucoin.com/a"}]}}
+    [k] = parse_exchange(kucoin, "kucoin")
+    assert k["id"] == "kucoin:9" and k["ts"] == 1794744000000 and k["kind"] == "exchange"
+    from agent.news.classify import classify, exchange_coins
+    assert classify(u["title"], "upbit").rule == "upbit_listing" and exchange_coins(u["title"]) == ["ZRO"]
+    assert classify(k["title"], "kucoin").level == 1

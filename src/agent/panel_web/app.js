@@ -140,7 +140,7 @@
   }
 
   // ------------------------------------------------------------------ tabs
-  var TABS = {home: home, chart: chartTab, hist: histTab, perf: perf, cmp: compare, mkt: market, sys: health, news: news, strat: strategy, how: method};
+  var TABS = {home: home, chart: chartTab, hist: histTab, perf: perf, cmp: compare, mkt: market, sys: health, news: news, cal: calendarTab, ai: aiTab, strat: strategy, how: method};
   function show(tab, push) {
     if (!TABS[tab]) tab = "home";
     S.tab = tab;
@@ -166,6 +166,7 @@
   function openTrades() { return trades().filter(function (t) { return t.open && t.filled_at; }); }
   function pendingTrades() { return trades().filter(function (t) { return t.status === "pending"; }); }
   function closedTrades() { return trades().filter(function (t) { return !t.open; }); }
+  function partlyClosed() { return trades().filter(function (t) { return t.open && t.filled_at && t.open_frac != null && t.open_frac < 0.999; }); }
   function openTrade(id) { S.sel = id; S.tf = null; show("chart"); window.scrollTo(0, 0); }
   app.addEventListener("click", function (e) {
     var el = e.target.closest("[data-open]");
@@ -478,7 +479,7 @@
       '<div class="chartbox tall" id="tv-chart"><div class="empty">در حال بارگذاری نمودار…</div></div>' +
       '<div class="legend"><span><i style="background:' + cssv("--acc") + '"></i>ورود</span><span><i style="background:' + cssv("--neg") + '"></i>استاپ</span>' +
       '<span><i style="background:' + cssv("--pos") + '"></i>تارگت‌ها</span><small>فلش‌ها: زمان سیگنال، ورود و خروج‌ها · کندل آخر با قیمت زنده جلو می‌رود</small></div>';
-    info.innerHTML = levels(t, p) + markBox(t) + '<div class="grid g2 tools"><div>' + derivBox(t.base, t.side) + excBox(t) + "</div><div>" + calcBox(t) + "</div></div>" + detail(t);
+    info.innerHTML = levels(t, p) + markBox(t) + aiBox(t) + '<div class="grid g2 tools"><div>' + derivBox(t.base, t.side) + excBox(t) + "</div><div>" + calcBox(t) + "</div></div>" + detail(t);
     wireCalc(t); wireMarks(t); decorateTips(box); decorateTips(info);
     document.getElementById("ind").onclick = function (e) {
       var b = e.target.closest("button"); if (!b) return;
@@ -736,7 +737,7 @@
       seg("k", [["", "همه"], ["ok", "تأییدشده"], ["w", "Watch"]]) +
       seg("s", [["", "همه‌ی سیستم‌ها"]].concat(names.map(function (n) { return [n, n]; }))) +
       seg("side", [["", "هر دو جهت"], ["1", "لانگ"], ["-1", "شورت"]]) +
-      seg("res", [["", "همه‌ی نتایج"], ["win", "سود"], ["loss", "ضرر"], ["none", "بدون ورود"]]) +
+      seg("res", [["", "همه‌ی نتایج"], ["win", "سود"], ["loss", "ضرر"], ["part", "بخشی بسته"], ["none", "بدون ورود"]]) +
       '<input class="search" id="q" placeholder="جستجوی کوین…" value="' + esc(f.q) + '"></div><div id="hsum" class="muted"></div><div class="scroll" id="htab"></div></section>';
     app.querySelectorAll(".seg").forEach(function (sg) {
       sg.addEventListener("click", function (e) {
@@ -761,7 +762,10 @@
   }
   function histTable() {
     var f = S.hist;
-    var rows = closedTrades().filter(function (t) {
+    // 2026-11-15 (Ali: "closed positions missing from history"): a trade past TP1/TP2 has most of
+    // it closed with profit and only the rest still trailing, so it is listed too, as partly closed
+    var rows = closedTrades().concat(partlyClosed()).filter(function (t) {
+      if (f.res === "part" && !t.open) return false;
       if (f.k && (f.k === "ok") !== t.approved) return false;
       if (f.s && t.system !== f.s) return false;
       if (f.side && String(t.side) !== f.side) return false;
@@ -780,7 +784,8 @@
     var wins = filled.filter(function (t) { return t.net_r > 0; }).length;
     var sumR = filled.reduce(function (s, t) { return s + (t.net_r || 0); }, 0);
     var sumP = rows.reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0);
-    document.getElementById("hsum").innerHTML = plural(rows.length, "معامله") + " · برد " + (filled.length ? fa(Math.round(wins / filled.length * 100)) + "٪" : "—") +
+    var nPart = rows.filter(function (t) { return t.open; }).length;
+    document.getElementById("hsum").innerHTML = plural(rows.length - nPart, "معامله‌ی کامل بسته") + (nPart ? " + " + fa(nPart) + " بخشی بسته" : "") + " · برد " + (filled.length ? fa(Math.round(wins / filled.length * 100)) + "٪" : "—") +
       " · مجموع " + R(sumR) + " · " + usd(sumP) + ' <small>(روی هر ردیف کلیک کنید تا روی نمودار ببینید)</small>';
     if (!rows.length) { document.getElementById("htab").innerHTML = '<div class="empty">هنوز معامله‌ی بسته‌شده‌ای نیست.</div>'; return; }
     var head = "<tr>" + HCOLS.map(function (c) {
@@ -788,11 +793,15 @@
     }).join("") + "</tr>";
     var body = rows.map(function (t) {
       var hold = t.closed_at && t.filled_at ? dur((t.closed_at - t.filled_at) / 3600000) : "—";
-      return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + esc(jfmt(t.created)) + "</td><td>" + esc(jfmt(t.closed_at)) + "</td><td>" + kind(t) +
+      var part = t.open, left = Math.round((t.open_frac == null ? 1 : t.open_frac) * 100);
+      return '<tr class="click' + (part ? " part" : "") + '" data-open="' + esc(t.id) + '"><td>' + esc(jfmt(t.created)) + "</td><td>" +
+        (part ? '<span class="badge watch">هنوز ' + fa(left) + "٪ باز</span>" : esc(jfmt(t.closed_at))) + "</td><td>" + kind(t) +
         "</td><td>" + esc(sysShort(t.system)) + "</td><td><b>" + esc(t.base) + "</b></td><td>" + side(t.side) + "</td><td>" + esc(t.grade) +
-        ' <small class="ltr">' + (t.score || 0).toFixed(0) + "</small></td><td>" + esc(t.status_fa) + "</td><td>" + hold + "</td><td>" +
-        R(t.filled_at ? t.gross_r : null) + "</td><td>" + R(t.filled_at ? t.net_r : null) + "</td><td>" + usd(t.pnl_usd) + "</td><td>" +
-        usd(t.own_pnl_usd) + "</td><td>" + usd(t.own_balance_after, false) + "</td></tr>";
+        ' <small class="ltr">' + (t.score || 0).toFixed(0) + "</small></td><td>" + (part ? "بخشی بسته · " : "") + esc(t.status_fa) + "</td><td>" + hold + "</td><td>" +
+        R(t.filled_at ? t.gross_r : null) + "</td><td>" + R(t.filled_at ? t.net_r : null) + "</td><td>" +
+        usd(part ? (t.risk_usd != null ? t.risk_usd * t.net_r : null) : t.pnl_usd) + "</td><td>" +
+        usd(part ? (t.own_risk_usd != null ? t.own_risk_usd * t.net_r : null) : t.own_pnl_usd) + "</td><td>" +
+        (part ? '<small class="muted">سود قطعی تا الان</small>' : usd(t.own_balance_after, false)) + "</td></tr>";
     }).join("");
     var el = document.getElementById("htab");
     el.innerHTML = "<table><thead>" + head + "</thead><tbody>" + body + "</tbody></table>";
@@ -1087,6 +1096,30 @@
     return '<span class="score ' + g + '" title="Watch از ۵۵ · B از ۶۵ · A از ۷۵"><i style="width:' + Math.min(100, v || 0) + '%"></i>' +
       '<b style="right:55%"></b><b style="right:65%"></b><b style="right:75%"></b></span>';
   }
+  // what the regime and the majors say to do now, in the market's own direction (2026-11-15, Ali:
+  // "when everything is bearish, suggest shorts; why talk about longs?")
+  function marketTake(s) {
+    var r = s.regime || {}, m = s.majors || {};
+    var trend = r.bias === "short" ? -1 : r.bias === "long" ? 1 : (r.trend || 0);
+    var maj = (m.btc || 0) + (m.eth || 0), dir = trend || (maj <= -4 ? -1 : maj >= 4 ? 1 : 0);
+    var side = function (d) { return d > 0 ? "لانگ" : "شورت"; };
+    var best = (s.candidates || []).filter(function (c) { return dir && c.side === dir; }).slice(0, 4).map(function (c) {
+      return '<a href="#chart/' + esc(c.base) + '">' + esc(c.base) + "</a> <small>" + fa(Math.round(c.score || 0)) + "</small>";
+    });
+    var lines = [];
+    if (!dir) lines.push("جهت بازار روشن نیست: هر دو طرف ممکن است، ولی فقط ستاپ‌های قوی (A) ارزش ورود دارند.");
+    else {
+      var cls = dir > 0 ? "pos" : "neg";
+      lines.push('<b class="' + cls + '">بازار ' + (dir > 0 ? "صعودی" : "نزولی") + " است: " + side(dir) + " در جهت روند است</b> و با ریسک کامل گرفته می‌شود.");
+      if (r.bias === "both") lines.push(side(-dir) + " (خلاف روند) هم مجاز است، ولی با " + fa(Math.round((r.counter_risk || 0.5) * 100)) + "٪ ریسک.");
+      else if (r.bias === "short" || r.bias === "long") lines.push("این سیستم الان فقط " + side(dir) + " می‌گیرد.");
+      if ((dir < 0 && maj < 0) || (dir > 0 && maj > 0)) lines.push("BTC و ETH هم " + (dir > 0 ? "قوی" : "ضعیف") + " هستند و جهت را تأیید می‌کنند.");
+      else if (maj) lines.push('<span class="warn">BTC و ETH با این جهت هم‌سو نیستند؛ احتیاط.</span>');
+      lines.push(best.length ? "بهترین کاندیدهای " + side(dir) + ": " + best.join(" · ") : "فعلاً کاندیدای " + side(dir) + " نزدیک به سیگنال نیست.");
+    }
+    if (m.btc_weak && dir > 0) lines.push('<span class="warn">BTC ضعیف است؛ لانگ آلت‌ها امتیاز ۸۰ به بالا لازم دارند.</span>');
+    return '<div class="take">' + lines.map(function (x) { return "<p>" + x + "</p>"; }).join("") + "</div>";
+  }
   function market() {
     var sys = D.systems || [];
     var cards = sys.map(function (s) {
@@ -1098,7 +1131,7 @@
         (r.usdt_d != null ? '<div style="margin-top:8px" class="grid g3"><div class="stat"><span class="l">USDT.D</span>' + dir(-r.usdt_d) + '<small> (برعکس)</small></div><div class="stat"><span class="l">BTC.D</span>' + dir(r.btc_d) +
           '</div><div class="stat"><span class="l">TOTAL2</span>' + dir(r.total2) + "</div></div>" : "") +
         '<h3>امتیاز بازارهای اصلی</h3>' + gauge("BTC", m.btc, 10) + gauge("ETH", m.eth, 10) + gauge("ETH/BTC", m.ethbtc, 10) +
-        (m.btc_weak ? '<p class="warn">BTC ضعیف است؛ لانگ آلت‌ها امتیاز بالاتر لازم دارد.</p>' : "") +
+        marketTake(s) +
         '<p class="muted">آخرین بررسی ' + esc(ago(s.evaluated_at)) + " · قیف " + esc(ago(s.funnel_ts ? Number(s.funnel_ts) : null)) + "</p></section>";
     }).join("");
     var dom = D.dominance || [];
@@ -1565,7 +1598,7 @@
   }
   function upcomingEvents(hours) {
     var now = Date.now();
-    return ((MK.calendar) || []).filter(function (e) { return e.impact === "High" && e.ts > now - 30 * 60000 && e.ts < now + hours * 3600000; });
+    return ((MK.calendar) || []).filter(function (e) { return (e.w == null ? e.impact === "High" : e.w >= 4) && e.ts > now - 30 * 60000 && e.ts < now + hours * 3600000; });
   }
   function eventBanner() {
     var ev = upcomingEvents(2);
@@ -1576,7 +1609,9 @@
   }
   function untilTxt(ms) {
     var m = Math.round((ms - Date.now()) / 60000);
-    return m < 60 ? fa(m) + " دقیقه‌ی دیگر" : fa(Math.round(m / 6) / 10) + " ساعت دیگر";
+    if (m >= 48 * 60) return fa(Math.round(m / 1440)) + " روز دیگر";
+    if (m >= 60) return fa(Math.floor(m / 60)) + " ساعت" + (m % 60 ? " و " + fa(m % 60) + " دقیقه" : "") + "ی دیگر";
+    return fa(Math.max(m, 0)) + " دقیقه‌ی دیگر";
   }
 
   // ------------------------------------------------------------------ performance tab
@@ -1794,17 +1829,228 @@
     var pts = vals.map(function (v, i) { return (i / (vals.length - 1) * W).toFixed(1) + "," + (H - (v - lo) / (hi - lo) * H).toFixed(1); }).join(" ");
     return '<svg class="spark" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none"><polyline points="' + pts + '"/></svg>';
   }
-  function calendarSection() {
-    var cal = MK.calendar || [];
+  // ------------------------------------------------------------------ AI reviewers (2026-11-15, Ali: several AIs that score
+  // every signal, learn from every closed trade, and are graded themselves: how far can we rely on them?)
+  var AIV = {few: ["داده کم", "gray", "هنوز کمتر از ۲۰ معامله‌ی نتیجه‌دار نمره داده؛ هیچ قضاوتی درباره‌اش ممکن نیست."],
+    good: ["بهتر از حدس ساده", "ok", "نمره‌هایش به‌طور معنادار بهتر از «نرخ برد تا امروز» نتیجه را پیش‌بینی کرده است."],
+    maybe: ["شاید بهتر", "watch", "بهتر از حدس ساده بوده، ولی هنوز آن‌قدر معامله نیست که مطمئن باشیم شانس نبوده."],
+    same: ["هم‌اندازه‌ی حدس ساده", "gray", "فعلاً چیزی بیشتر از نرخ برد کلی نمی‌داند؛ به نمره‌اش تکیه نکنید."],
+    bad: ["بدتر از حدس ساده", "short", "نمره‌هایش از حدس ساده بدتر بوده؛ به آن تکیه نکنید."]};
+  var AISTAT = {pending: "در انتظار ورود", active: "باز", tp1: "TP1 خورده", tp2: "TP2 خورده"};
+  function aiData() { return D.ai || {}; }
+  function aiRow(id) {
+    var a = aiData();
+    return (a.open || []).concat(a.recent || []).filter(function (r) { return r.id === id; })[0] || null;
+  }
+  function aiName(k) {
+    var r = (aiData().reviewers || []).filter(function (x) { return x.key === k; })[0];
+    return r ? r.name : k;
+  }
+  function aiPill(p) {
+    if (p == null) return '<span class="muted">—</span>';
+    var c = p >= 60 ? "pos" : p <= 40 ? "neg" : "warn";
+    return '<b class="aip ' + c + '">' + fa(Math.round(p)) + "</b>";
+  }
+  function aiBox(t) {
+    var r = t && aiRow(t.id);
+    if (!r || !r.scores) return "";
+    var ks = Object.keys(r.scores).filter(function (k) { return k !== "base"; });
+    return '<div class="aibox"><div class="l">نمره‌ی داوران هوش مصنوعی <small>(شانس سود، ۰ تا ۱۰۰)</small></div><div class="aiv">' +
+      '<span>جمع‌بندی ' + aiPill(r.consensus) + "</span>" + ks.map(function (k) {
+        return '<span title="' + esc(r.why && r.why[k] || "") + '">' + esc(aiName(k)) + " " + aiPill(r.scores[k]) + "</span>";
+      }).join("") + '<span class="muted">مبنا ' + fa(Math.round(r.scores.base || 0)) + '</span></div><small class="muted">فقط مشورتی است؛ <a href="#ai">اعتبار هر داور ←</a></small></div>';
+  }
+  function aiTab() {
+    var a = aiData(), revs = (a.reviewers || []).filter(function (r) { return r.key !== "base"; });
+    if (!a.reviewers) { app.innerHTML = '<section><h2>داوران هوش مصنوعی</h2><p class="muted">هنوز داده‌ای نیست.</p></section>'; return; }
+    var base = (a.reviewers || []).filter(function (r) { return r.key === "base"; })[0] || {};
+    function num(x, d) { return x == null ? "—" : '<span class="ltr">' + Number(x).toFixed(d == null ? 2 : d) + "</span>"; }
+    var cards = revs.map(function (r) {
+      var v = AIV[r.verdict] || AIV.few, L = r.live || {};
+      var status = r.kind === "مدل زبانی" ? (r.error === "no key" ? '<span class="warn">کلید API ندارد</span>' : r.error ? '<span class="neg">' + esc(r.error) + "</span>" :
+        r.ran ? "آخرین اجرا " + esc(ago(r.ran)) : '<span class="muted">هنوز اجرا نشده</span>') : "هر دقیقه، روی سرور";
+      return '<div class="aicard"><div class="aih"><b>' + esc(r.name) + '</b> <small class="muted">' + esc(r.kind) + '</small><span class="badge ' + v[1] + '">' + v[0] + "</span></div>" +
+        '<div class="trust" title="اعتبار: چقدر بهتر از حدس ساده، چقدر مطمئن و با چند معامله"><i style="width:' + (r.trust || 0) + '%"></i></div>' +
+        '<div class="muted small">اعتبار ' + fa(r.trust || 0) + " از ۱۰۰ · " + esc(v[2]) + "</div>" +
+        '<div class="grid g2 aist">' +
+        "<div>معامله‌ی نتیجه‌دار<span class=\"v\">" + fa(r.n || 0) + "</span><small>زنده: " + fa(L.n || 0) + " · کل نمره‌ها " + fa(r.scored || 0) + "</small></div>" +
+        "<div>پیش‌بینی درست<span class=\"v\">" + (r.hit == null ? "—" : fa(Math.round(r.hit)) + "٪") + "</span><small>نمره‌ی ۵۰+ و سود، یا زیر ۵۰ و ضرر</small></div>" +
+        "<div>خطای Brier<span class=\"v\">" + num(r.brier, 3) + "</span><small>مبنا " + num(r.brier_base, 3) + " (کمتر بهتر)</small></div>" +
+        "<div>جداسازی برد از باخت (AUC)<span class=\"v\">" + num(r.auc, 2) + "</span><small>۰٫۵ یعنی شانسی، ۱ یعنی کامل</small></div>" +
+        "<div>وقتی نمره‌ی ۶۰+ داد<span class=\"v\">" + (r.hi_r == null ? "—" : R(r.hi_r)) + "</span><small>میانگین نتیجه در " + fa(r.hi_n || 0) + " معامله</small></div>" +
+        "<div>وقتی نمره‌ی ۴۰− داد<span class=\"v\">" + (r.lo_r == null ? "—" : R(r.lo_r)) + "</span><small>میانگین نتیجه در " + fa(r.lo_n || 0) + " معامله</small></div>" +
+        "</div>" + (r.calib && r.calib.length ? '<table class="calib"><thead><tr><th>نمره</th><th>تعداد</th><th>میانگین نمره</th><th>برد واقعی</th></tr></thead><tbody>' +
+          r.calib.map(function (c) { return "<tr><td>" + fa(Math.round(c[0] * 100)) + "–" + fa(Math.round(c[1] * 100)) + "</td><td>" + fa(c[2]) + "</td><td>" + fa(Math.round(c[3])) + "٪</td><td>" + fa(Math.round(c[4])) + "٪</td></tr>"; }).join("") +
+          "</tbody></table>" : "") + '<div class="muted small">' + status + "</div></div>";
+    }).join("");
+    var keys = revs.map(function (r) { return r.key; });
+    var head = "<tr><th>سیگنال</th><th>کوین</th><th>سیستم</th><th>وضعیت</th><th>جمع‌بندی</th>" + keys.map(function (k) { return "<th>" + esc(aiName(k)) + "</th>"; }).join("") + "<th>مبنا</th></tr>";
+    function line(r, res) {
+      return '<tr class="click" data-open="' + esc(r.id) + '"><td>' + esc(jfmt(r.created)) + "</td><td><b>" + esc(r.base) + "</b> " + side(r.side) + "</td><td>" + esc(sysShort(r.system)) + " " +
+        (r.approved ? '<span class="badge ok">تأیید</span>' : '<span class="badge watch">Watch</span>') + "</td><td>" +
+        (res ? R(r.r) : esc(AISTAT[r.status] || r.status)) + "</td><td>" + aiPill(r.consensus) + "</td>" +
+        keys.map(function (k) {
+          var p = r.scores[k];
+          var right = res && p != null ? ((p >= 50) === r.win ? ' <small class="pos">✓</small>' : ' <small class="neg">✗</small>') : "";
+          return '<td title="' + esc(r.why && r.why[k] || "") + '">' + aiPill(p) + right + "</td>";
+        }).join("") + "<td>" + fa(Math.round(r.scores.base || 0)) + "</td></tr>";
+    }
+    var open = (a.open || []), rec = (a.recent || []);
+    var lessons = Object.keys(a.lessons || {}).map(function (k) {
+      var l = a.lessons[k] || [];
+      if (!l.length) return "";
+      return "<div><h3>درس‌های " + esc(aiName(k)) + "</h3><ul class=\"lessons\">" + l.map(function (x) { return "<li>" + esc(x[2]) + ' <small class="muted">' + esc(ago(x[0])) + "</small></li>"; }).join("") + "</ul></div>";
+    }).join("");
+    app.innerHTML = '<section><h2>داوران هوش مصنوعی <small>مشورتی؛ چیزی را در معامله‌ها تغییر نمی‌دهد</small></h2>' +
+      '<p class="muted">هر داور به هر سیگنال (تأییدشده و Watch) نمره‌ی ۰ تا ۱۰۰ می‌دهد: شانس اینکه با سود بسته شود. نمره همان لحظه ثبت و قفل می‌شود و بعد از بسته شدن معامله با نتیجه مقایسه می‌شود. ' +
+      "معیار مقایسه «مبنا» است: همیشه نرخ برد تا امروز را می‌گوید (الان " + (a.base_rate == null ? "—" : fa(Math.round(a.base_rate)) + "٪") + " از " + fa(a.n_done || 0) + " معامله). " +
+      "داوری ارزش دارد که از مبنا بهتر باشد. نمره‌ی معامله‌هایی که قبل از شروع داوران باز یا بسته شده بودند «گذشته‌نگر» است: فقط با معامله‌هایی که پیش از باز شدن آن بسته شده بودند. " +
+      "معامله‌ای که از TP1 رد شده (استاپ روی ورود و سود گرفته شده) برد حساب می‌شود.</p>" +
+      '<div class="grid g3">' + cards + "</div></section>" +
+      '<section><h2>نمره‌ی سیگنال‌های باز و در انتظار</h2>' + (open.length ? '<div class="scroll"><table class="aitab"><thead>' + head + "</thead><tbody>" + open.map(function (r) { return line(r, false); }).join("") + "</tbody></table></div>" : '<p class="muted">الان سیگنال بازی بدون نتیجه نیست.</p>') + "</section>" +
+      '<section><h2>معامله‌های نتیجه‌دار اخیر <small>✓ پیش‌بینی درست · ✗ غلط</small></h2>' + (rec.length ? '<div class="scroll"><table class="aitab"><thead>' + head.replace("<th>وضعیت</th>", "<th>نتیجه</th>") + "</thead><tbody>" + rec.map(function (r) { return line(r, true); }).join("") + "</tbody></table></div>" : "") + "</section>" +
+      (lessons ? '<section><h2>آنچه مدل‌های زبانی از معامله‌ها یاد گرفته‌اند</h2><div class="grid g2">' + lessons + "</div></section>" : "") +
+      '<section><h2>داوران چطور کار می‌کنند</h2><ul class="muted">' +
+      "<li><b>همسایه‌ها:</b> ۷ معامله‌ی بسته‌ی شبیه‌تر (امتیاز، رده، بخش‌های امتیاز، رژیم، قدرت BTC/ETH، فاندینگ، فاصله‌ی استاپ...) را پیدا می‌کند و نرخ بردشان را می‌گوید.</li>" +
+      "<li><b>رگرسیون لجستیک:</b> از همه‌ی معامله‌های بسته یاد می‌گیرد کدام ویژگی‌ها با سود همراه بوده‌اند؛ با هر معامله‌ی تازه دوباره آموزش می‌بیند.</li>" +
+      "<li><b>Gemini و GPT:</b> سیگنال، معامله‌های مشابه گذشته و درس‌هایی را که خودشان بعد از هر معامله نوشته‌اند می‌خوانند و نمره می‌دهند. روی GitHub اجرا می‌شوند (این سرویس‌ها سرور ایران را نمی‌پذیرند)، هر ۱۵ دقیقه.</li>" +
+      "<li><b>اعتبار:</b> ترکیبی از اینکه چقدر از مبنا بهتر است (امتیاز مهارت Brier)، چقدر مطمئنیم شانس نبوده، و با چند معامله سنجیده شده. با کمتر از ۶۰ معامله هیچ داوری اعتبار کامل نمی‌گیرد.</li></ul></section>";
+  }
+
+  // ------------------------------------------------------------------ economic calendar (2026-11-15, Ali: "much fuller, so I can decide from it")
+  var CCY = {USD: ["🇺🇸", "آمریکا"], EUR: ["🇪🇺", "اروپا"], GBP: ["🇬🇧", "انگلیس"], JPY: ["🇯🇵", "ژاپن"], CNY: ["🇨🇳", "چین"],
+    CAD: ["🇨🇦", "کانادا"], AUD: ["🇦🇺", "استرالیا"], NZD: ["🇳🇿", "نیوزیلند"], CHF: ["🇨🇭", "سوئیس"], ALL: ["🌐", "همه"]};
+  // [label, what it is, how it usually moves crypto, sign: +1 = above forecast is good for crypto, -1 = bad, 0 = depends]
+  var CALKIND = {
+    fomc: ["فدرال رزرو", "جلسه، صورت‌جلسه یا سخنرانی رئیس فدرال رزرو. لحن آن مسیر نرخ بهره را نشان می‌دهد.", "لحن سخت‌گیر (هاوکیش) معمولاً کریپتو را پایین می‌برد و لحن نرم (داویش) بالا. نوسان شدید در دقایق اول عادی است.", 0],
+    rate: ["نرخ بهره", "تصمیم بانک مرکزی درباره‌ی نرخ بهره.", "نرخ بالاتر از انتظار = پول گران‌تر = معمولاً منفی برای کریپتو؛ کاهش بیش از انتظار مثبت.", -1],
+    cpi: ["تورم مصرف‌کننده (CPI)", "تغییر قیمت سبد مصرف خانوار؛ مهم‌ترین عدد تورم برای فدرال رزرو.", "بالاتر از پیش‌بینی = احتمال سخت‌گیری بیشتر = معمولاً ریزش کریپتو. پایین‌تر = معمولاً رشد.", -1],
+    ppi: ["تورم تولیدکننده (PPI)", "تغییر قیمت در سطح تولید؛ نشانه‌ی زودهنگام تورم مصرف‌کننده.", "بالاتر از پیش‌بینی معمولاً منفی، پایین‌تر مثبت؛ اثرش از CPI کمتر است.", -1],
+    pce: ["تورم PCE", "شاخص تورم مورد علاقه‌ی فدرال رزرو (و درآمد/هزینه‌ی خانوار).", "بالاتر از پیش‌بینی معمولاً منفی برای کریپتو.", -1],
+    nfp: ["اشتغال غیرکشاورزی (NFP)", "تعداد شغل‌های جدید آمریکا در ماه؛ بزرگ‌ترین گزارش بازار کار.", "عدد خیلی قوی = فشار کمتر برای کاهش نرخ = معمولاً منفی کوتاه‌مدت. عدد خیلی ضعیف = امید کاهش نرخ، ولی ترس رکود.", -1],
+    adp: ["اشتغال ADP", "برآورد بخش خصوصی از اشتغال، دو روز پیش از NFP.", "مثل NFP ولی کم‌اثرتر.", -1],
+    claims: ["مدعیان بیکاری", "تعداد درخواست‌های هفتگی بیمه‌ی بیکاری.", "عدد بالاتر = بازار کار ضعیف‌تر = امید کاهش نرخ؛ اثرش معمولاً کم است.", 1],
+    unemp: ["نرخ بیکاری", "درصد بیکاران از نیروی کار.", "بیکاری بالاتر از انتظار معمولاً امید کاهش نرخ را بالا می‌برد (مثبت ملایم)، ولی اگر خیلی بد باشد ترس رکود.", 1],
+    jolts: ["فرصت‌های شغلی (JOLTS)", "تعداد شغل‌های خالی.", "عدد قوی‌تر کمی منفی، ضعیف‌تر کمی مثبت.", -1],
+    wages: ["دستمزد", "رشد دستمزدها؛ منبع تورم آینده.", "رشد بیشتر از انتظار معمولاً منفی.", -1],
+    gdp: ["تولید ناخالص (GDP)", "رشد اقتصاد.", "بستگی دارد: رشد قوی ریسک‌پذیری را بالا می‌برد ولی امید کاهش نرخ را کم می‌کند.", 0],
+    retail: ["خرده‌فروشی", "هزینه‌ی مصرف‌کننده‌ها.", "عدد خیلی قوی گاهی منفی (تورم)، خیلی ضعیف نشانه‌ی کندی اقتصاد.", 0],
+    pmi: ["شاخص مدیران خرید (PMI/ISM)", "حال صنعت و خدمات؛ بالای ۵۰ یعنی رشد.", "اثر معمولاً متوسط و دوطرفه است.", 0],
+    sentiment: ["اعتماد/انتظارات", "نظرسنجی از مصرف‌کننده‌ها یا کسب‌وکارها (و انتظار تورمی).", "اثر معمولاً کم؛ انتظار تورم بالاتر منفی.", 0],
+    durable: ["کالاهای بادوام/تولید", "سفارش‌ها و تولید صنعتی.", "اثر کم.", 0],
+    housing: ["مسکن", "فروش خانه و ساخت‌وساز.", "اثر کم.", 0],
+    trade: ["تراز تجاری", "صادرات منهای واردات.", "اثر کم.", 0],
+    auction: ["حراج اوراق", "فروش اوراق قرضه‌ی دولت.", "تقاضای ضعیف = بازده بالاتر = گاهی منفی برای کریپتو.", 0],
+    speech: ["سخنرانی", "سخنرانی مقام‌های بانک مرکزی.", "اگر از مسیر نرخ بهره چیز تازه‌ای بگویند نوسان می‌دهد.", 0],
+    holiday: ["تعطیلی", "بازارهای آن کشور بسته‌اند.", "حجم معاملات کم می‌شود؛ حرکت‌های تند و فیک بیشتر است.", 0],
+    other: ["سایر", "", "", 0]
+  };
+  S.cal = {r: "all", c: "major", i: "hm", open: {}};
+  function numOf(x) {
+    var m = /^(-?[\d.]+)\s*([KMBT%])?/i.exec(String(x || "").replace(/,/g, "").trim());
+    if (!m) return null;
+    var k = {K: 1e3, M: 1e6, B: 1e9, T: 1e12}[(m[2] || "").toUpperCase()] || 1;
+    return Number(m[1]) * k;
+  }
+  function surprise(e) {                    // the actual against the forecast, read for crypto
+    var a = numOf(e.actual), f = numOf(e.forecast), k = CALKIND[e.kind] || CALKIND.other;
+    if (a == null || f == null) return "";
+    if (a === f) return '<small class="muted">مطابق انتظار</small>';
+    var good = k[3] ? (a > f ? k[3] : -k[3]) > 0 : null;
+    return '<small class="' + (good == null ? "muted" : good ? "pos" : "neg") + '">' + (a > f ? "بالاتر" : "پایین‌تر") + " از پیش‌بینی" +
+      (good == null ? "" : good ? " · معمولاً مثبت برای کریپتو" : " · معمولاً منفی برای کریپتو") + "</small>";
+  }
+  function wStars(w) { return '<span class="stars" title="اثر معمول روی کریپتو">' + "★★★★★".slice(0, w) + '<i>' + "★★★★★".slice(w) + "</i></span>"; }
+  function calFilter(all) {
+    var now = Date.now(), c = S.cal;
+    var dayEnd = function (ms) { var d = new Date(ms + 3.5 * 3600000); d.setUTCHours(24, 0, 0, 0); return d.getTime() - 3.5 * 3600000; };
+    return all.filter(function (e) {
+      if (c.c === "usd" && e.country !== "USD") return false;
+      if (c.c === "major" && !{USD: 1, EUR: 1, GBP: 1, JPY: 1, CNY: 1}[e.country]) return false;
+      if (c.i === "h" && e.impact !== "High") return false;
+      if (c.i === "hm" && e.impact !== "High" && e.impact !== "Medium" && e.impact !== "Holiday") return false;
+      if (c.r === "today") return e.ts >= now - 12 * 3600000 && e.ts < dayEnd(now);
+      if (c.r === "24") return e.ts >= now - 3600000 && e.ts < now + 24 * 3600000;
+      if (c.r === "up") return e.ts >= now - 3600000;
+      return true;
+    });
+  }
+  function calendarTab() {
+    var all = MK.calendar || [], now = Date.now();
+    if (!all.length) {
+      app.innerHTML = '<section><h2>تقویم اقتصادی</h2><p class="muted">داده‌ی تقویم هنوز نرسیده است (هر ۳۰ دقیقه از faireconomy.media گرفته می‌شود).</p></section>';
+      return;
+    }
+    var us = all.filter(function (e) { return e.country === "USD" && e.w >= 4; });
+    var next = us.filter(function (e) { return e.ts > now; })[0];
+    var today = all.filter(function (e) { return e.w >= 3 && Math.abs(e.ts - now) < 24 * 3600000 && e.ts > now - 12 * 3600000; });
+    var weekHi = all.filter(function (e) { return e.impact === "High" && e.ts > now; });
+    var cards = '<div class="grid g4">' +
+      statCard("رویداد مهم بعدی آمریکا", next ? esc((CALKIND[next.kind] || CALKIND.other)[0]) : "—",
+        next ? esc(next.title) + " · " + esc(jfmt(next.ts, "dt")) + ' · <b data-until="' + next.ts + '">' + esc(untilTxt(next.ts)) + "</b>" : "در دو هفته‌ی پیش رو نیست") +
+      statCard("رویدادهای پراثر ۲۴ ساعت", fa(today.length), today.slice(0, 3).map(function (e) { return esc(e.country + " " + e.title); }).join(" · ") || "آرام") +
+      statCard("رویدادهای «مهم» پیش رو", fa(weekHi.length), fa(weekHi.filter(function (e) { return e.country === "USD"; }).length) + " مورد از آمریکا") +
+      statCard("پیشنهاد", next && next.ts - now < 3 * 3600000 ? '<span class="warn">احتیاط</span>' : '<span class="pos">عادی</span>',
+        next && next.ts - now < 3 * 3600000 ? "تا انتشار " + esc(next.title) + " ورود تازه را کوچک‌تر بگیرید یا صبر کنید؛ استاپ‌ها ممکن است با نوسان بخورند." : "تا ۳ ساعت آینده رویداد پراثر آمریکایی نیست.") +
+      "</div>";
+    function seg(id, cur, opts) {
+      return '<div class="seg" data-cal="' + id + '">' + opts.map(function (o) { return '<button data-v="' + o[0] + '" class="' + (cur === o[0] ? "on" : "") + '">' + o[1] + "</button>"; }).join("") + "</div>";
+    }
+    app.innerHTML = eventBanner() + '<section><h2>تقویم اقتصادی <small>این هفته و هفته‌ی بعد · ساعت تهران</small></h2>' + cards +
+      '<div class="filters">' +
+      seg("r", S.cal.r, [["today", "امروز"], ["24", "۲۴ ساعت آینده"], ["up", "پیش رو"], ["all", "همه (از ۲ روز پیش)"]]) +
+      seg("c", S.cal.c, [["usd", "فقط آمریکا"], ["major", "اقتصادهای بزرگ"], ["all", "همه‌ی کشورها"]]) +
+      seg("i", S.cal.i, [["h", "فقط مهم"], ["hm", "مهم و متوسط"], ["all", "همه"]]) +
+      '</div><div id="calbody"></div><p class="muted">ستاره‌ها اثر معمول هر رویداد روی کریپتو است (از اهمیت، کشور و نوع آن)، نه پیش‌بینی جهت. ' +
+      "روی هر ردیف بزنید تا توضیح آن باز شود. منبع: ForexFactory (faireconomy.media). عدد «واقعی» اگر منبع بدهد نشان داده می‌شود.</p></section>";
+    app.querySelectorAll("[data-cal]").forEach(function (el) {
+      el.onclick = function (e) {
+        var b = e.target.closest("button"); if (!b) return;
+        S.cal[el.dataset.cal] = b.dataset.v;
+        el.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
+        calBody();
+      };
+    });
+    calBody();
+  }
+  function calBody() {
+    var el = document.getElementById("calbody"); if (!el) return;
+    var list = calFilter(MK.calendar || []), now = Date.now(), day = null, rows = [];
+    if (!list.length) { el.innerHTML = '<p class="muted">با این فیلترها رویدادی نیست.</p>'; return; }
+    var nextTs = (list.filter(function (e) { return e.ts > now; })[0] || {}).ts;
+    list.forEach(function (e, i) {
+      var d = jfmt(e.ts, "ymd");
+      if (d !== day) { day = d; rows.push('<tr class="day"><td colspan="8">' + esc(new Intl.DateTimeFormat("fa-IR", {weekday: "long", timeZone: "Asia/Tehran"}).format(new Date(e.ts))) + " " + esc(d) + "</td></tr>"); }
+      var k = CALKIND[e.kind] || CALKIND.other, c = CCY[e.country] || ["", e.country], past = e.ts < now, key = e.ts + "|" + e.title + "|" + e.country;
+      var imp = e.impact === "High" ? '<span class="badge short">مهم</span>' : e.impact === "Medium" ? '<span class="badge watch">متوسط</span>' :
+        e.impact === "Holiday" ? '<span class="badge gray">تعطیل</span>' : '<span class="badge gray">کم</span>';
+      rows.push('<tr class="calrow' + (past ? " thin" : "") + (e.ts === nextTs ? " nextev" : "") + '" data-k="' + esc(key) + '"><td class="num">' + esc(jfmt(e.ts, "time")) +
+        (past ? "" : '<br><small data-until="' + e.ts + '">' + esc(untilTxt(e.ts)) + "</small>") + "</td><td>" + c[0] + " " + esc(c[1]) + "</td><td>" + imp + "</td><td>" + wStars(e.w || 0) +
+        "</td><td><b>" + esc(e.title) + '</b><br><small class="muted">' + esc(k[0]) + "</small></td>" +
+        '<td class="num">' + esc(e.forecast || "—") + '</td><td class="num">' + esc(e.previous || "—") + '</td><td class="num">' + (e.actual ? "<b>" + esc(e.actual) + "</b><br>" + surprise(e) : "—") + "</td></tr>");
+      if (S.cal.open[key] && (k[1] || k[2])) rows.push('<tr class="calx"><td colspan="8"><b>' + esc(k[0]) + ":</b> " + esc(k[1]) + (k[2] ? '<br><b>اثر روی کریپتو:</b> ' + esc(k[2]) : "") + "</td></tr>");
+    });
+    el.innerHTML = '<div class="scroll"><table class="caltab"><thead><tr><th>ساعت</th><th>کشور</th><th>اهمیت</th><th>اثر روی کریپتو</th><th>رویداد</th><th>پیش‌بینی</th><th>قبلی</th><th>واقعی</th></tr></thead><tbody>' +
+      rows.join("") + "</tbody></table></div>";
+    el.querySelectorAll("tr.calrow").forEach(function (tr) {
+      tr.onclick = function () { var k = tr.dataset.k; S.cal.open[k] = !S.cal.open[k]; calBody(); };
+    });
+  }
+  function calendarSection() {                // the market tab keeps a short list; the full one is its own tab
+    var now = Date.now(), cal = (MK.calendar || []).filter(function (e) { return e.ts > now - 3600000 && e.w >= 3; }).slice(0, 6);
     if (!cal.length) return "";
-    var now = Date.now();
-    return '<section><h2>تقویم اقتصادی <small>آمریکا · این هفته</small></h2><div class="scroll"><table><thead><tr><th>زمان (تهران)</th><th>اهمیت</th><th>رویداد</th><th>پیش‌بینی</th><th>قبلی</th></tr></thead><tbody>' +
+    return '<section><h2>رویدادهای اقتصادی پیش رو <small><a href="#cal">تقویم کامل ←</a></small></h2><div class="scroll"><table><tbody>' +
       cal.map(function (e) {
-        var past = e.ts < now;
-        return '<tr class="' + (past ? "thin" : "") + '"><td>' + esc(jfmt(e.ts, "dt")) + (past ? "" : " <small>(" + esc(untilTxt(e.ts)) + ")</small>") + "</td><td>" +
-          (e.impact === "High" ? '<span class="badge short">مهم</span>' : '<span class="badge gray">متوسط</span>') + "</td><td>" + esc(e.title) + '</td><td class="num">' + esc(e.forecast || "—") + '</td><td class="num">' + esc(e.previous || "—") + "</td></tr>";
+        var c = CCY[e.country] || ["", e.country];
+        return "<tr><td>" + esc(jfmt(e.ts, "dt")) + ' <small data-until="' + e.ts + '">' + esc(untilTxt(e.ts)) + "</small></td><td>" + c[0] + " " + esc(e.title) + "</td><td>" + wStars(e.w || 0) + "</td></tr>";
       }).join("") + "</tbody></table></div></section>";
   }
+  setInterval(function () {                    // countdowns tick without a re-render
+    document.querySelectorAll("[data-until]").forEach(function (el) {
+      var t = Number(el.dataset.until);
+      el.textContent = t > Date.now() ? untilTxt(t) : "منتشر شد";
+    });
+  }, 30000);
 
   // ------------------------------------------------------------------ notifications
   var NOTIF_KEY = "notify";
@@ -1863,6 +2109,13 @@
   var saved = null; try { saved = localStorage.getItem("tab2"); } catch (e) {}
   if (h[1]) S.sel = decodeURIComponent(h[1]);
   show(TABS[h[0]] ? h[0] : (saved && TABS[saved] ? saved : "home"), false);
+  window.addEventListener("hashchange", function () {   // in-page links such as #chart/BTC or #cal
+    var p = (location.hash || "").replace(/^#/, "").split("/");
+    if (!TABS[p[0]]) return;
+    if (p[1]) S.sel = decodeURIComponent(p[1]);
+    show(p[0], false);
+    window.scrollTo(0, 0);
+  });
   loadMarks();
   bellUi();
   setInterval(refresh, 20000);
