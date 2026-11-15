@@ -181,3 +181,14 @@ def test_panel_pull_takes_the_databases_from_the_data_branch(cfg, tmp_path, monk
     monkeypatch.setattr(cli, "live_config", lambda cfg: cfg)
     assert cli.cmd_panel(argparse.Namespace(out=str(tmp_path / "panel"), pull=True), c, None) == 0
     assert pulled and (tmp_path / "panel" / "index.html").exists()
+
+
+def test_panel_script_does_not_hide_browser_globals():
+    """2026-11-15: a tab function named `history` hid window.history, so clicking a tab did nothing."""
+    import re
+
+    from agent.panel import WEB
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    declared = set(re.findall(r"\bfunction\s+(\w+)\s*\(", js)) | set(re.findall(r"\bvar\s+(\w+)\s*=", js))
+    assert not declared & {"history", "location", "document", "fetch", "localStorage", "setInterval",
+                           "navigator", "screen", "scroll", "alert", "Intl"}
