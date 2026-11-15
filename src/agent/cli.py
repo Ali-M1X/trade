@@ -201,6 +201,8 @@ def cmd_backtest(args, cfg, secrets) -> int:
         cfg["backtest"]["max_coins"] = args.max_coins
     if args.record_watch:
         cfg["backtest"]["record_watch"] = True
+    if args.no_cg_charts:
+        cfg["backtest"]["cg_charts"] = False
     for key, val in (("replay_start", args.start), ("replay_end", args.end)):
         if val:
             cfg["backtest"][key] = _ms(val)
@@ -311,6 +313,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--end", help="replay until this date (YYYY-MM-DD)")
             p.add_argument("--record-watch", action="store_true",
                            help="also follow Watch setups in a shadow book (approved=false)")
+            p.add_argument("--no-cg-charts", action="store_true",
+                           help="with --fetch: no CoinGecko daily charts; coin history from "
+                           "daily candles, dominance seeded beforehand (scripts/seed_backtest_db.py)")
         if name == "run-news":
             p.add_argument("--preview", action="store_true",
                            help="also alert headlines already out and exchange news (testing)")

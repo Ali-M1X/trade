@@ -3,7 +3,7 @@ name: panel-backfill
 # Status panel (2026-11-14, Ali): replays both live systems from 2026-11-06 with the shadow
 # book on (Watch setups followed like signals), then commits the trades to
 # panel/backfill.json on the branch it ran on. Changes nothing live.
-# rerun: 2026-11-14 after the CoinGecko quota fallback
+# rerun: 2026-11-15 without CoinGecko charts
 on:
   workflow_dispatch:
     inputs:
@@ -37,8 +37,21 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -e .
+      # The CoinGecko key's monthly quota is used up and the public API is too slow for one
+      # daily chart per coin (the first try ran out of time): dominance and the cached coin
+      # categories come from the live database, coin history from the daily candles.
+      - name: Seed dominance from the live database
+        run: |
+          mkdir -p data
+          git fetch --depth=1 origin data
+          git show FETCH_HEAD:state.db.gz | gunzip > data/live_state.db
+          python scripts/seed_backtest_db.py data/live_state.db data/backtest.db
       # 150 days: the regime's moving averages need ~100 days of history before START
-      - run: set -o pipefail; trade-agent -v backtest --fetch-only --days 150 2>&1 | grep -v " INFO .*HTTP" | tail -60
+      - name: Fetch candles and funding
+        run: |
+          set -o pipefail
+          trade-agent -v backtest --fetch-only --no-cg-charts --days 150 > fetch.log 2>&1 || { tail -80 fetch.log; exit 1; }
+          grep -E "\] .* done|fetched:|WARNING" fetch.log | tail -40
       - run: gzip -k data/backtest.db && ls -la data
       - uses: actions/upload-artifact@v4
         with:

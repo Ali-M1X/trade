@@ -52,6 +52,11 @@ def fetch_history(cfg: dict, repo, client, market, cg, now_ms: int) -> dict:
     raw, rows = load_universe(cg, bases, cfg, b.get("universe_top_n") or cfg["universe"].get("coins_top_n"))
     if b["max_coins"]:
         rows = rows[:b["max_coins"]]
+    # cg_charts off (2026-11-15, panel backfill): no CoinGecko daily charts. Each coin's
+    # history is built from its daily candles as in fetch_long_history, and dominance must
+    # already be in the database (scripts/seed_backtest_db.py copies the live one).
+    charts_on = b.get("cg_charts", True)
+    by_base = {r["symbol"].upper(): r for r in rows}
     targets = sorted({r["symbol"].upper() for r in rows} | {"BTC", "ETH"})
     window = cfg["analysis"]["window_bars"] + cfg["storage"]["warmup_bars"]
     stats = {"coins": len(targets), "candles": 0, "funding": 0}
@@ -66,6 +71,9 @@ def fetch_history(cfg: dict, repo, client, market, cg, now_ms: int) -> dict:
                 continue
             repo.upsert_candles(name, symbol, tf, candles)
             stats["candles"] += len(candles)
+            if not charts_on and tf == "1d" and candles and base in by_base:
+                repo.upsert_coin_history(by_base[base]["id"],
+                                         _synthetic_history(client, name, symbol, candles, by_base[base]))
         name, funding = fetch_funding(client, symbol, start - 7 * DAY, now_ms)
         if funding:
             repo.upsert_funding(name, symbol, funding)
@@ -74,6 +82,10 @@ def fetch_history(cfg: dict, repo, client, market, cg, now_ms: int) -> dict:
 
     # CoinGecko: the raw top list (stablecoins included, for USDT.D) plus the universe
     ids = list(dict.fromkeys([m["id"] for m in raw[:cfg["universe"]["top_n"]]] + [r["id"] for r in rows]))
+    if not charts_on:
+        ids = []
+        if repo.get_dominance().empty:
+            log.warning("cg_charts off and no dominance in the database: seed it first")
     charts = {}
     for cid in ids:
         try:
@@ -90,8 +102,15 @@ def fetch_history(cfg: dict, repo, client, market, cg, now_ms: int) -> dict:
         repo.add_dominance(int(r.ts), "recon", r.total_mcap, r.btc_mcap, r.eth_mcap, r.usdt_mcap)
 
     repo.set_state("bt_universe", rows)
-    repo.set_state("bt_categories", load_categories(cg, rows))
-    repo.set_state("bt_meta", {"start": start, "end": now_ms, "exchange": client.names[0]})
+    if charts_on:
+        cats = load_categories(cg, rows)
+    else:                                 # one call a coin: only the ones liquid today
+        min_vol = cfg["universe"]["min_volume_24h_usd"]
+        liquid = [r for r in rows if (r.get("total_volume") or 0) >= min_vol]
+        cats = {r["id"]: [] for r in rows} | load_categories(cg, liquid)
+    repo.set_state("bt_categories", cats)
+    repo.set_state("bt_meta", {"start": start, "end": now_ms, "exchange": client.names[0],
+                               "cg_charts": charts_on})
     return stats
 
 
