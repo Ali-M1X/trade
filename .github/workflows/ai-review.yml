@@ -38,6 +38,15 @@ jobs:
           done
           if git fetch --depth=1 origin ai 2>/dev/null; then git show FETCH_HEAD:ai_llm.json > data/ai_llm.json || true; fi
           ls -la data
+      - name: DEBUG endpoints (temporary)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          body='{"model":"openai/gpt-4.1-mini","messages":[{"role":"user","content":"Say hi"}]}'
+          for u in https://models.github.ai/inference/chat/completions https://models.inference.ai.azure.com/chat/completions; do
+            echo "== $u"; curl -s -m 60 -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" -H "Accept: application/json" -d "$body" "$u" | head -c 600; echo
+          done
+          curl -s https://openrouter.ai/api/v1/models | python3 -c "import sys,json;print([m['id'] for m in json.load(sys.stdin)['data'] if m['id'].endswith(':free')])"
       - name: Review
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
