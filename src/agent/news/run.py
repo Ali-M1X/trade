@@ -23,6 +23,7 @@ from .sources import fetch_all
 log = logging.getLogger(__name__)
 HOUR = 3_600_000
 HORIZONS = {"p0": 0, "1h": HOUR, "4h": 4 * HOUR, "24h": 24 * HOUR}
+FILL_MAX_AGE = 26 * HOUR          # older headlines get no prices (see fill_prices)
 
 
 def coin_names(cg) -> list[tuple[str, str]]:
@@ -67,6 +68,11 @@ def fill_prices(repo, client, quote: str, bases: set[str], now: int) -> int:
     n = 0
     for item in repo.get_news(since=now - 26 * HOUR, with_coins=True):
         t0 = item["ts"] or item["seen_at"]
+        # 2026-11-15: the exchange announcement APIs (PR #33) also return posts months old the
+        # first time they are read. Their reaction can't be measured any more, and asking for
+        # 5m candles that far back failed on Gate every minute (4 "gate" errors a run).
+        if now - t0 > FILL_MAX_AGE:
+            continue
         prices = item["prices"]
         changed = False
         for coin in item["coins"]:

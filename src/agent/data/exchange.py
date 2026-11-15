@@ -52,6 +52,7 @@ class ExchangeClient:
         self._sleep = sleep
         self._instances: dict = {}
         self.failures: dict[str, int] = {}      # per exchange, this run (status panel)
+        self.last_error: dict[str, str] = {}    # per exchange: the last failed call and why
 
     def exchange(self, name: str):
         if name not in self._instances:
@@ -79,6 +80,7 @@ class ExchangeClient:
             except (UnsupportedExchange, ccxt.BaseError, TypeError) as e:
                 log.warning("%s.%s failed: %s", name, method, e)
                 self.failures[name] = self.failures.get(name, 0) + 1
+                self.last_error[name] = f"{method} {args[0] if args and isinstance(args[0], str) else ''}: {type(e).__name__}: {e}"[:240]
                 errors.append(f"{name}: {type(e).__name__}: {e}")
         raise AllExchangesFailed(f"{method} failed on all exchanges: " + " | ".join(errors))
 

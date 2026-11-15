@@ -309,3 +309,5 @@ svg.scatter .pt{outline:none}
 .sumrow{margin-top:10px}
 .sdir{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--card2)}
 .sdir .l{display:block;font-size:12px;color:var(--muted)}.sdir b{display:block;font-size:16px;margin:2px 0}.sdir small{display:block;font-size:12px;line-height:1.7}
+.exerr{margin:6px 0;padding:6px 10px;border-radius:8px;background:var(--chip);font-size:12px}.exerr code{display:block;direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-word;margin-top:3px;color:var(--muted)}
+.aiwhy{display:block;direction:ltr;text-align:left;font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-word;margin-top:3px}

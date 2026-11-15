@@ -51,6 +51,9 @@ def test_client_falls_back_in_order(cfg):
     client = ExchangeClient(cfg, factory=factory_with({"okx"}, {"bitunix"}), sleep=lambda s: None)
     name, rows = client.fetch_ohlcv("BTC/USDT:USDT", "4h")
     assert name == "bitget" and rows[-1][4] == 1.8
+    # counted and explained per exchange for the health tab
+    assert client.failures == {"okx": 1, "bitunix": 1}
+    assert client.last_error["okx"].startswith("fetch_ohlcv BTC/USDT:USDT: ExchangeNotAvailable")
 
 
 def test_client_falls_back_when_ccxt_breaks_parsing(cfg):
