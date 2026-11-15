@@ -55,6 +55,10 @@ def test_run_scheduled_runs_due_tasks_and_records_them(cfg, monkeypatch):
     monkeypatch.setattr(runs, "hold_new_entrants", lambda *a: [])
     monkeypatch.setattr(runs, "weekly", lambda *a: calls.append("weekly") or [])
     monkeypatch.setattr(cli, "news_pass", lambda *a: calls.append("news") or {})
+    from agent import system2
+    from agent.signals import shadow
+    monkeypatch.setattr(shadow, "enabled", lambda c: False)     # tested in test_shadow.py
+    monkeypatch.setattr(system2, "enabled", lambda c: False)    # its own manage() would count here
     repo.set_state("last_runs", {"run-daily": MON, "run-weekly": MON, "run-1h": MON + 3 * HOUR,
                                  "run-4h": MON})
     code = cli.main(["run-scheduled"])

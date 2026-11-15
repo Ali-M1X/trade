@@ -26,6 +26,7 @@ from ..layers.technical import evaluate
 from ..regime_systems import system_cfg
 from ..layers.trade import flip_level
 from ..signals.lifecycle import OPEN, on_4h_close, on_candle, on_time
+from ..signals import shadow
 from ..signals.manager import SignalBook
 from ..store.repository import Repository
 from .history import History
@@ -44,6 +45,8 @@ class Backtest:
         self.h = History(cfg, data_repo)
         self.book_repo = Repository()
         self.book = SignalBook(self.book_repo, cfg)
+        # backtest.record_watch: Watch setups are followed in a shadow book (status panel)
+        self.shadow_repo = Repository() if cfg["backtest"].get("record_watch") else None
         self.rows = data_repo.get_state("bt_universe", [])
         if cfg["backtest"].get("universe_rank"):      # replay only the top N of a wider list
             self.rows = [r for r in self.rows if r.get("u_rank", 0) < cfg["backtest"]["universe_rank"]]
@@ -209,6 +212,9 @@ class Backtest:
             if ev.grade:
                 self.stats[f"grade_{ev.grade}"] += 1
             if not ev.is_signal:
+                if self.shadow_repo is not None and ev.grade == "Watch":
+                    self.stats["shadow"] += len(shadow.record(self.cfg, self.shadow_repo, [ev], t,
+                                                              self.state))
                 continue
             adm = self.book.admit(base, side, ev.score, t, self._corr(t))
             if not adm.ok:
@@ -229,8 +235,13 @@ class Backtest:
 
     # ------------------------------------------------------------- lifecycle
     def manage(self, t: int) -> None:
+        self._manage(self.book, self.book_repo, t)
+        if self.shadow_repo is not None:
+            self._manage(SignalBook(self.shadow_repo, self.cfg), self.shadow_repo, t)
+
+    def _manage(self, book: SignalBook, book_repo, t: int) -> None:
         ma = f"ma{self.cfg['indicators']['ma_mid']}"
-        for sig in self.book.open_signals():
+        for sig in book.open_signals():
             lc = sig["payload"]["lifecycle"]
             base = sig["symbol"]
             cfg = self.cfg_for(sig["payload"]["regime"]["name"])
@@ -247,14 +258,20 @@ class Backtest:
                                           float(f.last["open"]))
             events += on_time(lc, t)
             if events:
-                self.book.save(sig, events, t)
+                book.save(sig, events, t)
             else:
-                self.book_repo.update_signal(sig["id"], lc["status"], sig["payload"], sig["updated_at"])
+                book_repo.update_signal(sig["id"], lc["status"], sig["payload"], sig["updated_at"])
 
     # ---------------------------------------------------------------- output
     def trades(self) -> list[dict]:
+        out = self._trades(self.book_repo)
+        if self.shadow_repo is not None:
+            out += self._trades(self.shadow_repo, approved=False)
+        return out
+
+    def _trades(self, book_repo, approved: bool = True) -> list[dict]:
         out = []
-        for s in self.book_repo.get_signals():
+        for s in book_repo.get_signals():
             p = s["payload"]
             out.append({
                 "id": s["id"], "base": s["symbol"], "side": p["lifecycle"]["side"],
@@ -267,8 +284,10 @@ class Backtest:
                 "gross_r": p["lifecycle"]["realized_r"],
                 "filled_at": p["lifecycle"]["filled_at"], "closed_at": p["lifecycle"]["closed_at"],
                 "events": [(e["kind"], e["ts"], e["payload"].get("price"))
-                           for e in self.book_repo.get_events(s["id"]) if e["kind"] != "created"],
+                           for e in book_repo.get_events(s["id"]) if e["kind"] != "created"],
                 "ctx": _context(p),
+                "approved": approved,
+                "tp1": p["lifecycle"]["tp1"], "tp2": p["lifecycle"]["tp2"],
             })
         return out
 

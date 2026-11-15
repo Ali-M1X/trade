@@ -107,6 +107,7 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
     tasks = args.only.split(",") if args.only else due_tasks(now, last, (cfg.get("realtime") or {}).get("periods_min"))
     print(f"due: {', '.join(tasks)}")
     failed = []
+    evs = None
     for task in tasks:
         try:
             if task == "run-15m":
@@ -114,7 +115,8 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
             elif task == "run-4h":
                 print(summarize_funnel(run_4h(cfg, repo, market, cg, now)))
             elif task == "run-1h":
-                print(summarize_evaluations(run_1h(cfg, repo, market, now, notifier)))
+                evs = run_1h(cfg, repo, market, now, notifier)
+                print(summarize_evaluations(evs))
             elif task == "run-daily":
                 daily(cfg, repo, notifier, now)
                 hold_new_entrants(cfg, repo, market, cg, notifier, now)
@@ -126,14 +128,25 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
             logging.getLogger(__name__).exception("%s failed", task)
             failed.append(task)
     from . import system2
+    from .signals import shadow
+    from .store.repository import Repository
+    if shadow.enabled(cfg):
+        sh = Repository(cfg["shadow"]["db_path"])
+        try:                                    # status panel only: never blocks the live system
+            shadow.run_pass(cfg, repo, sh, market, now, tasks, evs, "funnel")
+        except Exception:
+            logging.getLogger(__name__).exception("shadow failed")
+        sh.close()
     if system2.enabled(cfg):
-        from .store.repository import Repository
         repo2 = Repository(cfg["system2"]["db_path"])
+        sh2 = Repository(cfg["shadow"]["s2_db_path"]) if shadow.enabled(cfg) else None
         try:
-            system2.run_system2(cfg, repo, repo2, market, notifier, now, tasks)
+            system2.run_system2(cfg, repo, repo2, market, notifier, now, tasks, shadow_repo=sh2)
         except Exception:                       # paper experiment: never blocks the live system
             logging.getLogger(__name__).exception("system2 failed")
         repo2.close()
+        if sh2 is not None:
+            sh2.close()
     extra = {}
     if cfg.get("news", {}).get("enabled"):
         try:
@@ -186,6 +199,10 @@ def cmd_backtest(args, cfg, secrets) -> int:
         cfg["backtest"]["universe_top_n"] = args.top_n
     if args.max_coins is not None:
         cfg["backtest"]["max_coins"] = args.max_coins
+    if args.record_watch:
+        cfg["backtest"]["record_watch"] = True
+    if args.no_cg_charts:
+        cfg["backtest"]["cg_charts"] = False
     for key, val in (("replay_start", args.start), ("replay_end", args.end)):
         if val:
             cfg["backtest"][key] = _ms(val)
@@ -246,6 +263,13 @@ def cmd_backtest_robust(args, cfg, secrets) -> int:
     return 0
 
 
+def cmd_panel(args, cfg, secrets) -> int:
+    """Write the status panel page (read-only; for a web server on the VPS)."""
+    from .panel import build
+    print(build(live_config(cfg), args.out))
+    return 0
+
+
 COMMANDS = {
     "check-sources": cmd_check_sources,
     "run-4h": cmd_run_4h,
@@ -258,6 +282,7 @@ COMMANDS = {
     "backtest": cmd_backtest,
     "backtest-compare": cmd_backtest_compare,
     "backtest-robust": cmd_backtest_robust,
+    "panel": cmd_panel,
 }
 
 
@@ -286,9 +311,16 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--shard", help="with --since: fetch only shard I of N coins (I/N, from 0)")
             p.add_argument("--start", help="replay from this date (YYYY-MM-DD)")
             p.add_argument("--end", help="replay until this date (YYYY-MM-DD)")
+            p.add_argument("--record-watch", action="store_true",
+                           help="also follow Watch setups in a shadow book (approved=false)")
+            p.add_argument("--no-cg-charts", action="store_true",
+                           help="with --fetch: no CoinGecko daily charts; coin history from "
+                           "daily candles, dominance seeded beforehand (scripts/seed_backtest_db.py)")
         if name == "run-news":
             p.add_argument("--preview", action="store_true",
                            help="also alert headlines already out and exchange news (testing)")
+        if name == "panel":
+            p.add_argument("--out", default="panel", help="folder for index.html")
         if name == "run-scheduled":
             p.add_argument("--only", help="comma-separated tasks to force, e.g. run-4h,run-1h")
         if name == "backtest-compare":
