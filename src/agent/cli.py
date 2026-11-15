@@ -277,6 +277,18 @@ def cmd_panel(args, cfg, secrets) -> int:
     return 0
 
 
+def cmd_backup(args, cfg, secrets) -> int:
+    """Copy the databases to the data branch now (agent on the server, before switching back to GitHub)."""
+    from .store.storage import GitBackupStorage, make_storage
+    storage = make_storage(cfg)
+    if isinstance(storage, GitBackupStorage):
+        storage.push("backup", force=True)
+    else:
+        storage.push("backup")
+    print(f"backed up {storage.db_path}")
+    return 0
+
+
 COMMANDS = {
     "check-sources": cmd_check_sources,
     "run-4h": cmd_run_4h,
@@ -290,6 +302,7 @@ COMMANDS = {
     "backtest-compare": cmd_backtest_compare,
     "backtest-robust": cmd_backtest_robust,
     "panel": cmd_panel,
+    "backup": cmd_backup,
 }
 
 

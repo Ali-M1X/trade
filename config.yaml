@@ -463,12 +463,13 @@ panel:
   font_dir: /opt/trade/fonts      # put IRANSansWeb.woff2 / IRANSansWeb_Bold.woff2 here (licensed font); Vazirmatn otherwise
 
 storage:
-  backend: local               # local | git_branch
+  backend: local               # local | git_branch | git_backup (set by AGENT_STORAGE)
   db_path: data/state.db
   git_branch: data
   git_remote: origin
   warmup_bars: 120             # extra bars fetched before the analysis window (MA99 etc.)
   keep_bars: 450               # candles kept per series in the runtime DB
+  backup_min: 15               # git_backup (agent on the server): copy to the data branch at most this often
 
 backtest:
   days: 365                    # all layers, limited by the 365-day dominance history
@@ -972,7 +973,7 @@ backtest:
 # candles; the funnel (L1-L5) refreshes every hour.
 realtime:
   open_candle_tfs: [4h, 1h]
-  periods_min: {run-4h: 60, run-1h: 5}
+  periods_min: {run-4h: 60, run-1h: 1}   # 2026-11-15: agent on Ali's server every minute (GitHub: every run)
 
 live:
   variant: combo_avoid
