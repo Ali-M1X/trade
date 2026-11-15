@@ -1376,7 +1376,7 @@
     "امتیاز در برابر نتیجه": "هر نقطه یک معامله است: محور افقی امتیاز سیستم و محور عمودی نتیجه بر حسب R. خط‌های عمودی مرزهای Watch (۵۵)، B (۶۵) و A (۷۵) هستند.\nاگر نقطه‌های سمت راست به‌طور معنادار بالاتر از سمت چپ باشند، امتیاز واقعاً پیش‌بینی می‌کند. با گذشت زمان معلوم می‌شود مرزها جای درستی هستند یا نه.",
     "معامله‌های شما": "فقط معامله‌هایی که در صفحه‌ی نمودار با «گرفتم» علامت زده‌اید. کنارش نتیجه‌ی سیگنال‌های تأییدشده‌ای را می‌بینید که نگرفتید.",
     "سلامت اجراها": "هر اجرای ربات روی سرور: کی شروع شد، چقدر طول کشید و آیا بخشی خطا داد.\nاجرای قیف (هر ساعت) چند دقیقه طول می‌کشد و در این مدت اجرای بعدی صبر می‌کند. این عادی است.",
-    "صرافی‌ها": "تعداد دفعه‌هایی که صرافی اصلی (Gate) جواب نداده و ربات سراغ صرافی پشتیبان رفته است. چند خطای پراکنده عادی است، ولی اگر زیاد شد دیتا کند یا ناقص می‌شود.",
+    "صرافی‌ها": "تعداد دفعه‌هایی که صرافی اصلی (Gate) به یک درخواست جواب نداده و ربات سراغ صرافی پشتیبان رفته است. زیر آن آخرین پیام خطای هر صرافی آمده است تا معلوم باشد کدام درخواست و چرا.\nچند خطای پراکنده عادی است، ولی اگر زیاد شد دیتا کند یا ناقص می‌شود.",
     "پشتیبان": "دیتای ربات روی سرور است و هر چند دقیقه یک نسخه روی گیت‌هاب (شاخه‌ی data) ذخیره می‌شود. اگر این عدد خیلی قدیمی شد، اتصال سرور به گیت‌هاب مشکل دارد."
   };
   var LTIPS = {
@@ -1777,6 +1777,8 @@
     var failed = day.filter(function (r) { return (r.failed || []).length; }).length;
     var ex = {};
     day.forEach(function (r) { Object.keys(r.ex || {}).forEach(function (k) { ex[k] = (ex[k] || 0) + r.ex[k]; }); });
+    var exErr = {};                                // newest error message per exchange
+    day.forEach(function (r) { Object.keys(r.ex_err || {}).forEach(function (k) { if (!exErr[k]) exErr[k] = [r.ts, r.ex_err[k]]; }); });
     var last = runs[0];
     var backupAge = h.last_backup ? (now - h.last_backup) / 60000 : null;
     var backupBad = h.storage === "git_backup" && (backupAge == null || backupAge > (h.backup_min || 15) * 3);
@@ -1792,7 +1794,10 @@
       statCard("اجراهای خطادار", '<span class="' + (failed ? "neg" : "pos") + '">' + fa(failed) + "</span>", failed ? "بخشی از اجرا خطا داده؛ جدول پایین را ببینید" : "همه‌ی اجراها کامل بودند") +
       statCard("پشتیبان", '<span class="' + (backupBad ? "neg" : "") + '">' + esc(h.last_backup ? ago(h.last_backup) : "—") + "</span>", "حالت ذخیره: " + esc(h.storage || "—") + (h.backup_min ? " · هر " + fa(h.backup_min) + " دقیقه" : "")) +
       "</div></section>" +
-      '<section><h2>صرافی‌ها <small>خطاها در ۲۴ ساعت گذشته</small></h2>' + (Object.keys(ex).length ? Object.keys(ex).map(function (k) { return '<span class="chip">' + esc(k) + " <b>" + fa(ex[k]) + "</b> خطا</span>"; }).join("") : '<span class="pos">هیچ خطایی ثبت نشده است.</span>') + "</section>" +
+      '<section><h2>صرافی‌ها <small>خطاها در ۲۴ ساعت گذشته</small></h2>' + (Object.keys(ex).length ? Object.keys(ex).map(function (k) { return '<span class="chip">' + esc(k) + " <b>" + fa(ex[k]) + "</b> خطا</span>"; }).join("") +
+        '<p class="muted small">هر خطا یعنی یک درخواست به آن صرافی جواب نداد و ربات همان را از صرافی بعدی (OKX، Bitget و ...) گرفت. فقط اگر همه‌ی صرافی‌ها جواب ندهند، چیزی از دست می‌رود.</p>' +
+        Object.keys(exErr).map(function (k) { return '<div class="exerr"><b>' + esc(k) + '</b> <small class="muted">آخرین خطا ' + esc(ago(exErr[k][0])) + '</small><code>' + esc(exErr[k][1]) + "</code></div>"; }).join("")
+        : '<span class="pos">هیچ خطایی ثبت نشده است.</span>') + "</section>" +
       '<section><h2>اجراهای اخیر</h2><div class="chartbox small" id="dur-chart"></div>' +
       (rows ? '<div class="scroll"><table><thead><tr><th>شروع</th><th>مدت اجرا</th><th>بخش‌ها</th><th>خطا</th><th>خطای صرافی</th></tr></thead><tbody>' + rows + "</tbody></table></div>" : '<div class="empty">گزارش اجرا هنوز ثبت نشده است. بعد از اولین اجرای ربات با کد جدید پر می‌شود.</div>') + "</section>";
     var el = document.getElementById("dur-chart");
@@ -1988,9 +1993,10 @@
     function num(x, d) { return x == null ? "—" : '<span class="ltr">' + Number(x).toFixed(d == null ? 2 : d) + "</span>"; }
     var cards = revs.map(function (r) {
       var v = AIV[r.verdict] || AIV.few, L = r.live || {};
-      var status = r.kind === "مدل زبانی" ? (r.error === "no key" ? '<span class="warn">کلید API ندارد</span>' : r.error ? '<span class="neg">' + esc({"API failed": "API جواب نداد", "daily limit": "سقف روزانه‌ی درخواست پر شد"}[r.error] || r.error) + "</span>" :
+      var status = r.kind === "مدل زبانی" ? (r.error === "no key" ? '<span class="warn">کلید API ندارد</span>' : r.error ? '<span class="neg" title="' + esc(r.why || "") + '">' + esc({"API failed": "API جواب نداد", "daily limit": "سقف روزانه‌ی درخواست پر شد", "no free model": "مدل رایگانی پیدا نشد"}[r.error] || r.error) + "</span>" +
+          (r.why ? '<code class="aiwhy">' + esc(r.why) + "</code>" : "") :
         r.ran ? "آخرین اجرا " + esc(ago(r.ran)) : '<span class="muted">هنوز اجرا نشده</span>') : "هر دقیقه، روی سرور";
-      return '<div class="aicard"><div class="aih"><b>' + esc(r.name) + '</b> <small class="muted">' + esc(r.kind) + '</small><span class="badge ' + v[1] + '">' + v[0] + "</span></div>" +
+      return '<div class="aicard"><div class="aih"><b>' + esc(r.name) + '</b> <small class="muted">' + esc(r.kind) + (r.model ? ' · <span class="ltr">' + esc(r.model) + "</span>" : "") + '</small><span class="badge ' + v[1] + '">' + v[0] + "</span></div>" +
         '<div class="trust" title="اعتبار: چقدر بهتر از حدس ساده، چقدر مطمئن و با چند معامله"><i style="width:' + (r.trust || 0) + '%"></i></div>' +
         '<div class="muted small">اعتبار ' + fa(r.trust || 0) + " از ۱۰۰ · " + esc(v[2]) + "</div>" +
         '<div class="grid g2 aist">' +

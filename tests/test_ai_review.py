@@ -131,3 +131,48 @@ def test_llm_daily_cap(cfg, tmp_path, monkeypatch):
     assert len(asked) == 3 and st["calls"]["o"]["n"] == 3 and st["errors"]["o"] == "daily limit"
     ai.run_llm(c, cases, NOW + 86_400_000, post)                    # next day: allowed again
     assert len(asked) == 6
+
+
+def test_openrouter_picks_a_free_model_and_moves_on_when_one_is_gone(cfg, tmp_path, monkeypatch):
+    c = copy.deepcopy(cfg)
+    c["storage"]["db_path"] = str(tmp_path / "state.db")
+    c["ai"] = {"llm": [{"key": "o", "url": "https://or.test/api/v1", "model": "auto-free", "prefer": ["deepseek", "qwen"],
+                        "key_env": "O_KEY", "budget": 4}]}
+    monkeypatch.setenv("O_KEY", "k")
+
+    class _List:
+        def json(self):
+            return {"data": [{"id": "meta/llama:free"}, {"id": "paid/model"}, {"id": "qwen/qwen3:free"},
+                             {"id": "deepseek/v3:free"}, {"id": "img/x:free", "architecture": {"output_modalities": ["image"]}}]}
+
+    assert ai.free_models(c["ai"]["llm"][0], lambda url, timeout=None: _List()) == ["deepseek/v3:free", "qwen/qwen3:free", "meta/llama:free"]
+    used = []
+
+    def post(url, json=None, timeout=None, headers=None):
+        used.append(json["model"])
+        if json["model"] == "deepseek/v3:free":
+            return _Resp('{"error": "This model is unavailable for free"}', 404)
+        return _Resp('{"p_win": 55, "reason": ""}')
+
+    cases = [_case(i, False, NOW - i * HOUR) for i in range(3)]
+    st = ai.run_llm(c, cases, NOW, post, lambda url, timeout=None: _List())
+    assert used[:2] == ["deepseek/v3:free"] * 2 and set(used[2:]) == {"qwen/qwen3:free"}
+    assert st["model"]["o"] == "qwen/qwen3:free" and st["errors"]["o"] == "" and st["preds"]["c2"]["o"][1] == 55.0
+    assert ai.run_llm(c, cases, NOW + 60_000, post, lambda url, timeout=None: _List())["preds"]["c0"]["o"][1] == 55.0   # retried next run
+    assert list(st["dead"]["o"]) == ["deepseek/v3:free"]
+
+    def busy(url, json=None, timeout=None, headers=None):
+        return _Resp('{"error": "rate-limited upstream"}', 429)
+    c["storage"]["db_path"] = str(tmp_path / "other" / "state.db")
+    (tmp_path / "other").mkdir()
+    st = ai.run_llm(c, cases, NOW, busy, lambda url, timeout=None: _List())
+    assert st["dead"]["o"] == {} and st["why"]["o"].startswith("HTTP 429")    # busy, not withdrawn
+
+
+def test_failure_reason_is_kept_for_the_panel(cfg, tmp_path, monkeypatch):
+    c = copy.deepcopy(cfg)
+    c["storage"]["db_path"] = str(tmp_path / "state.db")
+    c["ai"] = {"llm": [{"key": "g", "url": "https://x.test", "model": "m", "key_env": "G_KEY", "budget": 3}]}
+    monkeypatch.setenv("G_KEY", "k")
+    st = ai.run_llm(c, [_case(i, False, NOW - i * HOUR) for i in range(3)], NOW, lambda *a, **k: _Resp("", 200))
+    assert st["errors"]["g"] == "API failed" and st["why"]["g"].startswith("empty answer")

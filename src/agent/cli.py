@@ -155,7 +155,7 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
             extra = news_pass(cfg, repo, market, cg, notifier, now)
         except Exception:                       # experimental: never blocks or fails the signal runs
             logging.getLogger(__name__).exception("news failed")
-    _log_run(repo, now, tasks, failed, getattr(getattr(market, "client", None), "failures", {}))
+    _log_run(repo, now, tasks, failed, getattr(market, "client", None))
     repo.close()
     if extra:
         storage.push("run-scheduled " + ",".join(tasks), extra=extra)
@@ -205,16 +205,18 @@ def cmd_run_funnel(args, cfg, secrets) -> int:
         logging.getLogger(__name__).exception("run-funnel failed")
         failed = ["run-4h"]
     repo.set_state(FUNNEL_HB, int(time.time() * 1000))
-    _log_run(repo, now, ["funnel"], failed, getattr(getattr(market, "client", None), "failures", {}))
+    _log_run(repo, now, ["funnel"], failed, getattr(market, "client", None))
     repo.close()
     return 1 if failed else 0
 
 
-def _log_run(repo, started: int, tasks: list[str], failed: list[str], ex_failures: dict) -> None:
-    """Last runs for the panel's system-health view: when, how long, what failed."""
+def _log_run(repo, started: int, tasks: list[str], failed: list[str], client=None) -> None:
+    """Last runs for the panel's system-health view: when, how long, what failed, and the last
+    error of each exchange (the call and the exchange's own message)."""
     log = repo.get_state("run_log", []) or []
     log.append({"ts": started, "dur": round(time.time() - started / 1000, 1), "tasks": tasks,
-                "failed": failed, "ex": dict(ex_failures or {})})
+                "failed": failed, "ex": dict(getattr(client, "failures", None) or {}),
+                "ex_err": dict(getattr(client, "last_error", None) or {})})
     repo.set_state("run_log", log[-300:])
 
 

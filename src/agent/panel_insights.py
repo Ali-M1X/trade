@@ -420,7 +420,7 @@ def news_view(repos, now: int) -> dict:
                 continue
             seen.add(key)
             rows.append(n)
-    rows.sort(key=lambda n: -n["seen_at"])
+    rows.sort(key=lambda n: -(n.get("ts") or n["seen_at"]))
     items = []
     stats: dict[str, dict] = {}
     for n in rows:
@@ -435,7 +435,8 @@ def news_view(repos, now: int) -> dict:
                 for k in ("1h", "4h", "24h"):
                     if k in m:
                         s[k].append(sign * m[k])
-        if n["seen_at"] < now - NEWS_DAYS * 24 * HOUR or len(items) >= NEWS_MAX:
+        # by publication time: an exchange API read for the first time returns months-old posts
+        if (n.get("ts") or n["seen_at"]) < now - NEWS_DAYS * 24 * HOUR or len(items) >= NEWS_MAX:
             continue
         url = n.get("url") or ""
         items.append({

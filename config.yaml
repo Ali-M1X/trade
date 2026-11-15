@@ -487,11 +487,16 @@ ai:
   llm:                         # OpenAI-compatible chat APIs; keys only in GitHub Secrets
     - {key: gemini, name: Gemini, url: "https://generativelanguage.googleapis.com/v1beta/openai",
        model: gemini-2.5-flash, key_env: GEMINI_API_KEY, budget: 6}
-    - {key: gpt, name: "GPT (GitHub Models)", url: "https://models.github.ai/inference",
-       model: openai/gpt-4.1-mini, key_env: GITHUB_TOKEN, budget: 6}
+    # GPT through GitHub Models: off since 2026-11-15. models.github.ai answers every request
+    # with a bare "OK" (HTTP 200) and the old Azure endpoint is unreachable from Actions.
+    # - {key: gpt, name: "GPT (GitHub Models)", url: "https://models.github.ai/inference",
+    #    model: openai/gpt-4.1-mini, key_env: GITHUB_TOKEN, budget: 6}
     # 2026-11-15 (Ali): OpenRouter's free models; 50 requests a day per account without credit
-    - {key: deepseek, name: "DeepSeek (OpenRouter)", url: "https://openrouter.ai/api/v1",
-       model: "deepseek/deepseek-chat-v3-0324:free", key_env: OPENROUTER_API_KEY, budget: 4, daily: 45}
+    # model auto-free: the free models change often (deepseek-chat-v3-0324:free was withdrawn
+    # 2026-11-15), so each run takes the first free one offered in `prefer` order.
+    - {key: openrouter, name: "OpenRouter (مدل رایگان)", url: "https://openrouter.ai/api/v1",
+       model: auto-free, prefer: [nemotron-3-ultra, gemma-4-31b, deepseek, qwen, llama, gemma, ernie],
+       key_env: OPENROUTER_API_KEY, budget: 4, daily: 45}
 
 storage:
   backend: local               # local | git_branch | git_backup (set by AGENT_STORAGE)

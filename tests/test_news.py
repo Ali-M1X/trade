@@ -177,6 +177,20 @@ def test_prices_filled_as_time_passes(cfg):
     assert set(repo.get_news()[0]["prices"]["HYPE"]) == {"p0", "1h", "4h", "24h"}
 
 
+def test_old_announcements_get_no_prices(cfg):
+    """An exchange API read for the first time returns posts months old: no candles asked for them
+    (Gate refused them every minute, 2026-11-15)."""
+    repo = Repository()
+    now = NOW + 200 * 24 * HOUR
+    repo.add_news({"id": "old", "source": "okx", "kind": "exchange", "title": "OKX to delist KITE", "ts": NOW,
+                   "seen_at": now - HOUR, "level": -2, "coins": ["HYPE"]})
+    m = Market()
+    asked = []
+    real = m.client.fetch_ohlcv
+    m.client.fetch_ohlcv = lambda *a, **k: asked.append(a) or real(*a, **k)
+    assert fill_prices(repo, m.client, "USDT", {"HYPE"}, now) == 0 and asked == []
+
+
 def test_coin_status_lines():
     ctx = {"perp_bases": ["SOL", "ADA", "XRP"], "coins": {
         "SOL": {"signal": {"side": "long", "grade": "B", "status": "active"}},

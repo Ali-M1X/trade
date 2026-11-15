@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import copy
 import json
 import time
@@ -133,6 +134,9 @@ def test_news_view_scores_and_measures_headlines():
     repo.add_news({**base, "id": "a", "title": "OKX to list ABC", "seen_at": NOW - HOUR, "level": 1, "rule": "okx_spot_listing",
                    "coins": ["ABC"], "prices": {"ABC": {"p0": 10, "1h": 10.5, "4h": 9.0, "24h": 11}}})
     repo.add_news({**base, "id": "b", "title": "stocks", "seen_at": NOW - HOUR, "level": 0, "rule": "ignored", "coins": []})
+    # first read today, published months ago: not on the page
+    repo.add_news({**base, "id": "c", "title": "OKX to delist OLD", "ts": NOW - 200 * 24 * HOUR, "seen_at": NOW - HOUR,
+                   "level": -2, "rule": "okx_delist", "coins": ["OLD"]})
     v = pi.news_view([repo], NOW)
     assert [i["title"] for i in v["items"]] == ["OKX to list ABC"]
     it = v["items"][0]
@@ -183,9 +187,11 @@ def test_panel_api_http(cfg, tmp_path):
 def test_run_log_keeps_the_last_runs(tmp_path):
     repo = Repository(tmp_path / "s.db")
     for i in range(305):
-        _log_run(repo, int(time.time() * 1000) - 5000, ["run-1h"], [], {"gate": 1} if i == 304 else {})
+        client = SimpleNamespace(failures={"gate": 1}, last_error={"gate": "fetch_ohlcv X: BadRequest: too old"}) if i == 304 else None
+        _log_run(repo, int(time.time() * 1000) - 5000, ["run-1h"], [], client)
     log = repo.get_state("run_log")
     assert len(log) == 300 and log[-1]["ex"] == {"gate": 1} and 4 <= log[-1]["dur"] < 30
+    assert log[-1]["ex_err"]["gate"].startswith("fetch_ohlcv") and log[-2]["ex_err"] == {}
 
 
 def test_build_carries_the_insights(cfg, tmp_path):

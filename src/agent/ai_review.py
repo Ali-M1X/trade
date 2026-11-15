@@ -222,6 +222,31 @@ def score_local(cfg: dict, all_cases: list[dict], now: int) -> dict:
 
 
 # ------------------------------------------------------------------ LLM reviewers
+LAST_ERR: dict[str, str] = {}        # reviewer -> why its last call failed (shown in the AI tab)
+AUTO_FREE = "auto-free"              # OpenRouter: pick whichever free model is offered today
+
+
+def free_models(rv: dict, get=None) -> list[str]:
+    """OpenRouter's free chat models, the reviewer's `prefer` list first. Free models come and go
+    (deepseek-chat-v3-0324:free was withdrawn on 2026-11-15), so the list is read on every run."""
+    import requests
+    get = get or requests.get
+    try:
+        r = get(rv["url"].rstrip("/") + "/models", timeout=30)
+        data = r.json().get("data") or []
+    except Exception as e:                             # noqa: BLE001
+        LAST_ERR[rv["key"]] = f"model list: {e}"[:200]
+        return []
+    ids = [m["id"] for m in data if str(m.get("id", "")).endswith(":free")
+           and "text" in ((m.get("architecture") or {}).get("output_modalities") or ["text"])]
+    prefer = [p.lower() for p in rv.get("prefer") or []]
+
+    def rank(i):
+        hit = [n for n, p in enumerate(prefer) if p in i.lower()]
+        return (hit[0] if hit else len(prefer), i)
+    return sorted(ids, key=rank)
+
+
 def _chat(rv: dict, messages: list[dict], post=None) -> str | None:
     key = os.environ.get(rv.get("key_env") or "")
     if not key:
@@ -234,14 +259,21 @@ def _chat(rv: dict, messages: list[dict], post=None) -> str | None:
                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     except Exception as e:                             # noqa: BLE001
         log.warning("%s: %s", rv["key"], e)
+        LAST_ERR[rv["key"]] = f"{type(e).__name__}: {e}"[:200]
         return None
     if r.status_code != 200:
         log.warning("%s: HTTP %s %s", rv["key"], r.status_code, r.text[:200])
+        LAST_ERR[rv["key"]] = f"HTTP {r.status_code}: {r.text[:180]}"
         return None
     try:
-        return r.json()["choices"][0]["message"]["content"]
+        text = r.json()["choices"][0]["message"]["content"]
     except (KeyError, IndexError, ValueError, TypeError):
+        text = None
+    if not text:
+        log.warning("%s: empty or unreadable answer: %s", rv["key"], r.text[:300])
+        LAST_ERR[rv["key"]] = f"empty answer: {r.text[:180]}"
         return None
+    return text
 
 
 def _json_from(text: str | None) -> dict | None:
@@ -286,6 +318,9 @@ def _predict_llm(rv: dict, c: dict, train: list[dict], lessons: list[str], post=
                                {"role": "user", "content": json.dumps(user, ensure_ascii=False)}], post))
     p = _num((js or {}).get("p_win"))
     if p is None:
+        if rv["key"] not in LAST_ERR:
+            LAST_ERR[rv["key"]] = "answer without p_win"
+        log.warning("%s: no p_win in the answer: %s", rv["key"], str(js)[:200])
         return None
     return max(0.0, min(100.0, p)), str((js or {}).get("reason") or "")[:200]
 
@@ -299,7 +334,7 @@ def _lesson_llm(rv: dict, c: dict, pred, post=None) -> str | None:
     return les[:300] or None
 
 
-def run_llm(cfg: dict, all_cases: list[dict], now: int, post=None) -> dict:
+def run_llm(cfg: dict, all_cases: list[dict], now: int, post=None, get=None) -> dict:
     """One pass of every LLM reviewer: lessons from newly closed trades, then scores for
     trades it has not scored (open ones first, then retro), within its call budget."""
     path = llm_path(cfg)
@@ -311,6 +346,17 @@ def run_llm(cfg: dict, all_cases: list[dict], now: int, post=None) -> dict:
         if not os.environ.get(rv.get("key_env") or ""):
             store["errors"][k] = "no key"
             continue
+        LAST_ERR.pop(k, None)
+        models = [rv["model"]]
+        dead = {m: t for m, t in (store.setdefault("dead", {}).get(k) or {}).items() if now - t < 86_400_000}
+        store["dead"][k] = dead                  # free models that refused us today: not asked again
+        if rv.get("model") == AUTO_FREE:
+            models = [m for m in free_models(rv, get) if m not in dead][:3]
+            if not models:
+                store["errors"][k] = "no free model"
+                store.setdefault("why", {})[k] = LAST_ERR.get(k, "")
+                continue
+        rv = {**rv, "model": models.pop(0)}
         budget = int(rv.get("budget", 6))
         day = time.strftime("%Y-%m-%d", time.gmtime(now / 1000))
         calls = store.setdefault("calls", {}).get(k) or {}
@@ -334,6 +380,11 @@ def run_llm(cfg: dict, all_cases: list[dict], now: int, post=None) -> dict:
         todo = sorted([c for c in all_cases if k not in (preds.get(c["id"]) or {})],
                       key=lambda c: (c["done"], -c["created"]))     # open first, newest first
         for c in todo:
+            if failures >= 2 and models and budget > 0:   # this free model is gone: the next one
+                log.warning("%s: %s failed, trying %s", k, rv["model"], models[0])
+                if not LAST_ERR.get(k, "").startswith("HTTP 429"):   # busy is not withdrawn
+                    dead[rv["model"]] = now
+                rv, failures = {**rv, "model": models.pop(0)}, 0
             if budget <= 0 or failures >= 2:
                 break
             live = not c["done"] and now - c["created"] <= 3 * 3_600_000
@@ -348,6 +399,8 @@ def run_llm(cfg: dict, all_cases: list[dict], now: int, post=None) -> dict:
             preds.setdefault(c["id"], {})[k] = [now if live else c["created"], round(res[0], 1), 0 if live else 1, res[1]]
         store["calls"][k] = {"day": day, "n": used + start_budget - budget}
         store["errors"][k] = "API failed" if failures >= 2 else ("daily limit" if rv.get("daily") and not start_budget else "")
+        store.setdefault("why", {})[k] = LAST_ERR.get(k, "") if failures else ""
+        store.setdefault("model", {})[k] = rv["model"]
         store.setdefault("ran", {})[k] = now
     store["ts"] = now
     _save(path, store)
@@ -468,7 +521,8 @@ def view(cfg: dict, all_cases: list[dict], now: int) -> dict:
         g["live"] = grade(liver, liveb)
         out_rev.append({"key": k, "name": name, "kind": kind, **g,
                         "scored": sum(1 for c in all_cases if k in (preds.get(c["id"]) or {})),
-                        "ran": (llm.get("ran") or {}).get(k), "error": (llm.get("errors") or {}).get(k, "")})
+                        "ran": (llm.get("ran") or {}).get(k), "error": (llm.get("errors") or {}).get(k, ""),
+                        "why": (llm.get("why") or {}).get(k, ""), "model": (llm.get("model") or {}).get(k)})
     trust = {r["key"]: r["trust"] for r in out_rev}
     open_rows, recent = [], []
     for c in all_cases:
