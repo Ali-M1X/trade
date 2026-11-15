@@ -294,3 +294,18 @@ svg.scatter .pt{outline:none}
 .trust{height:8px;border-radius:4px;background:var(--chip);margin:8px 0 4px;overflow:hidden}.trust i{display:block;height:100%;background:linear-gradient(90deg,var(--warn),var(--pos))}
 .aist{margin:8px 0;gap:8px}.aist>div{font-size:12px;color:var(--muted)}.aist .v{display:block;font-size:17px;color:var(--fg, inherit);text-align:right}.aist small{display:block;font-size:11px}
 .small{font-size:12px}.calib{font-size:12px;margin:6px 0}.lessons li{margin:4px 0;line-height:1.8}
+/* summary tab (2026-11-15) */
+.badge.new{background:rgba(59,130,246,.18);color:var(--acc);font-size:11px;line-height:17px;margin-inline-start:4px}
+.feed{list-style:none;margin:6px 0;padding:0}
+.feed li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px;padding:6px 4px;border-bottom:1px solid var(--line);line-height:1.7;font-size:14px}
+.feed li:last-child{border-bottom:0}.feed li.click{cursor:pointer}.feed li.click:hover{background:rgba(127,127,127,.06)}
+.feed .ft{flex:0 0 auto;min-width:44px;color:var(--muted);font-size:12px;direction:ltr;text-align:left}
+.feed .stars{color:#ff8a00;letter-spacing:-1px}
+.alerts{list-style:none;margin:6px 0;padding:0}
+.alerts li{margin:6px 0;padding:8px 12px;border-radius:10px;background:var(--card2);border:1px solid var(--line);border-inline-start:4px solid var(--line);line-height:1.8;font-size:14px}
+.alerts li a{color:var(--fg);text-decoration:none;display:block}.alerts li a:hover{color:var(--acc)}
+.alerts li.neg{border-inline-start-color:var(--neg)}.alerts li.warn{border-inline-start-color:var(--warn)}
+.alerts li.pos{border-inline-start-color:var(--pos)}.alerts li.acc{border-inline-start-color:var(--acc)}
+.sumrow{margin-top:10px}
+.sdir{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--card2)}
+.sdir .l{display:block;font-size:12px;color:var(--muted)}.sdir b{display:block;font-size:16px;margin:2px 0}.sdir small{display:block;font-size:12px;line-height:1.7}
