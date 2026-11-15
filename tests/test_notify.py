@@ -287,3 +287,9 @@ def test_messages_link_to_the_coin_chart_on_the_panel(cfg):
     assert panel_link(cfg, "SOL") == "\nنمودار: https://signal.techfold.ir/#chart/SOL"
     cfg["panel"]["url"] = "http://insecure.example"
     assert panel_link(cfg, "SOL") == ""
+
+
+def test_signal_message_names_runners_to_close_for_room(cfg):
+    msg = fmt.signal_message(signal_eval(), cfg, runners=["WIF", "MOCA"])
+    assert "۲۰٪ باقی‌مانده‌ی WIF، MOCA را ببند" in msg
+    assert fmt.signal_message(signal_eval(), cfg, runners=[]) == fmt.signal_message(signal_eval(), cfg)

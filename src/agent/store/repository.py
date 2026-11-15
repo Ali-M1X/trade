@@ -57,6 +57,7 @@ CANDLE_COLUMNS = ["ts", "open", "high", "low", "close", "volume"]
 
 class Repository:
     def __init__(self, path: str | Path = ":memory:"):
+        self.path = str(path)
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         # timeout: the funnel (run-funnel) and the minute run write the same file at once
@@ -67,6 +68,7 @@ class Repository:
     def open_readonly(cls, path: str | Path) -> "Repository":
         """Read an existing database without creating or changing anything (status panel)."""
         repo = cls.__new__(cls)
+        repo.path = str(path)
         repo.conn = sqlite3.connect(f"file:{Path(path).resolve()}?mode=ro", uri=True, timeout=30)
         return repo
 

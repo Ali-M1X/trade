@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from .analysis.frame import make_frame
 from .backtest.variants import merge
@@ -238,6 +239,54 @@ def summarize_evaluations(evs: list[Evaluation]) -> str:
 
 
 # ------------------------------------------------------------------ signals
+SKIP_KEY = "skipped_signals"
+SKIP_REPEAT_MS = 4 * 3_600_000          # the same coin refused again within this: counted once
+
+
+def note_skip(repo, ev, reason: str, now_ms: int) -> None:
+    """2026-11-15 (Ali): keep every A/B signal the book refused (full cap, correlation, loss-streak
+    pause, cooldown) so the panel can show how often a good setup found no room. A coin that is
+    already open ("duplicate") is not a missed signal."""
+    if reason == "duplicate":
+        return
+    skips = repo.get_state(SKIP_KEY, []) or []
+    for s in reversed(skips):
+        if s["base"] == ev.base and s["side"] == ev.side and s["reason"] == reason and now_ms - s["last"] < SKIP_REPEAT_MS:
+            s.update(last=now_ms, n=s.get("n", 1) + 1, score=max(s.get("score") or 0, round(ev.score, 1)))
+            break
+    else:
+        skips.append({"ts": now_ms, "last": now_ms, "n": 1, "base": ev.base, "side": ev.side,
+                      "grade": ev.grade, "score": round(ev.score, 1), "reason": reason})
+    repo.set_state(SKIP_KEY, skips[-300:])
+
+
+def runners(cfg: dict, repo) -> list[str]:
+    """Approved trades of both systems past TP2: only their last part is still open, with the stop
+    at entry. The new-signal message names them as the cheapest place to free up margin."""
+    from .store.repository import Repository
+    out, paths = [], {cfg["storage"]["db_path"]}
+    if (cfg.get("system2") or {}).get("enabled") and cfg["system2"].get("db_path"):
+        paths.add(cfg["system2"]["db_path"])
+    for s in repo.get_signals(["tp2"]):
+        out.append((s["updated_at"] or 0, s["symbol"]))
+    own = getattr(repo, "path", None)
+    for path in paths:
+        if (own is not None and str(path) == str(own)) or not os.path.exists(str(path)):
+            continue
+        try:
+            other = Repository(path)
+            out += [(s["updated_at"] or 0, s["symbol"]) for s in other.get_signals(["tp2"])]
+            other.close()
+        except Exception:                       # noqa: BLE001 - a hint only
+            continue
+    seen, names = set(), []
+    for _, b in sorted(out):                    # longest past TP2 first
+        if b not in seen:
+            seen.add(b)
+            names.append(b)
+    return names
+
+
 def publish(cfg: dict, repo, market, notifier, evs: list[Evaluation], now_ms: int,
             state: dict | None = None) -> list[int]:
     """Turn A/B evaluations into signals (subject to the book's rules) and send Watch
@@ -256,6 +305,7 @@ def publish(cfg: dict, repo, market, notifier, evs: list[Evaluation], now_ms: in
             adm = book.admit(ev.base, ev.side, ev.score, now_ms, corr)
             if not adm.ok:
                 log.info("%s %s not sent: %s", ev.base, ev.grade, adm.reason)
+                note_skip(repo, ev, adm.reason, now_ms)
                 continue
             meta = {"regime": state["regime"], "majors": state["majors"],
                     "evaluation": ev.to_dict(), "out_of_cap": adm.out_of_cap}
@@ -263,7 +313,7 @@ def publish(cfg: dict, repo, market, notifier, evs: list[Evaluation], now_ms: in
                 meta["system"] = state["regime"]["name"]
             sid, _ = book.create(ev, now_ms, meta)
             created.append(sid)
-            notifier.send(fmt.signal_message(ev, cfg, adm.out_of_cap))
+            notifier.send(fmt.signal_message(ev, cfg, adm.out_of_cap, runners(cfg, repo)))
         elif ev.grade == "Watch" and ev.plan is not None and cfg["watch_alerts"]["enabled"]:
             key = f"{ev.base}:{ev.side}"
             if now_ms - watch_sent.get(key, 0) >= cfg["watch_alerts"]["repeat_hours"] * 3_600_000:

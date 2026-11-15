@@ -236,6 +236,26 @@
         (m.btc_weak ? ' · <span class="warn">BTC ضعیف</span>' : "") + "</div>" : "") +
       (s.paused_until ? '<div class="warn">توقف بعد از ضررهای پشت‌سرهم تا ' + esc(jfmt(s.paused_until)) + "</div>" : "") + "</div>";
   }
+  // signals the book refused (2026-11-15, Ali: how often did a good setup find no room?)
+  var SKIPR = {max_active: ["سقف پوزیشن پر بود", "warn"], correlated: ["هم‌جهت با پوزیشن هم‌بسته", "gray"],
+    loss_streak_pause: ["توقف بعد از ضررهای پشت‌سرهم", "short"], cooldown: ["تازه استاپ خورده بود", "gray"]};
+  function skips(days) { var cut = Date.now() - days * 86400000; return (D.skips || []).filter(function (s) { return s.last >= cut; }); }
+  function skipsSection() {
+    var all = skips(30), by = {};
+    all.forEach(function (s) { by[s.reason] = (by[s.reason] || 0) + 1; });
+    var day = skips(1).length;
+    return '<section id="skips"><h2>سیگنال‌های ردشده <small>A و B که ارسال نشدند، ۳۰ روز گذشته</small></h2>' +
+      (all.length ? '<div class="grid g4">' +
+        statCard("۲۴ ساعت گذشته", fa(day), day ? "سیگنال خوب جا پیدا نکرد" : "چیزی رد نشده") +
+        Object.keys(by).map(function (k) { return statCard(esc((SKIPR[k] || [k])[0]), fa(by[k]), "در ۳۰ روز"); }).join("") + "</div>" +
+        '<div class="scroll"><table><thead><tr><th>زمان</th><th>کوین</th><th>جهت</th><th>رده</th><th>امتیاز</th><th>سیستم</th><th>دلیل</th></tr></thead><tbody>' +
+        all.slice(0, 30).map(function (s) {
+          var r = SKIPR[s.reason] || [s.reason, "gray"];
+          return "<tr><td>" + esc(jfmt(s.ts, "dt")) + (s.n > 1 ? ' <small class="muted">(' + fa(s.n) + " بار تا " + esc(jfmt(s.last, "time")) + ")</small>" : "") + "</td><td><b>" + esc(s.base) + "</b></td><td>" + side(s.side) +
+            "</td><td>" + esc(s.grade) + "</td><td>" + fa(Math.round(s.score || 0)) + "</td><td>" + esc(sysShort(s.system)) + '</td><td><span class="badge ' + r[1] + '">' + esc(r[0]) + "</span></td></tr>";
+        }).join("") + "</tbody></table></div>"
+        : '<p class="pos">در ۳۰ روز گذشته هیچ سیگنال A یا B‌ای رد نشده است. (ثبت از ۲۴ آبان شروع شده.)</p>') + "</section>";
+  }
   var TASKS = {"run-1h": "بررسی سیگنال", "run-15m": "مدیریت پوزیشن‌ها", "run-4h": "قیف و شورت‌لیست", "run-daily": "روزانه", "run-weekly": "هفتگی"};
   function runs() {
     var s = (D.systems || [])[0];
@@ -1376,6 +1396,7 @@
     "امتیاز در برابر نتیجه": "هر نقطه یک معامله است: محور افقی امتیاز سیستم و محور عمودی نتیجه بر حسب R. خط‌های عمودی مرزهای Watch (۵۵)، B (۶۵) و A (۷۵) هستند.\nاگر نقطه‌های سمت راست به‌طور معنادار بالاتر از سمت چپ باشند، امتیاز واقعاً پیش‌بینی می‌کند. با گذشت زمان معلوم می‌شود مرزها جای درستی هستند یا نه.",
     "معامله‌های شما": "فقط معامله‌هایی که در صفحه‌ی نمودار با «گرفتم» علامت زده‌اید. کنارش نتیجه‌ی سیگنال‌های تأییدشده‌ای را می‌بینید که نگرفتید.",
     "سلامت اجراها": "هر اجرای ربات روی سرور: کی شروع شد، چقدر طول کشید و آیا بخشی خطا داد.\nاجرای قیف (هر ساعت) چند دقیقه طول می‌کشد و در این مدت اجرای بعدی صبر می‌کند. این عادی است.",
+    "سیگنال‌های ردشده": "سیگنال‌های A و B که ربات ساخت ولی به تلگرام نفرستاد، چون:\n• سقف ۵ پوزیشنِ در ریسک پر بود (پوزیشن‌هایی که TP1 خورده‌اند حساب نمی‌شوند و امتیاز ۸۵ به بالا از سقف رد می‌شود)\n• یک پوزیشن هم‌جهت و هم‌بسته‌ی دیگر باز بود\n• ربات بعد از ضررهای پشت‌سرهم مکث کرده بود\n• آن کوین تازه استاپ خورده بود.\nاگر همان کوین چند بار پشت هم رد شود، یک بار شمرده می‌شود.",
     "صرافی‌ها": "تعداد دفعه‌هایی که صرافی اصلی (Gate) به یک درخواست جواب نداده و ربات سراغ صرافی پشتیبان رفته است. زیر آن آخرین پیام خطای هر صرافی آمده است تا معلوم باشد کدام درخواست و چرا.\nچند خطای پراکنده عادی است، ولی اگر زیاد شد دیتا کند یا ناقص می‌شود.",
     "پشتیبان": "دیتای ربات روی سرور است و هر چند دقیقه یک نسخه روی گیت‌هاب (شاخه‌ی data) ذخیره می‌شود. اگر این عدد خیلی قدیمی شد، اتصال سرور به گیت‌هاب مشکل دارد."
   };
@@ -1798,6 +1819,7 @@
         '<p class="muted small">هر خطا یعنی یک درخواست به آن صرافی جواب نداد و ربات همان را از صرافی بعدی (OKX، Bitget و ...) گرفت. فقط اگر همه‌ی صرافی‌ها جواب ندهند، چیزی از دست می‌رود.</p>' +
         Object.keys(exErr).map(function (k) { return '<div class="exerr"><b>' + esc(k) + '</b> <small class="muted">آخرین خطا ' + esc(ago(exErr[k][0])) + '</small><code>' + esc(exErr[k][1]) + "</code></div>"; }).join("")
         : '<span class="pos">هیچ خطایی ثبت نشده است.</span>') + "</section>" +
+      skipsSection() +
       '<section><h2>اجراهای اخیر</h2><div class="chartbox small" id="dur-chart"></div>' +
       (rows ? '<div class="scroll"><table><thead><tr><th>شروع</th><th>مدت اجرا</th><th>بخش‌ها</th><th>خطا</th><th>خطای صرافی</th></tr></thead><tbody>' + rows + "</tbody></table></div>" : '<div class="empty">گزارش اجرا هنوز ثبت نشده است. بعد از اولین اجرای ربات با کد جدید پر می‌شود.</div>') + "</section>";
     var el = document.getElementById("dur-chart");
@@ -1882,6 +1904,10 @@
       var curr = r - (t.gross_r || 0);                       // the part still open, in R
       if (t.status === "active" && curr <= -0.7) out.push(["neg", "<b>" + esc(t.base) + "</b> " + side(t.side) + " نزدیک استاپ است (" + R(r) + ").", "chart/" + t.id]);
       else if (t.status === "active" && r >= 1.6) out.push(["pos", "<b>" + esc(t.base) + "</b> " + side(t.side) + " نزدیک TP1 است (" + R(r) + ").", "chart/" + t.id]);
+    });
+    // 3b) good signals the book refused in the last 24 h (full cap and the rest)
+    skips(1).forEach(function (s) {
+      out.push(["warn", "سیگنال <b>" + esc(s.base) + "</b> " + side(s.side) + " رده " + esc(s.grade) + " ارسال نشد: " + esc((SKIPR[s.reason] || [s.reason])[0]) + ".", "sys"]);
     });
     // 4) the AI reviewers disagree with an open signal
     var ai = D.ai || {};

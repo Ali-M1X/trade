@@ -217,8 +217,17 @@ def panel_link(cfg: dict, base: str) -> str:
     return f"\nنمودار: {url}/#chart/{base}" if url.startswith("https://") else ""
 
 
-def signal_message(ev, cfg: dict, out_of_cap: bool = False) -> str:
-    return _signal_message(ev, cfg, out_of_cap) + panel_link(cfg, ev.base)
+def signal_message(ev, cfg: dict, out_of_cap: bool = False, runners: list[str] | None = None) -> str:
+    return _signal_message(ev, cfg, out_of_cap) + runner_hint(runners) + panel_link(cfg, ev.base)
+
+
+def runner_hint(runners: list[str] | None) -> str:
+    """2026-11-15 (Ali): no margin left for a good signal? Close the last part of a trade past TP2:
+    its profit is taken and its stop is at entry, so it costs the least."""
+    if not runners:
+        return ""
+    return ("\nجا برای این پوزیشن نداری؟ ۲۰٪ باقی‌مانده‌ی " + "، ".join(runners[:4]) +
+            " را ببند؛ سود اصلی‌اش برداشته شده و استاپش روی ورود است.")
 
 
 def _signal_message(ev, cfg: dict, out_of_cap: bool = False) -> str:

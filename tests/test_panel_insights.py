@@ -204,3 +204,17 @@ def test_build_carries_the_insights(cfg, tmp_path):
     assert d["panel_api"] is True and d["market"] == {} and d["news_view"]["items"] == []
     v = json.loads((tmp_path / "out" / "version.json").read_text())
     assert v["now"] == NOW and len(v["app"]) == 12 and d["app"] == v["app"]
+
+
+def test_panel_lists_refused_signals_of_both_systems(cfg, tmp_path):
+    from agent.panel import skipped_signals
+    from agent.runs import SKIP_KEY
+    c = copy.deepcopy(cfg)
+    c["storage"]["db_path"] = str(tmp_path / "s1.db")
+    c["system2"] = {"enabled": True, "db_path": str(tmp_path / "s2.db")}
+    Repository(tmp_path / "s1.db").set_state(SKIP_KEY, [{"ts": 1, "last": 5, "n": 2, "base": "SOL", "side": 1,
+                                                         "grade": "A", "score": 80, "reason": "max_active"}])
+    Repository(tmp_path / "s2.db").set_state(SKIP_KEY, [{"ts": 7, "last": 9, "n": 1, "base": "ADA", "side": -1,
+                                                         "grade": "B", "score": 66, "reason": "correlated"}])
+    s = skipped_signals(c)
+    assert [(x["base"], x["system"]) for x in s] == [("ADA", "سیستم ۲"), ("SOL", "سیستم ۱")]

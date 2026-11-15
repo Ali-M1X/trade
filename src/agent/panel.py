@@ -667,6 +667,26 @@ def _market_bases(pl: dict) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+def skipped_signals(cfg: dict) -> list[dict]:
+    """A/B signals each system refused (full cap, correlation, loss-streak pause, cooldown),
+    newest first (runs.note_skip, 2026-11-15)."""
+    from .runs import SKIP_KEY
+    s2 = cfg.get("system2") or {}
+    dbs = [("سیستم ۱", cfg["storage"]["db_path"])] + ([("سیستم ۲", s2["db_path"])] if s2.get("enabled") else [])
+    out = []
+    for name, path in dbs:
+        repo = _open(path)
+        if repo is None:
+            continue
+        try:
+            out += [{**s, "system": name} for s in repo.get_state(SKIP_KEY, []) or []]
+        except sqlite3.Error:
+            pass
+        finally:
+            repo.close()
+    return sorted(out, key=lambda s: -s["last"])
+
+
 def insights(cfg: dict, pl: dict) -> None:
     """Adds MAE/MFE, BTC beta, system health, taken marks and market data to the payload."""
     from . import panel_insights as pi
@@ -684,6 +704,7 @@ def insights(cfg: dict, pl: dict) -> None:
     finally:
         if repo is not None:
             repo.close()
+    pl["skips"] = skipped_signals(cfg)
     try:                                            # AI reviewers (2026-11-15): advisory, never blocks the build
         from . import ai_review
         pl["ai"] = ai_review.panel_view(cfg, now)
