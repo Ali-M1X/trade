@@ -204,3 +204,31 @@ def test_trades_without_a_stored_leverage_get_the_sizing_rule(cfg, tmp_path):
     Repository(c["system2"]["db_path"]).close()
     t = next(t for t in collect(c, NOW)["trades"] if t["base"] == "NOLEV")
     assert t["leverage"] == 8                                       # stop 5% -> 1 / (2.5 x 5%)
+
+
+def test_partial_exits_are_booked_when_they_happen():
+    """TP1 at +2R on half the position books +1R at once; the open half stays unrealized."""
+    t = {"base": "AAA", "side": 1, "entry": 100.0, "sl": 90.0, "filled_at": 1, "closed_at": None,
+         "status": "tp1", "risk_pct": 10, "net_r": 1.0, "cost_r": 0.0, "gross_r": 1.0, "open": True,
+         "sl_pct": 10.0, "open_r": 1.5, "open_frac": 0.5, "price": 110.0,
+         "events": [["tp1", 5, 120.0]], "partials": [(5, 1.0, 0.5)]}
+    a = simulate([t], 100.0, 0, 3 * 3_600_000, {"AAA": [(2, 105.0), (6, 110.0)]})
+    assert a["balance"] == pytest.approx(110.0)                 # +1R of $10 booked at TP1
+    assert a["equity"] == pytest.approx(115.0)                  # + the open half at +0.5R
+    assert len(a["partial"]) == 1 and a["wins"] == 1 and a["pnl"] == pytest.approx(10.0)
+    assert a["eq_curve"][-1][1] == pytest.approx(115.0)
+    closed = dict(t, status="tp3", open=False, closed_at=50, net_r=1.8, open_r=None,
+                  events=[["tp1", 5, 120.0], ["tp3", 50, 116.0]])
+    b = simulate([closed], 100.0, 0, 100)
+    assert b["balance"] == pytest.approx(118.0)                 # the whole trade books risk x net R
+    assert [round(v, 2) for _, v in b["curve"]][:3] == [100.0, 110.0, 118.0]
+
+
+def test_regime_labels_trend_range_and_whipsaw():
+    from agent.panel_regime import DEFAULTS, label_bars, segments
+    moves = [0.1, -0.1] * 10 + [-1.5] * 6 + [0.2, -0.2] * 6
+    sizes = [2.0] * 20 + [3.0] * 6 + [1.5] * 11 + [6.0]
+    labs = label_bars(moves, sizes, DEFAULTS)
+    assert labs[25] == "trend_down" and labs[-2] == "range_quiet" and labs[-1] == "whipsaw"
+    segs = segments(list(range(0, len(moves) * 10, 10)), labs, moves, sizes, 2)
+    assert [s["label"] for s in segs] == ["range", "trend_down", "range"]

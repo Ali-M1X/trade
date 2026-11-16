@@ -83,6 +83,7 @@ REASON_FA = {
     "level_worn": "سطح فرسوده",
     "weak_level": "سطح ضعیف",
     "funding_crowded": "فاندینگ شلوغ",
+    "news_against": "خبر قوی خلاف جهت",
     "out_of_cap": "خارج از سقف",
     "not_issued": "صادر نشد",
     # classic filters (technical.classic, experiment)
@@ -249,7 +250,18 @@ def _signal_message(ev, cfg: dict, out_of_cap: bool = False) -> str:
               f"لوریج: {p.leverage}x ایزوله",
               f"دلیل: {reason(ev.to_dict(), out_of_cap)}",
               f"امتیاز: {shown_score(ev.score)} (رده {ev.grade})"]
+    n = getattr(ev, "news", None)
+    if n and n.get("points"):
+        lines.append(news_line(n))
     return "\n".join(lines)
+
+
+def news_line(n: dict) -> str:
+    """2026-11-16: the news factor in the signal (technical.news)."""
+    pts = n["points"]
+    what = (f"{fa(n['pos'])} مثبت" if n.get("pos") else "") + ("، " if n.get("pos") and n.get("neg") else "") + \
+        (f"{fa(n['neg'])} منفی" if n.get("neg") else "")
+    return f"اخبار: {'+' if pts > 0 else '−'}{fmt_num(abs(pts), 1)} امتیاز ({what} در ۳ روز اخیر)"
 
 
 def watch_message(ev, cfg: dict) -> str | None:

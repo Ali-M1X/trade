@@ -288,3 +288,26 @@ def test_other_exchanges_are_parsed_by_their_fields():
     from agent.news.classify import classify, exchange_coins
     assert classify(u["title"], "upbit").rule == "upbit_listing" and exchange_coins(u["title"]) == ["ZRO"]
     assert classify(k["title"], "kucoin").level == 1
+
+
+def test_coin_news_adds_importance_and_count_and_ignores_old_or_neutral_items():
+    from agent.news.signal import coin_news, news_points
+    H = 3_600_000
+    now = 1_800_000_000_000
+    cfg = {"technical": {"news": {"enabled": True}}}
+    items = [
+        {"kind": "exchange", "level": 2, "rule": "upbit_listing", "coins": ["ABC"], "ts": now - H, "seen_at": now - H, "title": "Upbit lists ABC"},
+        {"kind": "media", "level": 1, "rule": "media_partner", "coins": ["ABCUSDT"], "ts": now - 2 * H, "seen_at": now - 2 * H, "title": "ABC partners"},
+        {"kind": "media", "level": 0, "rule": None, "coins": ["ABC"], "ts": now, "seen_at": now, "title": "ABC price"},
+        # a year-old announcement seen again today counts from its own date: too old
+        {"kind": "exchange", "level": -2, "rule": "binance_delist", "coins": ["XYZ"], "ts": now - 365 * 24 * H, "seen_at": now, "title": "delist XYZ"},
+        {"kind": "media", "level": -2, "rule": "media_hack", "coins": ["BTC"], "ts": now, "seen_at": now, "title": "hack mentions BTC"},
+    ]
+    cn = coin_news(items, now, cfg)
+    assert set(cn) == {"ABC"}                       # XYZ too old, BTC media only, neutral skipped
+    abc = cn["ABC"]
+    assert abc["n"] == 2 and abc["pos"] == 2 and abc["score"] > 3
+    assert news_points(abc, 1, cfg) == (10.0, False)       # capped at max_points
+    pts, against = news_points(abc, -1, cfg)
+    assert pts == -10.0 and against                         # a short against strong good news
+    assert news_points(abc, 1, {"technical": {"news": {"enabled": False}}}) == (0.0, False)

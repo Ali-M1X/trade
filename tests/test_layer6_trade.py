@@ -345,3 +345,19 @@ def test_avoid_turns_listed_setups_into_watch(cfg, setup):
     c = copy.deepcopy(cfg)
     c["technical"]["avoid"] = {"levels": [kind], "max_score": 101}
     assert evaluate("SOL", 1, frames, regime, majors, c, funding=0.0001).is_signal
+
+
+def test_strong_news_moves_the_score_and_blocks_the_other_side(cfg, setup):
+    frames, majors, regime = setup
+    c = {**cfg, "technical": {**cfg["technical"], "news": {"enabled": True}}}
+    base = evaluate("SOL", 1, frames, regime, majors, c, funding=0.0001)
+    good = {"score": 2.0, "n": 2, "pos": 2, "neg": 0, "top": [["listing", 2]]}
+    up = evaluate("SOL", 1, frames, regime, majors, c, funding=0.0001, news=good)
+    assert up.score == pytest.approx(base.score + 6) and up.news["points"] == 6
+    bad = {"score": -3.0, "n": 1, "pos": 0, "neg": 1, "top": [["delisting", -2]]}
+    down = evaluate("SOL", 1, frames, regime, majors, c, funding=0.0001, news=bad)
+    assert down.score == pytest.approx(base.score - 9) and "news_against" in down.flags
+    assert not down.is_signal
+    off = evaluate("SOL", 1, frames, regime, majors, {**cfg, "technical": {**cfg["technical"], "news": {"enabled": False}}},
+                   funding=0.0001, news=bad)
+    assert off.score == pytest.approx(base.score) and off.news is None
