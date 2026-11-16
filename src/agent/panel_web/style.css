@@ -336,3 +336,14 @@ svg.regchart .re{stroke:var(--bg);stroke-width:2}
 .legend i.re{border-radius:50%}
 .badge.neg{background:var(--short-bg);color:var(--neg)}.badge.pos{background:var(--long-bg);color:var(--pos)}.badge.warn{background:rgba(240,185,11,.12);color:var(--warn)}
 a.sdir{display:block;color:inherit;text-decoration:none}a.sdir:hover{border-color:var(--acc)}
+/* calendar: past week accordion */
+details.calpast{border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:0 0 14px}
+details.calpast>summary{cursor:pointer;font-size:15px}
+details.calpast>p{margin:8px 0}
+details.calday{border-top:1px solid var(--line);padding:6px 0}
+details.calday>summary{cursor:pointer;padding:4px 0}
+details.calev{margin:2px 0 2px 0;padding:4px 10px;border-radius:8px}
+details.calev[open]{background:rgba(127,127,127,.06)}
+details.calev>summary{cursor:pointer;line-height:1.9;font-size:13px}
+details.calev .calbtc{margin-inline-start:6px;font-size:12px}
+.calexp p,.caltab tr.calx p{margin:4px 0;line-height:1.9;font-size:13px}

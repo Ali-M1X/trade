@@ -57,6 +57,29 @@ def test_calendar_merges_this_and_next_week():
     assert [e["title"] for e in pi._merge_calendar(cache, NOW)] == ["a", "b"]
 
 
+def test_calendar_history_keeps_a_week_and_takes_late_actuals():
+    cache = {"calendar": {"v": [{"ts": NOW - HOUR, "title": "CPI", "country": "USD", "actual": "", "w": 5},
+                                {"ts": NOW - 9 * 24 * HOUR, "title": "old", "country": "EUR", "w": 1}]}}
+    hist = pi.remember_calendar(cache, NOW)
+    assert [e["title"] for e in hist.values()] == ["CPI"]                 # older than 8 days: dropped
+    cache["calendar"]["v"][0]["actual"] = "0.4%"
+    pi.remember_calendar(cache, NOW)
+    cache["calendar"] = {"v": []}                                         # the source moved on to a new week
+    hist = pi.remember_calendar(cache, NOW)
+    assert list(hist.values())[0]["actual"] == "0.4%"
+
+
+def test_btc_reaction_from_15m_candles():
+    q = 900_000
+    t0 = 1_000 * q
+    # [open ms, open, close, high, low]; 18 candles, the last one still open
+    c = [[t0 + i * q, 100 + i, 101 + i, 102 + i, 99 + i] for i in range(18)]
+    r = pi.btc_reaction(c, t0 + 5 * 60_000)                               # released 5 min into the candle
+    assert r == {"p0": 100, "m15": 1.0, "h1": 4.0, "h4": 16.0, "swing_h1": round((105 / 99 - 1) * 100, 3)}
+    assert "h4" not in pi.btc_reaction(c[:16], t0)                       # the 16th candle is the open one
+    assert pi.btc_reaction(c, t0 + 17 * q) is None                        # its candle is still open
+
+
 class _Resp:
     def __init__(self, data, code=200):
         self.status_code, self._data = code, data
@@ -93,6 +116,28 @@ def test_market_data_caches_and_survives_a_dead_network(cfg, tmp_path):
     m2 = pi.market_data(c, ["BTC"], NOW, pi._Net(get=dead))           # fresh cache: nothing asked
     assert m2["deriv"]["BTC"]["funding"] == 0.0001 and len(asked) == n
     assert pi.market_data(_cfg(cfg, tmp_path), ["BTC"], NOW) == {}     # switched off
+
+
+def test_market_data_keeps_past_releases_with_btc_reaction(cfg, tmp_path):
+    c = _cfg(cfg, tmp_path, market_data=True)
+    q = 900_000
+    ts = NOW - 6 * HOUR
+    ts -= ts % q
+    t0 = ts - q
+
+    def get(url, params=None, timeout=None, headers=None):
+        if url.endswith("/candlesticks"):
+            return _Resp([{"t": (t0 + i * q) // 1000, "o": "100", "c": str(100 + i), "h": "200", "l": "50"} for i in range(30)])
+        if "faireconomy" in url and "next" not in url:
+            iso = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(ts / 1000))
+            return _Resp([{"title": "CPI m/m", "country": "USD", "impact": "High", "date": iso,
+                           "actual": "0.4%", "forecast": "0.3%"}])
+        return _Resp([])
+
+    m = pi.market_data(c, [], NOW, pi._Net(get=get))
+    past = m["calendar_past"]
+    assert [e["title"] for e in past] == ["CPI m/m"]
+    assert past[0]["btc"]["h1"] == 4.0 and past[0]["btc"]["h4"] == 16.0   # candle 1 is the release's
 
 
 def _candles(repo, base, tf, step, closes, start):

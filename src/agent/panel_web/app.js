@@ -2425,18 +2425,108 @@
       (good == null ? "" : good ? " · معمولاً مثبت برای کریپتو" : " · معمولاً منفی برای کریپتو") + "</small>";
   }
   function wStars(w) { return '<span class="stars" title="اثر معمول روی کریپتو">' + "★★★★★".slice(0, w) + '<i>' + "★★★★★".slice(w) + "</i></span>"; }
+  function calKeep(e) {                    // the country and importance filters
+    var c = S.cal;
+    if (c.c === "usd" && e.country !== "USD") return false;
+    if (c.c === "major" && !{USD: 1, EUR: 1, GBP: 1, JPY: 1, CNY: 1}[e.country]) return false;
+    if (c.i === "h" && e.impact !== "High") return false;
+    if (c.i === "hm" && e.impact !== "High" && e.impact !== "Medium" && e.impact !== "Holiday") return false;
+    return true;
+  }
   function calFilter(all) {
     var now = Date.now(), c = S.cal;
     var dayEnd = function (ms) { var d = new Date(ms + 3.5 * 3600000); d.setUTCHours(24, 0, 0, 0); return d.getTime() - 3.5 * 3600000; };
     return all.filter(function (e) {
-      if (c.c === "usd" && e.country !== "USD") return false;
-      if (c.c === "major" && !{USD: 1, EUR: 1, GBP: 1, JPY: 1, CNY: 1}[e.country]) return false;
-      if (c.i === "h" && e.impact !== "High") return false;
-      if (c.i === "hm" && e.impact !== "High" && e.impact !== "Medium" && e.impact !== "Holiday") return false;
+      if (!calKeep(e)) return false;
       if (c.r === "today") return e.ts >= now - 12 * 3600000 && e.ts < dayEnd(now);
       if (c.r === "24") return e.ts >= now - 3600000 && e.ts < now + 24 * 3600000;
       if (c.r === "up") return e.ts >= now - 3600000;
       return true;
+    });
+  }
+  // ------------------------------------------------------------------ past releases (2026-11-16, Ali: "keep a week back, as an accordion, with the data and its effect on crypto")
+  function btcChip(b) {                    // BTC's first hour after the release
+    if (!b || b.h1 == null) return '<span class="muted">BTC: در انتظار</span>';
+    return "بیت‌کوین ۱ ساعت بعد: " + pct(b.h1, 2);
+  }
+  function calExpect(e) {                  // +1 crypto was expected up, -1 down, 0 no reading, null no numbers
+    var a = numOf(e.actual), f = numOf(e.forecast), k = CALKIND[e.kind] || CALKIND.other;
+    if (a == null || f == null) return null;
+    if (a === f || !k[3]) return 0;
+    return (a > f ? k[3] : -k[3]) > 0 ? 1 : -1;
+  }
+  function btcVerdict(e) {
+    var b = e.btc;
+    if (!b || b.h1 == null) return '<span class="muted">واکنش BTC هنوز ثبت نشده (یک ساعت پس از انتشار ثبت می‌شود).</span>';
+    var h1 = b.h1, ex = calExpect(e), quiet = Math.abs(h1) < 0.2;
+    var dir = h1 > 0 ? "بالا رفت" : "پایین آمد";
+    if (quiet) return "BTC در ساعت اول واکنش محسوسی نداشت (" + pct(h1, 2) + ")" + (b.swing_h1 >= 0.6 ? '، ولی دامنه‌ی نوسانش <span class="ltr">' + b.swing_h1.toFixed(2) + "%</span> بود: هر دو طرف را زد." : ".");
+    if (ex === 1 || ex === -1) {
+      var ok = (h1 > 0) === (ex > 0);
+      return '<span class="' + (ok ? "pos" : "warn") + '">' + (ok ? "مطابق انتظار" : "خلاف انتظار") + "</span>: BTC در ساعت اول " + pct(h1, 2) + " " + dir +
+        (ok ? "." : "؛ یعنی بازار به چیز دیگری (یا پیش‌خور شدن خبر) واکنش داد.");
+    }
+    return "BTC در ساعت اول " + pct(h1, 2) + " " + dir + ".";
+  }
+  function calDesc(e, same) {              // the explanation of a release: what it is, its data and BTC's move
+    var k = CALKIND[e.kind] || CALKIND.other, b = e.btc || {}, out = [];
+    if (k[1]) out.push("<b>" + esc(k[0]) + ":</b> " + esc(k[1]));
+    if (e.actual || e.forecast || e.previous)
+      out.push("<b>داده:</b> واقعی <b class=\"ltr\">" + esc(e.actual || "—") + "</b>، پیش‌بینی <span class=\"ltr\">" + esc(e.forecast || "—") +
+        "</span>، قبلی <span class=\"ltr\">" + esc(e.previous || "—") + "</span> " + surprise(e));
+    if (k[2]) out.push("<b>اثر معمول روی کریپتو:</b> " + esc(k[2]));
+    if (e.ts < Date.now()) {
+      out.push("<b>واکنش واقعی BTC:</b> ۱۵ دقیقه " + pct(b.m15, 2) + "، ۱ ساعت " + pct(b.h1, 2) + "، ۴ ساعت " + pct(b.h4, 2) +
+        (b.swing_h1 != null ? ' · دامنه‌ی نوسان ساعت اول <span class="ltr">' + b.swing_h1.toFixed(2) + "%</span>" : "") +
+        (b.p0 ? ' · قیمت لحظه‌ی انتشار <span class="ltr">$' + Math.round(b.p0).toLocaleString("en-US") + "</span>" : ""));
+      out.push("<b>نتیجه:</b> " + btcVerdict(e));
+      if (same && same.length) out.push('<small class="muted">هم‌زمان منتشر شد: ' + same.map(function (x) { return esc(x.country + " " + x.title); }).join("، ") +
+        "؛ حرکت BTC حاصل همه‌ی این‌هاست.</small>");
+    }
+    return out.map(function (x) { return "<p>" + x + "</p>"; }).join("");
+  }
+  function calPast() {
+    var now = Date.now(), all = (MK.calendar_past || []).filter(function (e) { return e.ts < now; });
+    var list = all.filter(calKeep);
+    var o = S.cal.past = S.cal.past || {};
+    var days = [], byDay = {};
+    list.forEach(function (e) {
+      var d = jfmt(e.ts, "ymd");
+      if (!byDay[d]) { byDay[d] = []; days.push(d); }
+      byDay[d].push(e);
+    });
+    var moved = list.filter(function (e) { return e.btc && e.btc.h1 != null && Math.abs(e.btc.h1) >= 0.5 && e.w >= 3; }).length;
+    var body = !list.length ? '<p class="muted">' + (all.length ? "با این فیلترها رویدادی در ۷ روز گذشته نیست." :
+      "تاریخچه از امروز جمع می‌شود: منبع فقط این هفته و هفته‌ی بعد را می‌دهد، پس رویدادهای گذشته با هر بار ساخت پنل نگه داشته می‌شوند تا یک هفته.") + "</p>" :
+      days.map(function (d) {
+        var evs = byDay[d], hi = evs.filter(function (e) { return e.impact === "High"; }).length;
+        return '<details class="calday" data-d="' + esc(d) + '"' + (o["d" + d] ? " open" : "") + "><summary><b>" +
+          esc(new Intl.DateTimeFormat("fa-IR", {weekday: "long", timeZone: "Asia/Tehran"}).format(new Date(evs[0].ts))) + " " + esc(d) + "</b> " +
+          '<small class="muted">' + fa(evs.length) + " رویداد" + (hi ? " · " + fa(hi) + " مهم" : "") + "</small></summary>" +
+          evs.slice().reverse().map(function (e) {
+            var c = CCY[e.country] || ["", e.country], key = e.ts + "|" + e.title + "|" + e.country;
+            var same = list.filter(function (x) { return x.ts === e.ts && x !== e && x.w >= 2; });
+            return '<details class="calev" data-k="' + esc(key) + '"' + (o[key] ? " open" : "") + "><summary>" +
+              '<span class="num">' + esc(jfmt(e.ts, "time")) + "</span> " + c[0] + " <b>" + esc(e.title) + "</b> " + wStars(e.w || 0) +
+              (e.actual ? ' <small class="muted">واقعی</small> <span class="ltr">' + esc(e.actual) + "</span>" +
+                (e.forecast ? ' <small class="muted">پیش‌بینی</small> <span class="ltr">' + esc(e.forecast) + "</span>" : "") : "") +
+              ' <span class="calbtc">' + (e.w >= 2 ? btcChip(e.btc) : "") + "</span></summary>" +
+              '<div class="calexp">' + calDesc(e, same) + "</div></details>";
+          }).join("") + "</details>";
+      }).join("");
+    return '<details class="calpast"' + (o.all ? " open" : "") + '><summary><b>رویدادهای ۷ روز گذشته</b> <small class="muted">' + fa(list.length) + " رویداد" +
+      (moved ? " · " + fa(moved) + " مورد BTC را در ساعت اول ۰٫۵٪+ جابه‌جا کرد" : "") + " · برای باز شدن بزنید</small></summary>" +
+      '<p class="muted">هر رویداد: داده‌ی منتشرشده در برابر پیش‌بینی، اثر معمولش روی کریپتو، و حرکت واقعی BTC در ۱۵ دقیقه، ۱ ساعت و ۴ ساعت بعد (از کندل‌های ۱۵ دقیقه‌ای گیت). ' +
+      "فیلتر کشور و اهمیت پایین صفحه روی این فهرست هم اعمال می‌شود.</p>" + body + "</details>";
+  }
+  function calPastBind() {
+    var o = S.cal.past = S.cal.past || {};
+    app.querySelectorAll("details.calpast, details.calday, details.calev").forEach(function (d) {
+      d.addEventListener("toggle", function (ev) {
+        ev.stopPropagation();
+        var k = d.classList.contains("calpast") ? "all" : d.classList.contains("calday") ? "d" + d.dataset.d : d.dataset.k;
+        o[k] = d.open;
+      });
     });
   }
   function calendarTab() {
@@ -2460,7 +2550,7 @@
     function seg(id, cur, opts) {
       return '<div class="seg" data-cal="' + id + '">' + opts.map(function (o) { return '<button data-v="' + o[0] + '" class="' + (cur === o[0] ? "on" : "") + '">' + o[1] + "</button>"; }).join("") + "</div>";
     }
-    app.innerHTML = eventBanner() + '<section><h2>تقویم اقتصادی <small>این هفته و هفته‌ی بعد · ساعت تهران</small></h2>' + cards +
+    app.innerHTML = eventBanner() + '<section><h2>تقویم اقتصادی <small>این هفته و هفته‌ی بعد · ساعت تهران</small></h2>' + '<div id="calpast">' + calPast() + "</div>" + cards +
       '<div class="filters">' +
       seg("r", S.cal.r, [["today", "امروز"], ["24", "۲۴ ساعت آینده"], ["up", "پیش رو"], ["all", "همه (از ۲ روز پیش)"]]) +
       seg("c", S.cal.c, [["usd", "فقط آمریکا"], ["major", "اقتصادهای بزرگ"], ["all", "همه‌ی کشورها"]]) +
@@ -2473,9 +2563,11 @@
         S.cal[el.dataset.cal] = b.dataset.v;
         el.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
         calBody();
+        var p = document.getElementById("calpast"); if (p) { p.innerHTML = calPast(); calPastBind(); }
       };
     });
     calBody();
+    calPastBind();
   }
   function calBody() {
     var el = document.getElementById("calbody"); if (!el) return;
@@ -2492,7 +2584,7 @@
         (past ? "" : '<br><small data-until="' + e.ts + '">' + esc(untilTxt(e.ts)) + "</small>") + "</td><td>" + c[0] + " " + esc(c[1]) + "</td><td>" + imp + "</td><td>" + wStars(e.w || 0) +
         "</td><td><b>" + esc(e.title) + '</b><br><small class="muted">' + esc(k[0]) + "</small></td>" +
         '<td class="num">' + esc(e.forecast || "—") + '</td><td class="num">' + esc(e.previous || "—") + '</td><td class="num">' + (e.actual ? "<b>" + esc(e.actual) + "</b><br>" + surprise(e) : "—") + "</td></tr>");
-      if (S.cal.open[key] && (k[1] || k[2])) rows.push('<tr class="calx"><td colspan="8"><b>' + esc(k[0]) + ":</b> " + esc(k[1]) + (k[2] ? '<br><b>اثر روی کریپتو:</b> ' + esc(k[2]) : "") + "</td></tr>");
+      if (S.cal.open[key] && (k[1] || k[2] || past)) rows.push('<tr class="calx"><td colspan="8">' + calDesc(e) + "</td></tr>");
     });
     el.innerHTML = '<div class="scroll"><table class="caltab"><thead><tr><th>ساعت</th><th>کشور</th><th>اهمیت</th><th>اثر روی کریپتو</th><th>رویداد</th><th>پیش‌بینی</th><th>قبلی</th><th>واقعی</th></tr></thead><tbody>' +
       rows.join("") + "</tbody></table></div>";
