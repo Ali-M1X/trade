@@ -1528,36 +1528,110 @@
       hit.map(function (t) { return esc(t.base); }).filter(function (b, i, a) { return a.indexOf(b) === i; }).join("، ") + "): " + RU(sumOf(hit, function (t) { return t.net_r; }), sumOf(hit, pnlUsd)) + ".";
     return {cur: cur, prev: prev, since: since, c: c, h: h, html: txt};
   }
+  var REGSHORT = {trend_down: "نزولی", trend_up: "صعودی", range: "رنج"};
+  var BARFA = {drop: "ریزش تند", jump_up: "جهش تند", trend_down: "روند نزولی", trend_up: "روند صعودی", whipsaw: "نوسان دوطرفه",
+    range_quiet: "رنج آرام", range: "رنج"};
+  // 2026-11-16 (Ali: "make the regime chart much nicer"): the basket line coloured by regime over a soft area,
+  // a regime ribbon under it with the move of each regime, round grid steps and a hover read-out
   function regimeChart(rg) {
     var bars = rg.bars || []; if (bars.length < 2) return "";
-    var W = 900, Hh = 230, L = 8, Rr = 46, T = 12, B = 26;
-    var x0 = bars[0][0], x1 = bars[bars.length - 1][0] + 4 * 3600000;
-    var vals = bars.map(function (b) { return b[1]; }), lo = Math.min.apply(null, vals.concat([0])), hi = Math.max.apply(null, vals.concat([0]));
-    var pad = (hi - lo) * 0.12 || 1; lo -= pad; hi += pad;
+    var BAR = 4 * 3600000, W = 960, Hh = 320, L = 10, Rr = 64, T = 16, B = 66, PB = Hh - B;
+    var x0 = bars[0][0], x1 = bars[bars.length - 1][0] + BAR;
+    var pts = [[x0, 0]].concat(bars.map(function (b) { return [b[0] + BAR, b[1]]; }));
+    var vals = pts.map(function (p) { return p[1]; }), mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+    var step = [0.5, 1, 2, 2.5, 5, 10, 20].filter(function (st) { return (mx - mn) / st <= 5; })[0] || 25;
+    var lo = Math.floor((mn - step * 0.25) / step) * step, hi = Math.ceil((mx + step * 0.25) / step) * step;
     function X(t) { return L + (t - x0) / (x1 - x0) * (W - L - Rr); }
-    function Y(v) { return T + (hi - v) / (hi - lo) * (Hh - T - B); }
-    var g = "";
-    (rg.segments || []).forEach(function (s) {
+    function Y(v) { return T + (hi - v) / (hi - lo) * (PB - T); }
+    function f1(v) { return v.toFixed(1); }
+    var segs = (rg.segments || []).filter(function (s) { return s.to > x0; });
+    var g = '<defs>' + ["neg", "pos", "warn"].map(function (c) {
+      return '<linearGradient id="rga-' + c + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--' + c + ');stop-opacity:.2"/>' +
+        '<stop offset="1" style="stop-color:var(--' + c + ');stop-opacity:0"/></linearGradient>';
+    }).join("") + "</defs>";
+    // soft background per regime
+    segs.forEach(function (s) {
       var a = Math.max(X(s.from), L), b = Math.min(X(s.to), W - Rr); if (b <= a) return;
-      g += '<rect x="' + a.toFixed(1) + '" y="' + T + '" width="' + (b - a).toFixed(1) + '" height="' + (Hh - T - B) + '" class="rb ' + REGCLS[s.label] + '"><title>' +
-        esc(REGFA[s.label] + " · " + jfmt(s.from) + " تا " + jfmt(s.to)) + "</title></rect>";
+      g += '<rect x="' + f1(a) + '" y="' + T + '" width="' + f1(b - a) + '" height="' + (PB - T) + '" class="rbg ' + REGCLS[s.label] + '"/>';
     });
-    [lo + pad, 0, hi - pad].forEach(function (v) {
-      g += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + Y(v).toFixed(1) + '" y2="' + Y(v).toFixed(1) + '" class="gl"/>' +
-        '<text x="' + (W - Rr + 4) + '" y="' + (Y(v) + 4).toFixed(1) + '" class="ax">' + (v > 0 ? "+" : "") + v.toFixed(1) + "%</text>";
+    // grid: round steps, the zero line stronger
+    var lastY = Y(pts[pts.length - 1][1]);
+    for (var v = lo; v <= hi + 1e-9; v += step) {
+      var y = f1(Y(v)), z = Math.abs(v) < 1e-9, near = Math.abs(Y(v) - lastY) < 16;
+      g += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + y + '" y2="' + y + '" class="' + (z ? "zl" : "gl") + '"/>' +
+        (near ? "" : '<text x="' + (W - Rr + 8) + '" y="' + (Y(v) + 4).toFixed(1) + '" class="ax">' + (v > 0 ? "+" : "") + (step < 1 ? v.toFixed(1) : Math.round(v)) + "%</text>");
+    }
+    // days: a faint line at Tehran midnight and the date under the ribbon
+    for (var t = Math.ceil((x0 + 12600000) / 86400000) * 86400000 - 12600000; t <= x1; t += 86400000) {
+      g += '<line x1="' + f1(X(t)) + '" x2="' + f1(X(t)) + '" y1="' + T + '" y2="' + PB + '" class="vl"/>';
+      if (t + 43200000 <= x1) g += '<text x="' + f1(X(t + 43200000)) + '" y="' + (Hh - 10) + '" class="ax" text-anchor="middle">' + esc(jfmt(t, "date")) + "</text>";
+    }
+    // the line and its area, each piece in its regime's colour
+    function inSegPts(s) {
+      var out = [];
+      pts.forEach(function (p, i) { if (p[0] > s.from && p[0] <= s.to) { if (!out.length && i) out.push(pts[i - 1]); out.push(p); } });
+      return out;
+    }
+    var pieces = segs.map(function (s) { return {c: REGCLS[s.label], p: inSegPts(s)}; }).filter(function (x) { return x.p.length > 1; });
+    if (!pieces.length) pieces = [{c: "", p: pts}];
+    pieces.forEach(function (x) {
+      var d = x.p.map(function (p, i) { return (i ? "L" : "M") + f1(X(p[0])) + " " + f1(Y(p[1])); }).join(" ");
+      if (x.c) g += '<path d="' + d + " L" + f1(X(x.p[x.p.length - 1][0])) + " " + PB + " L" + f1(X(x.p[0][0])) + " " + PB + ' Z" fill="url(#rga-' + x.c + ')"/>';
+      g += '<path d="' + d + '" class="rl ' + x.c + '"/>';
     });
-    var d = bars.map(function (b, i) { return (i ? "L" : "M") + X(b[0] + 4 * 3600000).toFixed(1) + " " + Y(b[1]).toFixed(1); }).join(" ");
-    g += '<path d="' + d + '" class="rl"/>';
+    // sharp moves
     (rg.events || []).forEach(function (e) {
       var b = bars.filter(function (x) { return x[0] === e.ts; })[0]; if (!b) return;
-      g += '<circle cx="' + X(e.ts + 4 * 3600000).toFixed(1) + '" cy="' + Y(b[1]).toFixed(1) + '" r="5" class="re ' + e.kind + '"><title>' +
-        esc(REGEV[e.kind] + " · " + jfmt(e.ts) + " · " + e.move + "%") + "</title></circle>";
+      var cx = f1(X(e.ts + BAR)), cy = f1(Y(b[1]));
+      g += '<circle cx="' + cx + '" cy="' + cy + '" r="9" class="reh ' + e.kind + '"/><circle cx="' + cx + '" cy="' + cy + '" r="4.5" class="re ' + e.kind + '">' +
+        "<title>" + esc(REGEV[e.kind] + " · " + jfmt(e.ts) + " · " + e.move + "%") + "</title></circle>";
     });
-    // a day tick every 24 h at Tehran midnight is close enough with the bar starts
-    for (var t = Math.ceil((x0 + 12600000) / 86400000) * 86400000 - 12600000; t <= x1; t += 86400000) g += '<text x="' + X(t).toFixed(1) + '" y="' + (Hh - 8) + '" class="ax" text-anchor="middle">' + esc(jfmt(t, "date")) + "</text>";
-    return '<svg class="scatter regchart" viewBox="0 0 ' + W + " " + Hh + '" direction="ltr">' + g + "</svg>" +
-      '<div class="legend">' + ["trend_down", "range", "trend_up"].map(function (k) { return '<span><i class="rb ' + REGCLS[k] + '"></i>' + REGFA[k] + "</span>"; }).join("") +
+    // the last value
+    var last = pts[pts.length - 1], ly = Y(last[1]), lc = last[1] >= 0 ? "pos" : "neg";
+    g += '<circle cx="' + f1(X(last[0])) + '" cy="' + f1(ly) + '" r="4" class="rlast"/>' +
+      '<rect x="' + (W - Rr + 4) + '" y="' + f1(ly - 10) + '" width="' + (Rr - 6) + '" height="20" rx="6" class="rpill ' + lc + '"/>' +
+      '<text x="' + (W - Rr / 2 + 1) + '" y="' + f1(ly + 4) + '" class="rpt" text-anchor="middle">' + (last[1] > 0 ? "+" : "") + last[1].toFixed(1) + "%</text>";
+    // the regime ribbon
+    var ry = PB + 10;
+    segs.forEach(function (s) {
+      var a = Math.max(X(s.from), L) + 1, b = Math.min(X(s.to), W - Rr) - 1; if (b <= a) return;
+      g += '<rect x="' + f1(a) + '" y="' + ry + '" width="' + f1(b - a) + '" height="22" rx="6" class="rrib ' + REGCLS[s.label] + '"><title>' +
+        esc(REGFA[s.label] + " · " + jfmt(s.from) + " تا " + jfmt(s.to) + " · بازار " + s.move + "%") + "</title></rect>";
+      var lab = REGSHORT[s.label] + " \u2066" + (s.move > 0 ? "+" : "") + s.move.toFixed(1) + "%\u2069";
+      if (b - a > 92) g += '<text x="' + f1((a + b) / 2) + '" y="' + (ry + 15) + '" class="rribt" text-anchor="middle" direction="rtl">' + esc(lab) + "</text>";
+      else if (b - a > 44) g += '<text x="' + f1((a + b) / 2) + '" y="' + (ry + 15) + '" class="rribt" text-anchor="middle">' + esc(REGSHORT[s.label]) + "</text>";
+    });
+    // hover read-out
+    g += '<line class="rx" x1="0" x2="0" y1="' + T + '" y2="' + PB + '" style="display:none"/><circle class="rxd" r="5" cx="0" cy="0" style="display:none"/>' +
+      '<rect class="rov" x="' + L + '" y="' + T + '" width="' + (W - L - Rr) + '" height="' + (PB - T) + '"/>';
+    regimeChart.geo = {x0: x0, x1: x1, W: W, L: L, Rr: Rr, X: X, Y: Y, bars: bars, BAR: BAR};
+    return '<div class="regwrap"><svg class="regchart" viewBox="0 0 ' + W + " " + Hh + '" direction="ltr">' + g + '</svg><div class="regtip" style="display:none"></div></div>' +
+      '<div class="legend reglegend">' + ["trend_down", "range", "trend_up"].map(function (k) { return '<span><i class="rrib ' + REGCLS[k] + '"></i>' + REGFA[k] + "</span>"; }).join("") +
       Object.keys(REGEV).map(function (k) { return '<span><i class="re ' + k + '"></i>' + REGEV[k] + "</span>"; }).join("") + "</div>";
+  }
+  function regimeHover() {
+    var wrap = app.querySelector(".regwrap"), geo = regimeChart.geo; if (!wrap || !geo) return;
+    var svg = wrap.querySelector("svg"), tip = wrap.querySelector(".regtip"), ln = svg.querySelector(".rx"), dot = svg.querySelector(".rxd");
+    function hide() { tip.style.display = ln.style.display = dot.style.display = "none"; }
+    function move(ev) {
+      var r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) / r.width * geo.W;
+      var t = geo.x0 + (sx - geo.L) / (geo.W - geo.L - geo.Rr) * (geo.x1 - geo.x0), best = null;
+      geo.bars.forEach(function (b) { if (!best || Math.abs(b[0] + geo.BAR - t) < Math.abs(best[0] + geo.BAR - t)) best = b; });
+      if (!best) return hide();
+      var cx = geo.X(best[0] + geo.BAR), cy = geo.Y(best[1]);
+      ln.setAttribute("x1", cx); ln.setAttribute("x2", cx); dot.setAttribute("cx", cx); dot.setAttribute("cy", cy);
+      ln.style.display = dot.style.display = "";
+      var i = geo.bars.indexOf(best), mv = best[1] - (i ? geo.bars[i - 1][1] : 0);
+      tip.innerHTML = "<b>" + esc(jfmt(best[0])) + "</b><br>سبد از شروع " + pct(best[1], 2) + "<br>این کندل " + pct(mv, 2) +
+        ' · اندازه <span class="ltr">' + best[2].toFixed(2) + "%</span>" + (best[3] ? '<br><span class="muted">' + (BARFA[best[3]] || best[3]) + "</span>" : "");
+      tip.style.display = "";
+      var px = cx / geo.W * r.width, w = tip.offsetWidth;
+      tip.style.left = Math.max(4, Math.min(r.width - w - 4, px + (px > r.width / 2 ? -w - 14 : 14))) + "px";
+      tip.style.top = Math.max(4, cy / svg.viewBox.baseVal.height * r.height - 30) + "px";
+    }
+    svg.addEventListener("mousemove", move);
+    svg.addEventListener("touchmove", function (e) { if (e.touches[0]) move(e.touches[0]); }, {passive: true});
+    svg.addEventListener("mouseleave", hide);
   }
   function regimeTab() {
     var rg = regime(), segs = regSegs();
@@ -1578,7 +1652,7 @@
       statCard("آلت‌ها (TOTAL2)", dm.t2 ? '<span class="ltr">$' + (dm.t2 / 1000).toFixed(2) + "T</span>" : "—", "۲۴ ساعت " + pct(dm.t2_chg, 2)) +
       statCard("دامیننس BTC", dm.btc_d ? '<span class="ltr">' + dm.btc_d.toFixed(2) + "%</span>" : "—", "۲۴ ساعت " + (dm.btc_d_chg == null ? "—" : '<span class="ltr">' + (dm.btc_d_chg > 0 ? "+" : "") + dm.btc_d_chg.toFixed(2) + "</span>")) +
       "</div></section>";
-    var chart = '<section><h2>رژیم‌های ۷ روز اخیر <small>خط: حرکت سبد بازار · رنگ پس‌زمینه: رژیم</small></h2>' + regimeChart(rg) + "</section>";
+    var chart = '<section><h2>رژیم‌های ۷ روز اخیر <small>خط: حرکت سبد ۱۰ کوین بزرگ از شروع بازه · نوار پایین: رژیم و حرکت بازار در آن</small></h2>' + regimeChart(rg) + "</section>";
     // every regime with the trades opened in it
     var rows = segs.slice().reverse().map(function (s) {
       var list = trades().filter(function (t) { return inSeg(t, s); }), c = outcomeCount(list);
@@ -1602,6 +1676,7 @@
           '<td data-v="' + (r == null ? "" : r) + '">' + RU(r, pnlUsd(t)) + "</td>" + pctCell(t) + "</tr>";
       }).join("") + "</tbody>" + totRow([{span: 7, v: "جمع " + fa(list.length) + " پوزیشن"}, RU(why.c.r, why.c.u), ""]) + "</table></div>" : '<div class="empty">در این رژیم هنوز پوزیشنی پر نشده.</div>') + "</section>";
     app.innerHTML = head + chart + posTab + segTab + regimeDays();
+    regimeHover();
   }
   // the last days side by side: what the market did and what it did to the accounts
   function regimeDays() {
