@@ -219,11 +219,11 @@
   }
   function miniPositions(list) {
     if (!list.length) return '<div class="empty">الان پوزیشن بازی نیست.</div>';
-    return '<div class="scroll"><table><thead><tr><th>کوین</th><th>جهت</th><th>سیستم</th><th>نوع</th><th>قیمت</th><th>سود/زیان</th></tr></thead><tbody>' +
+    return '<div class="scroll"><table data-defsort="7:desc"><thead><tr><th>کوین</th><th>جهت</th><th>سیستم</th><th>نوع</th><th>اهرم</th><th>قیمت</th><th>سود/زیان</th><th>سود٪</th></tr></thead><tbody>' +
       list.map(function (t) {
         return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + "</b></td><td>" + side(t.side) + "</td><td>" + esc(sysShort(t.system)) +
-          "</td><td>" + kind(t) + '</td><td class="num">' + px(livePrice(t)) + "</td><td>" + RU(openR(t), pnlUsd(t)) + "</td></tr>";
-      }).join("") + "</tbody>" + totRow([{span: 5, v: "جمع " + fa(list.length) + " پوزیشن"}, RU(sumOf(list, openR), sumOf(list, pnlUsd))]) + "</table></div>";
+          "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(livePrice(t)) + "</td><td>" + RU(openR(t), pnlUsd(t)) + "</td>" + pctCell(t) + "</tr>";
+      }).join("") + "</tbody>" + totRow([{span: 6, v: "جمع " + fa(list.length) + " پوزیشن"}, RU(sumOf(list, openR), sumOf(list, pnlUsd)), ""]) + "</table></div>";
   }
   var BIAS = {long: "فقط لانگ", short: "فقط شورت", both: "هر دو طرف"};
   var REG = {alt_season: "آلت‌سیزن", btc_led: "رهبری بیت‌کوین", risk_off: "ریسک‌گریزی", capitulation: "تسلیم", neutral: "خنثی",
@@ -251,7 +251,7 @@
         '<div class="scroll"><table><thead><tr><th>زمان</th><th>کوین</th><th>جهت</th><th>رده</th><th>امتیاز</th><th>سیستم</th><th>دلیل</th></tr></thead><tbody>' +
         all.slice(0, 30).map(function (s) {
           var r = SKIPR[s.reason] || [s.reason, "gray"];
-          return "<tr><td>" + esc(jfmt(s.ts, "dt")) + (s.n > 1 ? ' <small class="muted">(' + fa(s.n) + " بار تا " + esc(jfmt(s.last, "time")) + ")</small>" : "") + "</td><td><b>" + esc(s.base) + "</b></td><td>" + side(s.side) +
+          return '<tr><td data-v="' + s.ts + '">' + esc(jfmt(s.ts, "dt")) + (s.n > 1 ? ' <small class="muted">(' + fa(s.n) + " بار تا " + esc(jfmt(s.last, "time")) + ")</small>" : "") + "</td><td><b>" + esc(s.base) + "</b></td><td>" + side(s.side) +
             "</td><td>" + esc(s.grade) + "</td><td>" + fa(Math.round(s.score || 0)) + "</td><td>" + esc(sysShort(s.system)) + '</td><td><span class="badge ' + r[1] + '">' + esc(r[0]) + "</span></td></tr>";
         }).join("") + "</tbody></table></div>"
         : '<p class="pos">در ۳۰ روز گذشته هیچ سیگنال A یا B‌ای رد نشده است. (ثبت از ۲۴ آبان شروع شده.)</p>') + "</section>";
@@ -375,6 +375,76 @@
     if (t.open) { if (!t.filled_at) return null; var r = openR(t); return r == null ? null : t.risk_usd * r; }
     return t.filled_at ? t.pnl_usd : null;
   }
+  // P/L as % of the position's margin, as an exchange shows it: R x stop distance % x leverage.
+  // Works for open (live price), partly closed (banked part included) and closed trades.
+  function pnlPct(t) {
+    if (!t || !t.filled_at || !t.sl_pct) return null;
+    var r = t.open ? openR(t) : t.net_r;
+    return r == null ? null : r * t.sl_pct * (t.leverage || 1);
+  }
+  // P/L on margin; open trades also show the plain price move since the entry, small
+  function pctTxt(t, move) {
+    var v = pnlPct(t), p = move && t.open ? livePrice(t) : null, mv = p && t.entry ? t.side * (p - t.entry) / t.entry * 100 : null;
+    return (v == null ? "—" : pct(v, 1)) + (mv == null ? "" : ' <small class="muted">قیمت ' + pct(mv, 2) + "</small>");
+  }
+  function pctCell(t, move) { var v = pnlPct(t); return '<td class="xpc" data-v="' + (v == null ? "" : v.toFixed(3)) + '">' + pctTxt(t, move) + "</td>"; }
+  function levCell(t) { return '<td data-v="' + (t.leverage || "") + '">' + (t.leverage ? '<span class="ltr">' + t.leverage + "x</span>" : "—") + "</td>"; }
+  function tsCell(ts, how) { return '<td data-v="' + (ts || "") + '">' + (ts ? esc(jfmt(ts, how)) : "—") + "</td>"; }
+
+  // sortable tables (2026-11-16, Ali): every data table sorts by any column, by the column's own
+  // kind (numbers, $, R, %, dates through data-v, text). The choice survives the panel's refresh.
+  var SORTS = (function () { try { return JSON.parse(localStorage.getItem("sorts") || "{}"); } catch (e) { return {}; } })();
+  var FA_DIG = "۰۱۲۳۴۵۶۷۸۹";
+  function cellVal(td) {
+    if (!td) return null;
+    if (td.hasAttribute("data-v")) { var a = td.getAttribute("data-v"); return a === "" ? null : isNaN(+a) ? a : +a; }
+    var t = td.textContent.replace(/[؟\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").trim().replace(/[۰-۹]/g, function (d) { return FA_DIG.indexOf(d); })
+      .replace(/٫/g, ".").replace(/[٬,]/g, "").replace(/−/g, "-");
+    if (!t || t === "—") return null;
+    var m = t.match(/^[+\-]?\$?[+\-]?\d+(\.\d+)?/);
+    return m ? parseFloat(m[0].replace("$", "").replace("+-", "-").replace("-+", "-")) : t.toLowerCase();
+  }
+  function tableKey(tb) {
+    var sec = tb.closest("section"), h = sec && sec.querySelector("h2");
+    return (tb.id || (h ? firstText(h) : "")) + "|" + Array.prototype.map.call(tb.tHead.rows[0].cells, function (c) { return firstText(c); }).join(",");
+  }
+  function sortTable(tb, col, dir) {
+    var body = tb.tBodies[0]; if (!body) return;
+    tb._cur = [col, dir];
+    var rows = Array.prototype.slice.call(body.rows);
+    rows.sort(function (a, b) {
+      var x = cellVal(a.cells[col]), y = cellVal(b.cells[col]);
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;                  // empty cells always last
+      if (y == null) return -1;
+      var c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "fa");
+      return dir === "asc" ? c : -c;
+    });
+    rows.forEach(function (r) { body.appendChild(r); });
+    Array.prototype.forEach.call(tb.tHead.rows[0].cells, function (c, i) { if (i === col) c.setAttribute("data-dir", dir); else c.removeAttribute("data-dir"); });
+  }
+  function makeSortable(root) {
+    (root || app).querySelectorAll("table").forEach(function (tb) {
+      if (tb.dataset.sortable || !tb.tHead || !tb.tBodies[0] || tb.tBodies[0].rows.length < 2) return;
+      if (tb.classList.contains("cmp") || tb.classList.contains("caltab") || tb.querySelector("th.sort, tr.grp, tr.day, tr.calx")) return;
+      tb.dataset.sortable = "1";
+      var key = tableKey(tb);
+      Array.prototype.forEach.call(tb.tHead.rows[0].cells, function (th, i) {
+        if (!firstText(th)) return;
+        th.classList.add("sort");
+        th.addEventListener("click", function (e) {
+          if (e.target.closest(".qi")) return;
+          var cur = tb._cur, dir = cur && cur[0] === i && cur[1] === "desc" ? "asc" : "desc";
+          SORTS[key] = [i, dir];
+          try { localStorage.setItem("sorts", JSON.stringify(SORTS)); } catch (err) {}
+          sortTable(tb, i, dir);
+        });
+      });
+      var s = SORTS[key] || (tb.dataset.defsort ? [+tb.dataset.defsort.split(":")[0], tb.dataset.defsort.split(":")[1]] : null);
+      if (s) sortTable(tb, s[0], s[1]);
+    });
+  }
+
   // totals row at the foot of a table (2026-11-16, Ali: "a sum row wherever it makes sense")
   function totRow(cells) {
     return '<tfoot><tr class="tot">' + cells.map(function (c) {
@@ -440,42 +510,42 @@
     var el = document.getElementById("xtable"), rows, head, foot = "";
     function sym(t) { return '<b>' + esc(t.base) + '</b><small class="muted">/USDT · ' + esc(sysShort(t.system)) + "</small>"; }
     if (S.xtab === "open") {
-      head = ["نماد", "جهت", "نوع", "حجم", "ورود", "قیمت لحظه‌ای", "سود/زیان", "استاپ / TP1", "زمان ورود"];
+      head = ["نماد", "جهت", "نوع", "اهرم", "حجم", "ورود", "قیمت لحظه‌ای", "سود/زیان", "سود٪", "استاپ / TP1", "زمان ورود"];
       rows = open.map(function (t) {
         return '<tr class="click ' + (t.id === S.sel ? "sel" : "") + '" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) +
-          "</td><td>" + usd(t.size_usd == null ? null : t.size_usd * (t.open_frac == null ? 1 : t.open_frac), false) + '</td><td class="num">' + px(t.entry) +
-          '</td><td class="num xp">' + px(livePrice(t)) + '</td><td class="xu">' + pnlCell(t) + '</td><td class="num"><span class="neg">' + px(t.sl_now) +
-          '</span> / <span class="pos">' + px(t.tp1) + "</span></td><td>" + esc(jfmt(t.filled_at)) + "</td></tr>";
+          "</td>" + levCell(t) + "<td>" + usd(t.size_usd == null ? null : t.size_usd * (t.open_frac == null ? 1 : t.open_frac), false) + '</td><td class="num">' + px(t.entry) +
+          '</td><td class="num xp">' + px(livePrice(t)) + '</td><td class="xu">' + pnlCell(t) + "</td>" + pctCell(t, true) + '<td class="num"><span class="neg">' + px(t.sl_now) +
+          '</span> / <span class="pos">' + px(t.tp1) + "</span></td>" + tsCell(t.filled_at) + "</tr>";
       });
-      foot = totRow([{span: 3, v: "جمع " + fa(open.length) + " پوزیشن"}, usd(sumOf(open, function (t) { return t.size_usd == null ? null : t.size_usd * (t.open_frac == null ? 1 : t.open_frac); }), false),
-        {span: 2, v: ""}, RU(sumOf(open, openR), openUsd), {span: 2, v: ""}]);
+      foot = totRow([{span: 3, v: "جمع " + fa(open.length) + " پوزیشن"}, "", usd(sumOf(open, function (t) { return t.size_usd == null ? null : t.size_usd * (t.open_frac == null ? 1 : t.open_frac); }), false),
+        {span: 2, v: ""}, RU(sumOf(open, openR), openUsd), "", {span: 2, v: ""}]);
     } else if (S.xtab === "pend") {
-      head = ["نماد", "جهت", "نوع", "ورود", "قیمت لحظه‌ای", "فاصله تا ورود", "استاپ", "TP1", "ریسک / سود در TP1", "رده", "زمان سیگنال"];
+      head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "قیمت لحظه‌ای", "فاصله تا ورود", "استاپ", "TP1", "ریسک / سود در TP1", "رده", "زمان سیگنال"];
       rows = pend.map(function (t) {
         var p = livePrice(t), d = p && t.entry ? (t.entry - p) / p * 100 : null;
-        return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + '</td><td class="num">' + px(t.entry) +
+        return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
           '</td><td class="num xp">' + px(p) + "</td><td>" + pct(d, 2) + '</td><td class="num neg">' + px(t.sl) + '</td><td class="num pos">' + px(t.tp1) +
           "</td><td>" + (t.risk_usd != null ? usd(-t.risk_usd) + " / " + (t.tp1 && t.entry !== t.sl ? usd(t.risk_usd * Math.abs(t.tp1 - t.entry) / Math.abs(t.entry - t.sl)) : "—") : "—") +
-          "</td><td>" + esc(t.grade) + "</td><td>" + esc(jfmt(t.created)) + "</td></tr>";
+          "</td><td>" + esc(t.grade) + "</td>" + tsCell(t.created) + "</tr>";
       });
-      foot = totRow([{span: 8, v: "جمع " + fa(pend.length) + " سفارش"}, usd(-sumOf(pend, function (t) { return t.risk_usd; })) + ' <small class="muted">ریسک کل اگر همه پر شوند</small>', {span: 2, v: ""}]);
+      foot = totRow([{span: 9, v: "جمع " + fa(pend.length) + " سفارش"}, usd(-sumOf(pend, function (t) { return t.risk_usd; })) + ' <small class="muted">ریسک کل اگر همه پر شوند</small>', {span: 2, v: ""}]);
     } else {
-      head = ["نماد", "جهت", "نوع", "ورود", "خروج", "نتیجه", "سود/زیان", "مدت", "زمان بسته شدن"];
+      head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "خروج", "نتیجه", "سود/زیان", "سود٪", "مدت", "زمان بسته شدن"];
       rows = closed.map(function (t) {
         var ex = (t.events || []).filter(function (e) { return e[2] != null && e[0] !== "filled"; }).pop();
-        return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + '</td><td class="num">' + px(t.entry) +
-          '</td><td class="num">' + px(ex ? ex[2] : null) + "</td><td>" + esc(t.status_fa) + "</td><td>" + usd(pnlUsd(t)) + " " + R(t.net_r) + "</td><td>" +
-          (t.closed_at && t.filled_at ? dur((t.closed_at - t.filled_at) / 3600000) : "—") + "</td><td>" + esc(jfmt(t.closed_at)) + "</td></tr>";
+        var h = t.closed_at && t.filled_at ? (t.closed_at - t.filled_at) / 3600000 : null;
+        return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
+          '</td><td class="num">' + px(ex ? ex[2] : null) + "</td><td>" + esc(t.status_fa) + "</td><td>" + usd(pnlUsd(t)) + " " + R(t.net_r) + "</td>" + pctCell(t) +
+          '<td data-v="' + (h == null ? "" : h) + '">' + (h == null ? "—" : dur(h)) + "</td>" + tsCell(t.closed_at) + "</tr>";
       });
-      foot = totRow([{span: 6, v: "جمع " + fa(closed.length) + " معامله‌ی اخیر"}, usd(sumOf(closed, pnlUsd)) + " " + R(sumOf(closed, function (t) { return t.net_r; })), {span: 2, v: ""}]);
+      foot = totRow([{span: 7, v: "جمع " + fa(closed.length) + " معامله‌ی اخیر"}, usd(sumOf(closed, pnlUsd)) + " " + R(sumOf(closed, function (t) { return t.net_r; })), "", {span: 2, v: ""}]);
     }
-    el.innerHTML = rows.length ? "<table class=\"xt\"><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody>" + foot + "</table>"
+    el.innerHTML = rows.length ? "<table class=\"xt\"" + (S.xtab === "open" ? ' data-defsort="8:desc"' : "") + "><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody>" + foot + "</table>"
       : '<div class="empty">' + (S.xtab === "open" ? "الان پوزیشن بازی نیست." : S.xtab === "pend" ? "سفارشی در انتظار نیست." : "هنوز معامله‌ی بسته‌ای نیست.") + "</div>";
     decorateTips(el.parentNode);
   }
   function pnlCell(t) {
-    var p = livePrice(t), mv = p && t.entry ? t.side * (p - t.entry) / t.entry * 100 : null;
-    return usd(pnlUsd(t)) + " " + R(openR(t)) + ' <small class="muted">' + (mv == null ? "" : pct(mv, 2)) + "</small>";
+    return usd(pnlUsd(t)) + " " + R(openR(t));
   }
   function liveX(base) {                     // 24h numbers: from the live ticker, else from the last build
     var l = S.live[base], d = deriv(base) || {};
@@ -782,11 +852,14 @@
     histTable();
   }
   function uniqList(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }).sort(); }
-  var HCOLS = [["created", "سیگنال"], ["closed", "بسته شدن"], ["kind", "نوع"], ["system", "سیستم"], ["base", "کوین"], ["side", "جهت"],
-    ["score", "رده / امتیاز"], ["status", "نتیجه"], ["hold", "مدت"], ["gross", "R خام"], ["net", "R خالص"], ["pnl", "سود/زیان (همه)"],
+  var HCOLS = [["created", "سیگنال"], ["closed", "بسته شدن"], ["kind", "نوع"], ["system", "سیستم"], ["base", "کوین"], ["side", "جهت"], ["lev", "اهرم"],
+    ["score", "رده / امتیاز"], ["status", "نتیجه"], ["hold", "مدت"], ["gross", "R خام"], ["net", "R خالص"], ["pct", "سود٪"], ["pnl", "سود/زیان (همه)"],
     ["own", "در حساب خودش"], ["bal", "موجودی بعد"]];
+  // history rows show the banked result, also for partly closed trades (net_r so far)
+  function hpct(t) { return t.filled_at && t.sl_pct && t.net_r != null ? t.net_r * t.sl_pct * (t.leverage || 1) : null; }
   function hval(t, k) {
-    return {created: t.created, closed: t.closed_at || t.created, kind: t.approved ? 1 : 0, system: t.system, base: t.base, side: t.side,
+    var hp = hpct(t);
+    return {created: t.created, closed: t.closed_at || t.created, kind: t.approved ? 1 : 0, system: t.system, base: t.base, side: t.side, lev: t.leverage || 0, pct: hp == null ? -1e9 : hp,
       score: t.score, status: t.status, hold: t.closed_at && t.filled_at ? t.closed_at - t.filled_at : -1,
       gross: t.filled_at ? t.gross_r : -99, net: t.filled_at ? t.net_r : -99, pnl: t.pnl_usd == null ? -1e9 : t.pnl_usd,
       own: t.own_pnl_usd == null ? -1e9 : t.own_pnl_usd, bal: t.own_balance_after || 0}[k];
@@ -828,17 +901,17 @@
       var part = t.open, left = Math.round((t.open_frac == null ? 1 : t.open_frac) * 100);
       return '<tr class="click' + (part ? " part" : "") + '" data-open="' + esc(t.id) + '"><td>' + esc(jfmt(t.created)) + "</td><td>" +
         (part ? '<span class="badge watch">هنوز ' + fa(left) + "٪ باز</span>" : esc(jfmt(t.closed_at))) + "</td><td>" + kind(t) +
-        "</td><td>" + esc(sysShort(t.system)) + "</td><td><b>" + esc(t.base) + "</b></td><td>" + side(t.side) + "</td><td>" + esc(t.grade) +
+        "</td><td>" + esc(sysShort(t.system)) + "</td><td><b>" + esc(t.base) + "</b></td><td>" + side(t.side) + "</td>" + levCell(t) + "<td>" + esc(t.grade) +
         ' <small class="ltr">' + (t.score || 0).toFixed(0) + "</small></td><td>" + (part ? "بخشی بسته · " : "") + esc(t.status_fa) + "</td><td>" + hold + "</td><td>" +
-        R(t.filled_at ? t.gross_r : null) + "</td><td>" + R(t.filled_at ? t.net_r : null) + "</td><td>" +
+        R(t.filled_at ? t.gross_r : null) + "</td><td>" + R(t.filled_at ? t.net_r : null) + "</td><td>" + (hpct(t) == null ? "—" : pct(hpct(t), 1)) + "</td><td>" +
         usd(part ? (t.risk_usd != null ? t.risk_usd * t.net_r : null) : t.pnl_usd) + "</td><td>" +
         usd(part ? (t.own_risk_usd != null ? t.own_risk_usd * t.net_r : null) : t.own_pnl_usd) + "</td><td>" +
         (part ? '<small class="muted">سود قطعی تا الان</small>' : usd(t.own_balance_after, false)) + "</td></tr>";
     }).join("");
     var el = document.getElementById("htab");
     var fr = rows.filter(function (t) { return t.filled_at; });
-    var foot = totRow([{span: 9, v: "جمع " + fa(rows.length) + " معامله"}, R(sumOf(fr, function (t) { return t.gross_r; })), R(sumOf(fr, function (t) { return t.net_r; })),
-      usd(sumP),
+    var foot = totRow([{span: 10, v: "جمع " + fa(rows.length) + " معامله"}, R(sumOf(fr, function (t) { return t.gross_r; })), R(sumOf(fr, function (t) { return t.net_r; })),
+      "", usd(sumP),
       usd(sumOf(rows, function (t) { return t.open ? (t.own_risk_usd != null ? t.own_risk_usd * t.net_r : null) : t.own_pnl_usd; })), ""]);
     el.innerHTML = "<table><thead>" + head + "</thead><tbody>" + body + "</tbody>" + foot + "</table>";
     el.querySelectorAll("th.sort").forEach(function (th) {
@@ -1012,7 +1085,7 @@
     order.forEach(function (k) { Object.keys(days[k].v).forEach(function (i) { mx = Math.max(mx, Math.abs(days[k].v[i].r)); }); });
     return '<div class="scroll"><table class="daily"><thead><tr><th>روز</th>' + cols.map(function (c) { return "<th>" + esc(c.label) + "</th>"; }).join("") + "</tr></thead><tbody>" +
       order.slice(0, 21).map(function (k) {
-        return "<tr><td>" + esc(k) + "</td>" + cols.map(function (c, i) {
+        return '<tr><td data-v="' + days[k].ts + '">' + esc(k) + "</td>" + cols.map(function (c, i) {
           var d = days[k].v[i];
           if (!d) return '<td class="muted">—</td>';
           var a = Math.min(0.55, Math.abs(d.r) / mx * 0.55);
@@ -1354,6 +1427,8 @@
         var xp = row.querySelector(".xp"), xu = row.querySelector(".xu");
         if (xp) xp.textContent = px(livePrice(tr));
         if (xu && tr.open && tr.filled_at) xu.innerHTML = pnlCell(tr);
+        var xc = row.querySelector(".xpc"), pv = pnlPct(tr);
+        if (xc && tr.open && pv != null) { xc.innerHTML = pctTxt(tr, true); xc.setAttribute("data-v", pv.toFixed(3)); }
       });
       var xs = document.getElementById("xsum");
       if (xs) xs.innerHTML = usd(openTrades().reduce(function (s, t) { return s + (pnlUsd(t) || 0); }, 0));
@@ -1364,7 +1439,7 @@
         if (r) r.innerHTML = accLine(x[0], l);
       });
       var mp = document.getElementById("minipos");
-      if (mp) mp.innerHTML = miniPositions(openTrades().sort(function (a, b) { return b.created - a.created; }));
+      if (mp) { mp.innerHTML = miniPositions(openTrades().sort(function (a, b) { return b.created - a.created; })); decorateTips(mp); }
     }
   }
 
@@ -1463,6 +1538,8 @@
     "تعداد": "تعداد معامله‌های بسته‌ی دارای ورود در این گروه.",
     "میانگین R": "میانگین نتیجه‌ی هر معامله بر حسب R، بعد از هزینه‌ها.",
     "جمع R": "جمع نتیجه‌ی همه‌ی معامله‌های این گروه.",
+    "اهرم": "اهرم ایزوله‌ی پیشنهادی. طوری انتخاب شده که قیمت لیکوئید دست‌کم ۲٫۵ برابر فاصله‌ی استاپ دور باشد (حداکثر ۱۰x). اهرم سود دلاری را عوض نمی‌کند، فقط مارجین لازم را کم می‌کند.",
+    "سود٪": "سود یا زیان نسبت به مارجین، مثل عددی که صرافی نشان می‌دهد: درصد حرکت قیمت × اهرم، بعد از کارمزد. برای معامله‌ی بخشی بسته، سود قطعی‌شده هم حساب است.",
     "مدت اجرا": "از شروع تا پایان یک اجرای ربات. اجراهای زیر ۶۰ ثانیه یعنی ربات واقعاً هر دقیقه بازار را می‌بیند."
   };
   var TIP_KEYS = Object.keys(TIPS).sort(function (a, b) { return b.length - a.length; });
@@ -1482,6 +1559,7 @@
       var t = el.textContent.trim();
       if (LTIPS[t]) el.insertAdjacentHTML("beforeend", qi(LTIPS[t]));
     });
+    makeSortable(root);
   }
   var tipEl = document.getElementById("tip");
   function showTip(el) {
@@ -1840,7 +1918,7 @@
     var backupBad = h.storage === "git_backup" && (backupAge == null || backupAge > (h.backup_min || 15) * 3);
     var rows = runs.slice(0, 30).map(function (r) {
       var w = Math.min(100, (r.dur || 0) / 120 * 100);
-      return "<tr><td>" + esc(jfmt(r.ts, "dt")) + '</td><td><span class="ltr">' + (r.dur || 0).toFixed(0) + 's</span> <span class="dur"><i style="width:' + w + "%;background:var(" + ((r.dur || 0) > 60 ? "--warn" : "--acc") + ')"></i></span></td><td>' +
+      return '<tr><td data-v="' + r.ts + '">' + esc(jfmt(r.ts, "dt")) + '</td><td><span class="ltr">' + (r.dur || 0).toFixed(0) + 's</span> <span class="dur"><i style="width:' + w + "%;background:var(" + ((r.dur || 0) > 60 ? "--warn" : "--acc") + ')"></i></span></td><td>' +
         esc((r.tasks || []).map(function (k) { return TASKS[k] || k; }).join("، ")) + "</td><td>" + ((r.failed || []).length ? '<b class="neg">' + esc(r.failed.map(function (k) { return TASKS[k] || k; }).join("، ")) + "</b>" : '<span class="pos">✓</span>') +
         "</td><td>" + (Object.keys(r.ex || {}).length ? esc(Object.keys(r.ex).map(function (k) { return k + " ×" + r.ex[k]; }).join("، ")) : "—") + "</td></tr>";
     }).join("");
@@ -1992,12 +2070,12 @@
     var alertHtml = alerts.length ? '<ul class="alerts">' + alerts.slice(0, 10).map(function (a) {
       return '<li class="' + a[0] + '"><a href="#' + esc(a[2]) + '">' + a[1] + "</a></li>";
     }).join("") + "</ul>" : '<p class="pos">چیزی نیاز به اقدام فوری ندارد.</p>';
-    var posHtml = open.concat(pend).length ? '<div class="scroll"><table><thead><tr><th>کوین</th><th>جهت</th><th>نوع</th><th>وضعیت</th><th>سود/زیان</th><th>داوران AI</th></tr></thead><tbody>' +
+    var posHtml = open.concat(pend).length ? '<div class="scroll"><table data-defsort="6:desc"><thead><tr><th>کوین</th><th>جهت</th><th>نوع</th><th>اهرم</th><th>وضعیت</th><th>سود/زیان</th><th>سود٪</th><th>داوران AI</th></tr></thead><tbody>' +
       open.concat(pend).map(function (t) {
         var a = aiRow(t.id);
         return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + "</b> <small class=\"muted\">" + esc(sysShort(t.system)) + "</small></td><td>" + side(t.side) + "</td><td>" + kind(t) +
-          "</td><td>" + esc(t.status_fa) + "</td><td>" + (t.filled_at ? RU(openR(t), pnlUsd(t)) : "—") + "</td><td>" + (a ? aiPill(a.consensus) : "—") + "</td></tr>";
-      }).join("") + "</tbody>" + totRow([{span: 4, v: "جمع " + fa(open.length) + " پوزیشن + " + fa(pend.length) + " سفارش"}, RU(sumOf(open, openR), openUsd), ""]) + "</table></div>" : '<div class="empty">الان پوزیشن یا سفارشی باز نیست.</div>';
+          "</td>" + levCell(t) + "<td>" + esc(t.status_fa) + "</td><td>" + (t.filled_at ? RU(openR(t), pnlUsd(t)) : "—") + "</td>" + pctCell(t) + '<td data-v="' + (a && a.consensus != null ? a.consensus : "") + '">' + (a ? aiPill(a.consensus) : "—") + "</td></tr>";
+      }).join("") + "</tbody>" + totRow([{span: 5, v: "جمع " + fa(open.length) + " پوزیشن + " + fa(pend.length) + " سفارش"}, RU(sumOf(open, openR), openUsd), "", ""]) + "</table></div>" : '<div class="empty">الان پوزیشن یا سفارشی باز نیست.</div>';
     var revs = ((D.ai || {}).reviewers || []).filter(function (r) { return r.key !== "base" && r.n; }).sort(function (a, b) { return (b.trust || 0) - (a.trust || 0); });
     var aiLine = revs.length ? "معتبرترین داور: <b>" + esc(revs[0].name) + "</b> با اعتبار " + fa(revs[0].trust || 0) + " از ۱۰۰ (" + esc((AIV[revs[0].verdict] || AIV.few)[0]) + ")" : "داوران هنوز داده‌ی کافی ندارند.";
     var cal = (MK.calendar || []).filter(function (e) { return e.ts > now && e.ts < now + 48 * 3600000 && e.w >= 4; }).slice(0, 4);
@@ -2074,7 +2152,7 @@
     var keys = revs.map(function (r) { return r.key; });
     var head = "<tr><th>سیگنال</th><th>کوین</th><th>سیستم</th><th>وضعیت</th><th>جمع‌بندی</th>" + keys.map(function (k) { return "<th>" + esc(aiName(k)) + "</th>"; }).join("") + "<th>مبنا</th></tr>";
     function line(r, res) {
-      return '<tr class="click" data-open="' + esc(r.id) + '"><td>' + esc(jfmt(r.created)) + "</td><td><b>" + esc(r.base) + "</b> " + side(r.side) + "</td><td>" + esc(sysShort(r.system)) + " " +
+      return '<tr class="click" data-open="' + esc(r.id) + '"><td data-v="' + r.created + '">' + esc(jfmt(r.created)) + "</td><td><b>" + esc(r.base) + "</b> " + side(r.side) + "</td><td>" + esc(sysShort(r.system)) + " " +
         (r.approved ? '<span class="badge ok">تأیید</span>' : '<span class="badge watch">Watch</span>') + "</td><td>" +
         (res ? R(r.r) : esc(AISTAT[r.status] || r.status)) + "</td><td>" + aiPill(r.consensus) + "</td>" +
         keys.map(function (k) {
@@ -2230,7 +2308,7 @@
     return '<section><h2>رویدادهای اقتصادی پیش رو <small><a href="#cal">تقویم کامل ←</a></small></h2><div class="scroll"><table><tbody>' +
       cal.map(function (e) {
         var c = CCY[e.country] || ["", e.country];
-        return "<tr><td>" + esc(jfmt(e.ts, "dt")) + ' <small data-until="' + e.ts + '">' + esc(untilTxt(e.ts)) + "</small></td><td>" + c[0] + " " + esc(e.title) + "</td><td>" + wStars(e.w || 0) + "</td></tr>";
+        return '<tr><td data-v="' + e.ts + '">' + esc(jfmt(e.ts, "dt")) + ' <small data-until="' + e.ts + '">' + esc(untilTxt(e.ts)) + "</small></td><td>" + c[0] + " " + esc(e.title) + "</td><td>" + wStars(e.w || 0) + "</td></tr>";
       }).join("") + "</tbody></table></div></section>";
   }
   setInterval(function () {                    // countdowns tick without a re-render

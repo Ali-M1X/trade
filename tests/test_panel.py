@@ -192,3 +192,15 @@ def test_panel_script_does_not_hide_browser_globals():
     declared = set(re.findall(r"\bfunction\s+(\w+)\s*\(", js)) | set(re.findall(r"\bvar\s+(\w+)\s*=", js))
     assert not declared & {"history", "location", "document", "fetch", "localStorage", "setInterval",
                            "navigator", "screen", "scroll", "alert", "Intl"}
+
+
+def test_trades_without_a_stored_leverage_get_the_sizing_rule(cfg, tmp_path):
+    c = _cfg(cfg, tmp_path)
+    c["trade"].update(liquidation_sl_multiple=2.5, leverage_cap=10)
+    repo = Repository(c["storage"]["db_path"])
+    lc = _closed(new_signal(_plan(), START + DAY, c), "tp3", 2.0, START + 2 * DAY)
+    _add(repo, "NOLEV", START + DAY, "tp3", lc)                   # plan has no leverage
+    repo.close()
+    Repository(c["system2"]["db_path"]).close()
+    t = next(t for t in collect(c, NOW)["trades"] if t["base"] == "NOLEV")
+    assert t["leverage"] == 8                                       # stop 5% -> 1 / (2.5 x 5%)

@@ -14,6 +14,8 @@ after fees, slippage and funding (backtest/costs.py) is booked when it closes.
 """
 from __future__ import annotations
 
+import math
+
 import html
 import json
 import os
@@ -223,6 +225,12 @@ def _value(t: dict, cfg: dict, price_repo) -> None:
         t["cost_r"] = c["fee_r"] + c["slippage_r"] + c["funding_r"]
         t["net_r"] = c["net_r"]
     t["sl_pct"] = abs(t["entry"] - t["sl"]) / t["entry"] * 100 if t["entry"] else None
+    if not t.get("leverage") and t["sl_pct"]:
+        # plans from before leverage was stored, and replayed trades: the same rule as
+        # trade.size_position (liquidation >= liquidation_sl_multiple x the stop away)
+        tc = cfg.get("trade") or {}
+        lev = 1 / (tc.get("liquidation_sl_multiple", 2.5) * t["sl_pct"] / 100)
+        t["leverage"] = max(1, min(int(tc.get("leverage_cap", 10)), math.floor(lev)))
     t["open"] = t["status"] not in CLOSED + UNFILLED
     t["price"] = t["open_r"] = None
     if t["open"]:
