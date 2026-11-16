@@ -311,3 +311,7 @@ svg.scatter .pt{outline:none}
 .sdir .l{display:block;font-size:12px;color:var(--muted)}.sdir b{display:block;font-size:16px;margin:2px 0}.sdir small{display:block;font-size:12px;line-height:1.7}
 .exerr{margin:6px 0;padding:6px 10px;border-radius:8px;background:var(--chip);font-size:12px}.exerr code{display:block;direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-word;margin-top:3px;color:var(--muted)}
 .aiwhy{display:block;direction:ltr;text-align:left;font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-word;margin-top:3px}
+tr.tot td{font-weight:700;background:var(--chip);border-top:2px solid var(--line)}tr.tot td small{font-weight:400}
+.ksplit{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}.khalf{border:1px solid var(--line);border-radius:10px;padding:10px;border-top:3px solid var(--acc)}.khalf.w{border-top-color:var(--warn)}.kht{display:flex;justify-content:space-between;align-items:baseline;gap:6px;margin-bottom:4px}.kht small{color:var(--muted);font-size:12px}.khalf .kbig{font-size:20px}.khalf .kgrid{grid-template-columns:1fr 1fr}
+@media (max-width:700px){.ksplit{grid-template-columns:1fr}}
+.kh{flex-wrap:wrap;gap:4px 10px}.kh b{white-space:nowrap}

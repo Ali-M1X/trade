@@ -223,7 +223,7 @@
       list.map(function (t) {
         return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + "</b></td><td>" + side(t.side) + "</td><td>" + esc(sysShort(t.system)) +
           "</td><td>" + kind(t) + '</td><td class="num">' + px(livePrice(t)) + "</td><td>" + RU(openR(t), pnlUsd(t)) + "</td></tr>";
-      }).join("") + "</tbody></table></div>";
+      }).join("") + "</tbody>" + totRow([{span: 5, v: "جمع " + fa(list.length) + " پوزیشن"}, RU(sumOf(list, openR), sumOf(list, pnlUsd))]) + "</table></div>";
   }
   var BIAS = {long: "فقط لانگ", short: "فقط شورت", both: "هر دو طرف"};
   var REG = {alt_season: "آلت‌سیزن", btc_led: "رهبری بیت‌کوین", risk_off: "ریسک‌گریزی", capitulation: "تسلیم", neutral: "خنثی",
@@ -375,6 +375,13 @@
     if (t.open) { if (!t.filled_at) return null; var r = openR(t); return r == null ? null : t.risk_usd * r; }
     return t.filled_at ? t.pnl_usd : null;
   }
+  // totals row at the foot of a table (2026-11-16, Ali: "a sum row wherever it makes sense")
+  function totRow(cells) {
+    return '<tfoot><tr class="tot">' + cells.map(function (c) {
+      return c && typeof c === "object" ? '<td colspan="' + c.span + '">' + c.v + "</td>" : "<td>" + (c == null ? "" : c) + "</td>";
+    }).join("") + "</tr></tfoot>";
+  }
+  function sumOf(list, f) { return list.reduce(function (s, x) { var v = f(x); return s + (v == null || isNaN(v) ? 0 : v); }, 0); }
   function RU(r, u) { return R(r) + (u == null ? "" : ' <small class="usdv">' + usd(u) + "</small>"); }
   function byCreated(a, b) { return b.created - a.created; }
   function chartTab() {
@@ -430,7 +437,7 @@
       return '<button data-x="' + b[0] + '" class="' + (S.xtab === b[0] ? "on" : "") + '">' + b[1] + (b[2] != null ? " <small>(" + fa(b[2]) + ")</small>" : "") + "</button>";
     }).join("") + (open.length ? '<span class="xsum">سود/زیان باز: <span id="xsum">' + usd(openUsd) + "</span></span>" : "");
     tabs.onclick = function (e) { var b = e.target.closest("button"); if (b) { S.xtab = b.dataset.x; renderBottom(); } };
-    var el = document.getElementById("xtable"), rows, head;
+    var el = document.getElementById("xtable"), rows, head, foot = "";
     function sym(t) { return '<b>' + esc(t.base) + '</b><small class="muted">/USDT · ' + esc(sysShort(t.system)) + "</small>"; }
     if (S.xtab === "open") {
       head = ["نماد", "جهت", "نوع", "حجم", "ورود", "قیمت لحظه‌ای", "سود/زیان", "استاپ / TP1", "زمان ورود"];
@@ -440,6 +447,8 @@
           '</td><td class="num xp">' + px(livePrice(t)) + '</td><td class="xu">' + pnlCell(t) + '</td><td class="num"><span class="neg">' + px(t.sl_now) +
           '</span> / <span class="pos">' + px(t.tp1) + "</span></td><td>" + esc(jfmt(t.filled_at)) + "</td></tr>";
       });
+      foot = totRow([{span: 3, v: "جمع " + fa(open.length) + " پوزیشن"}, usd(sumOf(open, function (t) { return t.size_usd == null ? null : t.size_usd * (t.open_frac == null ? 1 : t.open_frac); }), false),
+        {span: 2, v: ""}, RU(sumOf(open, openR), openUsd), {span: 2, v: ""}]);
     } else if (S.xtab === "pend") {
       head = ["نماد", "جهت", "نوع", "ورود", "قیمت لحظه‌ای", "فاصله تا ورود", "استاپ", "TP1", "ریسک / سود در TP1", "رده", "زمان سیگنال"];
       rows = pend.map(function (t) {
@@ -449,6 +458,7 @@
           "</td><td>" + (t.risk_usd != null ? usd(-t.risk_usd) + " / " + (t.tp1 && t.entry !== t.sl ? usd(t.risk_usd * Math.abs(t.tp1 - t.entry) / Math.abs(t.entry - t.sl)) : "—") : "—") +
           "</td><td>" + esc(t.grade) + "</td><td>" + esc(jfmt(t.created)) + "</td></tr>";
       });
+      foot = totRow([{span: 8, v: "جمع " + fa(pend.length) + " سفارش"}, usd(-sumOf(pend, function (t) { return t.risk_usd; })) + ' <small class="muted">ریسک کل اگر همه پر شوند</small>', {span: 2, v: ""}]);
     } else {
       head = ["نماد", "جهت", "نوع", "ورود", "خروج", "نتیجه", "سود/زیان", "مدت", "زمان بسته شدن"];
       rows = closed.map(function (t) {
@@ -457,8 +467,9 @@
           '</td><td class="num">' + px(ex ? ex[2] : null) + "</td><td>" + esc(t.status_fa) + "</td><td>" + usd(pnlUsd(t)) + " " + R(t.net_r) + "</td><td>" +
           (t.closed_at && t.filled_at ? dur((t.closed_at - t.filled_at) / 3600000) : "—") + "</td><td>" + esc(jfmt(t.closed_at)) + "</td></tr>";
       });
+      foot = totRow([{span: 6, v: "جمع " + fa(closed.length) + " معامله‌ی اخیر"}, usd(sumOf(closed, pnlUsd)) + " " + R(sumOf(closed, function (t) { return t.net_r; })), {span: 2, v: ""}]);
     }
-    el.innerHTML = rows.length ? "<table class=\"xt\"><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody></table>"
+    el.innerHTML = rows.length ? "<table class=\"xt\"><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody>" + foot + "</table>"
       : '<div class="empty">' + (S.xtab === "open" ? "الان پوزیشن بازی نیست." : S.xtab === "pend" ? "سفارشی در انتظار نیست." : "هنوز معامله‌ی بسته‌ای نیست.") + "</div>";
     decorateTips(el.parentNode);
   }
@@ -803,7 +814,8 @@
     var filled = rows.filter(function (t) { return t.filled_at; });
     var wins = filled.filter(function (t) { return t.net_r > 0; }).length;
     var sumR = filled.reduce(function (s, t) { return s + (t.net_r || 0); }, 0);
-    var sumP = rows.reduce(function (s, t) { return s + (t.pnl_usd || 0); }, 0);
+    function rowUsd(t) { return t.open ? (t.risk_usd != null ? t.risk_usd * t.net_r : null) : t.pnl_usd; }     // partly closed: profit banked so far
+    var sumP = sumOf(rows, rowUsd);
     var nPart = rows.filter(function (t) { return t.open; }).length;
     document.getElementById("hsum").innerHTML = plural(rows.length - nPart, "معامله‌ی کامل بسته") + (nPart ? " + " + fa(nPart) + " بخشی بسته" : "") + " · برد " + (filled.length ? fa(Math.round(wins / filled.length * 100)) + "٪" : "—") +
       " · مجموع " + R(sumR) + " · " + usd(sumP) + ' <small>(روی هر ردیف کلیک کنید تا روی نمودار ببینید)</small>';
@@ -824,7 +836,11 @@
         (part ? '<small class="muted">سود قطعی تا الان</small>' : usd(t.own_balance_after, false)) + "</td></tr>";
     }).join("");
     var el = document.getElementById("htab");
-    el.innerHTML = "<table><thead>" + head + "</thead><tbody>" + body + "</tbody></table>";
+    var fr = rows.filter(function (t) { return t.filled_at; });
+    var foot = totRow([{span: 9, v: "جمع " + fa(rows.length) + " معامله"}, R(sumOf(fr, function (t) { return t.gross_r; })), R(sumOf(fr, function (t) { return t.net_r; })),
+      usd(sumP),
+      usd(sumOf(rows, function (t) { return t.open ? (t.own_risk_usd != null ? t.own_risk_usd * t.net_r : null) : t.own_pnl_usd; })), ""]);
+    el.innerHTML = "<table><thead>" + head + "</thead><tbody>" + body + "</tbody>" + foot + "</table>";
     el.querySelectorAll("th.sort").forEach(function (th) {
       th.addEventListener("click", function () {
         var k = th.dataset.k;
@@ -897,14 +913,21 @@
     if (!cols.length) { app.innerHTML = '<section><div class="empty">داده‌ای برای مقایسه نیست.</div></section>'; return; }
     cols.forEach(function (c) { c.s = cmpStats(c.list); });
     var systems = uniqList(cols.map(function (c) { return c.sys; }));
-    var kpis = systems.map(function (n) {
-      var s = cmpStats(trades().filter(function (t) { return t.system === n; }));
-      var ok = cols.filter(function (c) { return c.sys === n && c.k === "ok"; })[0].s;
-      return '<div class="kpi"><div class="kh"><b>' + esc(n) + "</b><small>" + fa(s.closed) + " معامله‌ی بسته · " + fa(s.open) + " باز</small></div>" +
-        '<div class="kbig">' + usd(s.all) + ' <small>حساب «همه با هم»</small></div>' +
+    // 2026-11-16 (Ali): each system's approved signals and its Watch setups side by side, never mixed
+    function half(c, title, acct) {
+      var s = c.s;
+      return '<div class="khalf ' + c.k + '"><div class="kht"><b>' + title + '</b><small>' + fa(s.closed) + " بسته · " + fa(s.open) + " باز</small></div>" +
+        '<div class="kbig">' + usd(s.own) + " <small>" + acct + "</small></div>" +
         '<div class="kgrid">' + statCard("جمع R", R(s.sum), "") + statCard("نرخ برد", s.win == null ? "—" : fa(Math.round(s.win)) + "٪", "") +
         statCard("ضریب سود", s.pf == null ? "—" : '<span class="ltr">' + s.pf.toFixed(2) + "</span>", "") +
-        statCard("فقط تأییدشده", usd(ok.own), R(ok.sum) + " · " + fa(ok.closed) + " معامله") + "</div></div>";
+        statCard("سود/زیان باز", usd(s.ownOpen), "") + "</div></div>";
+    }
+    var kpis = systems.map(function (n) {
+      var ok = cols.filter(function (c) { return c.sys === n && c.k === "ok"; })[0];
+      var w = cols.filter(function (c) { return c.sys === n && c.k === "w"; })[0];
+      var all = cmpStats(trades().filter(function (t) { return t.system === n; }));
+      return '<div class="kpi"><div class="kh"><b>' + esc(n) + "</b><small>هر دو با هم در حساب «همه با هم»: " + usd(all.all) + " · " + R(all.sum) + "</small></div>" +
+        '<div class="ksplit">' + half(ok, "تأییدشده (ارسال به تلگرام)", "حساب تأییدشده") + half(w, "Watch (ارسال‌نشده)", "حساب Watch") + "</div></div>";
     }).join("");
     var head = "<tr><th></th>" + cols.map(function (c, i) { return '<th><i class="sw" style="background:var(' + CMP_COLORS[i % 4] + ')"></i>' + esc(c.label) + "</th>"; }).join("") + "</tr>";
     var body = CMPROWS.map(function (m) {
@@ -995,7 +1018,11 @@
           var a = Math.min(0.55, Math.abs(d.r) / mx * 0.55);
           return '<td style="background:' + hexA(cssv(d.r >= 0 ? "--pos" : "--neg"), a) + '">' + usd(d.u) + '<br><small class="ltr">' + (d.r > 0 ? "+" : "") + d.r.toFixed(2) + "R · " + fa(d.n) + "</small></td>";
         }).join("") + "</tr>";
-      }).join("") + "</tbody></table></div>";
+      }).join("") + "</tbody>" + totRow(["جمع همه‌ی روزها"].concat(cols.map(function (c, i) {
+        var u = 0, r = 0, n = 0;
+        order.forEach(function (k) { var d = days[k].v[i]; if (d) { u += d.u; r += d.r; n += d.n; } });
+        return n ? usd(u) + '<br><small class="ltr">' + (r > 0 ? "+" : "") + r.toFixed(2) + "R · " + fa(n) + "</small>" : "—";
+      }))) + "</table></div>";
   }
 
   // ------------------------------------------------------------------ news (2026-11-15: every headline, 1-5 stars, the measured move after it)
@@ -1046,6 +1073,10 @@
           return '<span class="chip click" data-coin="' + esc(c) + '"><b>' + esc(c) + "</b></span>";
         }).join("") + (c0 && x.moves && x.moves[c0] ? '<span class="moves">حرکت ' + esc(c0) + " بعد از خبر: " + newsMove(x.moves[c0]) + "</span>" : "") + "</div>" : "") + "</div>";
     }).join("");
+    var rl = NV.rules || [], rn = sumOf(rl, function (r) { return r.n; });
+    function wavg(k) { var w = 0, s = 0; rl.forEach(function (r) { if (r[k] != null) { w += r.n; s += r[k] * r.n; } }); return w ? s / w : null; }
+    var rulesFoot = rl.length ? totRow(["<b>همه‌ی خبرها</b>", "", fa(rn), pct(wavg("avg_1h"), 2), pct(wavg("avg_4h"), 2), pct(wavg("avg_24h"), 2),
+      wavg("hit") == null ? "—" : fa(Math.round(wavg("hit"))) + "٪"]) : "";
     var rules = (NV.rules || []).map(function (r) {
       return '<tr class="' + (r.n < 5 ? "thin" : "") + '"><td><b>' + esc(r.fa) + "</b></td><td>" + lvBadge(r.level) + "</td><td>" + fa(r.n) + "</td><td>" + pct(r.avg_1h, 2) +
         "</td><td>" + pct(r.avg_4h, 2) + "</td><td>" + pct(r.avg_24h, 2) + "</td><td>" + (r.hit == null ? "—" : fa(r.hit) + "٪") + "</td></tr>";
@@ -1056,7 +1087,7 @@
       statCard("مثبت / منفی", '<span class="pos">' + fa(pos) + '</span> / <span class="neg">' + fa(neg) + "</span>", "بقیه خنثی") +
       statCard("ارسال‌شده به تلگرام", fa(items.filter(function (x) { return x.alerted; }).length), "") + "</div>" + newsDays(items) + "</section>" +
       '<div class="grid g2"><section><h2>اثر واقعی هر نوع خبر <small>' + fa(NV.stats_days) + ' روز · حرکت قیمت در جهتی که خبر انتظار داشت</small></h2>' +
-      (rules ? '<div class="scroll"><table><thead><tr><th>نوع خبر</th><th>جهت</th><th>تعداد</th><th>۱ ساعت</th><th>۴ ساعت</th><th>۲۴ ساعت</th><th>درست از آب درآمد</th></tr></thead><tbody>' + rules + "</tbody></table></div>" +
+      (rules ? '<div class="scroll"><table><thead><tr><th>نوع خبر</th><th>جهت</th><th>تعداد</th><th>۱ ساعت</th><th>۴ ساعت</th><th>۲۴ ساعت</th><th>درست از آب درآمد</th></tr></thead><tbody>' + rules + "</tbody>" + rulesFoot + "</table></div>" +
         '<p class="muted">عدد مثبت یعنی قیمت در همان جهتی رفت که خبر انتظار داشت (برای خبر منفی، ریزش). ردیف‌های کم‌رنگ کمتر از ۵ نمونه دارند.</p>' : '<div class="empty">هنوز قیمت بعد از خبرها ثبت نشده است.</div>') + "</section>" +
       '<section><h2>کوین‌های پرخبر</h2>' + (topCoins.map(function (c) {
         var o = coins[c], tone = o.s > 0 ? "pos" : o.s < 0 ? "neg" : "";
@@ -1342,7 +1373,7 @@
     "حساب‌های شبیه‌سازی‌شده": "سه حساب ۱۰۰ دلاری که از ۱۵ آبان با همه‌ی سیگنال‌ها معامله کرده‌اند.\nتأییدشده: فقط سیگنال‌های A و B که به تلگرام رفتند.\nWatch: ستاپ‌هایی که ارسال نشدند ولی دنبال شدند.\nهمه با هم: هر دو نوع در یک حساب.\nریسک هر معامله درصدی از موجودی همان لحظه است، پس سود و ضرر روی هم انباشته می‌شود.",
     "منحنی موجودی": "موجودی حساب انتخاب‌شده در طول زمان. بالای خط‌چین «شروع» سبز و زیر آن قرمز است. هر نقطه‌ی کوچک روی منحنی یک معامله‌ی بسته است: سبز سود و قرمز ضرر.\nنقطه‌ی آخر سود و زیان پوزیشن‌های باز را با قیمت زنده هم حساب می‌کند.\nموس را روی نمودار ببرید تا موجودی همان لحظه را بالای نمودار ببینید. «هر سه با هم» سه حساب را کنار هم نشان می‌دهد.",
     "منحنی سود تجمعی": "جمع سود هر گروه از معاملات به ترتیب زمان بسته شدن. حالت دلار سود حساب ۱۰۰ دلاری خود همان گروه را نشان می‌دهد و حالت R نتیجه را بر حسب ریسک، که سیستم‌ها را منصفانه‌تر مقایسه می‌کند. خط‌چین‌ها Watch هستند. روی هر مورد راهنمای زیر نمودار بزنید تا خاموش یا روشن شود.",
-    "خلاصه‌ی سیستم‌ها": "عدد بزرگ سود یا زیان دلاری همه‌ی معامله‌های بسته‌ی آن سیستم در حساب «همه با هم» است. کارت «فقط تأییدشده» سود سیگنال‌هایی است که به تلگرام رفته‌اند، در حساب تأییدشده.",
+    "خلاصه‌ی سیستم‌ها": "هر سیستم دو نیمه دارد:\nتأییدشده: سیگنال‌های A و B که به تلگرام رفتند، با سود دلاری‌شان در حساب ۱۰۰ دلاری تأییدشده.\nWatch: ستاپ‌هایی که ارسال نشدند ولی دنبال شدند، با سودشان در حساب ۱۰۰ دلاری Watch.\nبالای کارت جمع هر دو در حساب «همه با هم» آمده است.",
     "پخش نتیجه‌ها": "چند درصد معامله‌های هر گروه در هر بازه‌ی R تمام شده‌اند. سیستم خوب ضررهایش نزدیک ‎-1R می‌ماند و بخشی از معامله‌هایش به ۲R و بیشتر می‌رسد.",
     "نتیجه‌ی روزانه": "جمع سود یا زیان هر روز برای هر گروه. رنگ پررنگ‌تر یعنی روز بزرگ‌تر. عدد کوچک زیر آن جمع R و تعداد معامله‌هاست.",
     "خلاصه‌ی خبرها": "همه‌ی خبرهایی که ربات از صرافی‌ها و سایت‌های خبری خوانده است، به جز موارد نامربوط مثل سهام توکنی‌شده.\nستاره‌ها از ۱ تا ۵ اهمیت خبر را نشان می‌دهند: قدرت نوع خبر (مثلاً دلیست یا لیستینگ)، اینکه اعلان رسمی صرافی است یا رسانه، و اینکه قیمت کوین بعد از خبر واقعاً حرکت کرد یا نه (۳٪ یک ستاره و ۸٪ دو ستاره).",
@@ -1760,7 +1791,11 @@
       "</div></section>" +
       '<section><h2>آمار پایداری <small>معامله‌های بسته با ورود، بعد از هزینه‌ها</small></h2>' + stab + "</section>" +
       '<section><h2>کجا سود می‌دهیم <small>گروه‌بندی:</small></h2><div class="filters">' + seg("dim", DIMS.map(function (d) { return [d[0], d[1]]; })) + "</div>" +
-      (brows ? '<div class="scroll"><table class="brk"><thead><tr><th>' + esc(dim[1]) + "</th><th>تعداد</th><th>نرخ برد</th><th>میانگین R</th><th>جمع R</th><th>سود/زیان</th><th>ضریب سود</th></tr></thead><tbody>" + brows + "</tbody></table></div>" +
+      (brows ? '<div class="scroll"><table class="brk"><thead><tr><th>' + esc(dim[1]) + "</th><th>تعداد</th><th>نرخ برد</th><th>میانگین R</th><th>جمع R</th><th>سود/زیان</th><th>ضریب سود</th></tr></thead><tbody>" + brows + "</tbody>" + (function () {
+        var a = groupStats(list);
+        return totRow(["همه" + (f.dim === "label" ? ' <small class="muted">(هر معامله یک بار)</small>' : ""), fa(a.n), a.win == null ? "—" : fa(Math.round(a.win)) + "٪", R(a.avg), R(a.sum), usd(a.usd),
+          '<span class="ltr">' + (a.pf == null ? "—" : a.pf.toFixed(2)) + "</span>"]);
+      })() + "</table></div>" +
         '<p class="muted">ردیف‌های کم‌رنگ کمتر از ۵ معامله دارند و هنوز قابل‌اعتماد نیستند.' + (f.dim === "label" ? " هر معامله ممکن است چند برچسب داشته باشد، پس جمع ردیف‌ها از کل بیشتر است." : "") + "</p>" : '<div class="empty">—</div>') + "</section>" +
       '<div class="grid g2"><section><h2>MAE و MFE <small>' + plural(exc.length, "معامله") + "</small></h2>" +
       (excPts.length ? svgScatter(excPts, {xl: "MAE: بیشترین حرکت خلاف (R)", yl: "MFE (R)", xr: [0, 1], yr: [0, 1], hlines: [[1, "1R"], [2, "TP1 (2R)"]], vlines: [[1, "استاپ"]]}) +
@@ -1785,7 +1820,7 @@
     function row(label, l) { var s = groupStats(l); return "<tr><td>" + label + "</td><td>" + fa(s.n) + "</td><td>" + (s.win == null ? "—" : fa(Math.round(s.win)) + "٪") + "</td><td>" + R(s.avg) + "</td><td>" + R(s.sum) + "</td><td>" + usd(s.usd) + "</td></tr>"; }
     return '<section><h2>معامله‌های شما <small>بر اساس «گرفتم / نگرفتم» در صفحه‌ی نمودار</small></h2>' +
       (marked.length || openTook.length ? '<div class="scroll"><table><thead><tr><th></th><th>تعداد</th><th>نرخ برد</th><th>میانگین R</th><th>جمع R</th><th>سود/زیان</th></tr></thead><tbody>' +
-        row("گرفتید", took) + row("نگرفتید", skipped) + "</tbody></table></div>" + (openTook.length ? '<p class="muted">' + plural(openTook.length, "پوزیشن") + " که گرفته‌اید هنوز باز است.</p>" : "")
+        row("گرفتید", took) + row("نگرفتید", skipped) + "</tbody>" + totRow((function () { var a = groupStats(marked); return ["جمع", fa(a.n), a.win == null ? "—" : fa(Math.round(a.win)) + "٪", R(a.avg), R(a.sum), usd(a.usd)]; })()) + "</table></div>" + (openTook.length ? '<p class="muted">' + plural(openTook.length, "پوزیشن") + " که گرفته‌اید هنوز باز است.</p>" : "")
         : '<div class="empty">هنوز هیچ معامله‌ای را علامت نزده‌اید. در صفحه‌ی نمودار، زیر هر سیگنال «گرفتم» یا «نگرفتم» را بزنید.' + (S.apiOk === false ? " (بخش ثبت روی سرور هنوز فعال نیست.)" : "") + "</div>") + "</section>";
   }
 
@@ -1962,7 +1997,7 @@
         var a = aiRow(t.id);
         return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + "</b> <small class=\"muted\">" + esc(sysShort(t.system)) + "</small></td><td>" + side(t.side) + "</td><td>" + kind(t) +
           "</td><td>" + esc(t.status_fa) + "</td><td>" + (t.filled_at ? RU(openR(t), pnlUsd(t)) : "—") + "</td><td>" + (a ? aiPill(a.consensus) : "—") + "</td></tr>";
-      }).join("") + "</tbody></table></div>" : '<div class="empty">الان پوزیشن یا سفارشی باز نیست.</div>';
+      }).join("") + "</tbody>" + totRow([{span: 4, v: "جمع " + fa(open.length) + " پوزیشن + " + fa(pend.length) + " سفارش"}, RU(sumOf(open, openR), openUsd), ""]) + "</table></div>" : '<div class="empty">الان پوزیشن یا سفارشی باز نیست.</div>';
     var revs = ((D.ai || {}).reviewers || []).filter(function (r) { return r.key !== "base" && r.n; }).sort(function (a, b) { return (b.trust || 0) - (a.trust || 0); });
     var aiLine = revs.length ? "معتبرترین داور: <b>" + esc(revs[0].name) + "</b> با اعتبار " + fa(revs[0].trust || 0) + " از ۱۰۰ (" + esc((AIV[revs[0].verdict] || AIV.few)[0]) + ")" : "داوران هنوز داده‌ی کافی ندارند.";
     var cal = (MK.calendar || []).filter(function (e) { return e.ts > now && e.ts < now + 48 * 3600000 && e.w >= 4; }).slice(0, 4);
