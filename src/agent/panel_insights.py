@@ -21,12 +21,15 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 HOUR = 3_600_000
+DAY_MS = 24 * HOUR
 TF_MS = {"5m": 300_000, "15m": 900_000, "1h": HOUR, "4h": 4 * HOUR}
 GATE = "https://api.gateio.ws/api/v4/futures/usdt"
 FNG = "https://api.alternative.me/fng/?limit=30"
 CALENDAR = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 CALENDAR_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
-TTL_S = {"tickers": 55, "stats": 300, "fng": 1800, "calendar": 1800, "calendar_next": 6 * 3600}   # panel: every minute
+TTL_S = {"tickers": 55, "stats": 300, "fng": 1800, "calendar": 1800, "calendar_next": 6 * 3600,
+         "btc15": 900}   # panel: every minute
+CAL_KEEP_DAYS = 7                 # 2026-11-16 (Ali): past releases stay a week, with BTC's reaction
 MAX_STATS_PER_BUILD = 8                # contract stats refreshed per build (each is one request)
 
 
@@ -292,6 +295,11 @@ def _calendar(data) -> list[dict]:
     return sorted(out, key=lambda e: (e["ts"], -e["w"]))
 
 
+def _with_reaction(events: list[dict], hist: dict) -> list[dict]:
+    return [{**e, "btc": (hist.get(_cal_key(e)) or {}).get("btc")} if (hist.get(_cal_key(e)) or {}).get("btc") else e
+            for e in events]
+
+
 def _merge_calendar(cache: dict, now: int) -> list[dict]:
     """This week and next, from 2 days back (past releases stay, with their actual values)."""
     seen, out = set(), []
@@ -302,6 +310,46 @@ def _merge_calendar(cache: dict, now: int) -> list[dict]:
                 seen.add(k)
                 out.append(e)
     return sorted(out, key=lambda e: e["ts"])
+
+
+def _cal_key(e: dict) -> str:
+    return f"{e['ts']}|{e['title']}|{e.get('country')}"
+
+
+def remember_calendar(cache: dict, now: int) -> dict:
+    """Every release seen is kept for CAL_KEEP_DAYS (the source only has this week and next),
+    with the actual value it got; a later fetch of the same release updates it."""
+    hist = cache.setdefault("calendar_hist", {})
+    for key in ("calendar", "calendar_next"):
+        for e in (cache.get(key) or {}).get("v") or []:
+            old = hist.get(_cal_key(e)) or {}
+            hist[_cal_key(e)] = {**old, **{k: v for k, v in e.items() if v not in ("", None) or k not in old}}
+    for k in [k for k, e in hist.items() if e["ts"] < now - (CAL_KEEP_DAYS + 1) * DAY_MS]:
+        del hist[k]
+    return hist
+
+
+def btc_reaction(candles: list, ts: int) -> dict | None:
+    """BTC's move after a release from 15m candles [[open ms, open, close, high, low], ...]:
+    from the open of the candle the release falls in to the close 15 min, 1 h and 4 h later,
+    and the widest swing within the first hour. None until the candle of the release exists."""
+    q = 900_000
+    by = {c[0]: c for c in candles}
+    last = max(by) if by else 0             # the newest candle may still be open: not used
+    t0 = ts - ts % q
+    first = by.get(t0)
+    if not first or not first[1] or t0 >= last:
+        return None
+    p0 = first[1]
+    out = {"p0": p0}
+    for name, n in (("m15", 1), ("h1", 4), ("h4", 16)):
+        c = by.get(t0 + (n - 1) * q)
+        if c and c[0] < last:
+            out[name] = round((c[2] / p0 - 1) * 100, 3)
+    hour = [by[t0 + i * q] for i in range(4) if t0 + i * q in by and t0 + i * q < last]
+    if hour:
+        out["swing_h1"] = round((max(c[3] for c in hour) / min(c[4] for c in hour) - 1) * 100, 3)
+    return out
 
 
 def market_data(cfg: dict, bases: list[str], now: int, net: _Net | None = None) -> dict:
@@ -351,6 +399,20 @@ def market_data(cfg: dict, bases: list[str], now: int, net: _Net | None = None) 
                 cache[key] = {"t": t, "v": _calendar(data)}
             else:                                   # the site allows few requests: retry in 10 min
                 cache[key] = {"t": t - TTL_S[key] + 600, "v": (cache.get(key) or {}).get("v") or []}
+    hist = remember_calendar(cache, now)
+    # BTC's reaction to the releases that matter for crypto, once their 4 hours are over
+    want = [e for e in hist.values() if e.get("w", 0) >= 2 and e["ts"] <= now and "h4" not in (e.get("btc") or {})]
+    if want and not fresh("btc15", TTL_S["btc15"]) and not net.down:
+        data = net.json(f"{GATE}/candlesticks", contract="BTC_USDT", interval="15m", limit=800)
+        if isinstance(data, list):
+            cache["btc15"] = {"t": t, "v": [[int(_f(c.get("t")) or 0) * 1000, _f(c.get("o")), _f(c.get("c")),
+                                             _f(c.get("h")), _f(c.get("l"))] for c in data if isinstance(c, dict)]}
+    candles = [c for c in (cache.get("btc15") or {}).get("v") or [] if None not in c]
+    if candles:
+        for e in want:
+            r = btc_reaction(candles, e["ts"])
+            if r:
+                e["btc"] = r
     try:
         tmp = path.with_name(f".{path.name}.tmp")
         tmp.write_text(json.dumps(cache), encoding="utf-8")
@@ -367,7 +429,9 @@ def market_data(cfg: dict, bases: list[str], now: int, net: _Net | None = None) 
         if d:
             deriv[base] = d
     return {"deriv": deriv, "fng": (cache.get("fng") or {}).get("v") or [],
-            "calendar": _merge_calendar(cache, now),
+            "calendar": _with_reaction(_merge_calendar(cache, now), hist),
+            "calendar_past": sorted((e for e in hist.values() if now - CAL_KEEP_DAYS * DAY_MS <= e["ts"] < now),
+                                    key=lambda e: -e["ts"]),
             "fetched": {k: int(cache[k]["t"] * 1000) for k in ("tickers", "fng", "calendar") if k in cache}}
 
 

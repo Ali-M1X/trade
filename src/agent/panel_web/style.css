@@ -29,9 +29,10 @@ header{background:var(--card);border-bottom:1px solid var(--line);position:stick
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(46,189,133,.55)}70%{box-shadow:0 0 0 8px rgba(46,189,133,0)}100%{box-shadow:0 0 0 0 rgba(46,189,133,0)}}
 .icon{background:var(--chip);border:1px solid var(--line);border-radius:10px;width:36px;height:34px;cursor:pointer;font-size:16px;line-height:1}
 .icon:hover{border-color:var(--acc)}
-nav{display:flex;gap:2px;overflow-x:auto;margin-top:6px;scrollbar-width:none}
+nav{display:flex;flex-wrap:wrap;gap:0 2px;margin-top:6px}
 nav::-webkit-scrollbar{display:none}
-nav button{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:9px 12px;cursor:pointer;white-space:nowrap}
+nav button{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:9px 11px;cursor:pointer;white-space:nowrap}
+@media (max-width:640px){header{position:static}nav{gap:4px;padding-bottom:8px}nav button{padding:4px 10px;font-size:13px;border:1px solid var(--line);border-radius:999px;background:var(--chip)}nav button.on{border-color:var(--acc);background:var(--acc);color:#fff}}
 nav button:hover{color:var(--fg)}
 nav button.on{color:var(--fg);border-bottom-color:var(--acc);font-weight:700}
 main{max-width:1400px;margin:auto;padding:12px 16px 40px}
@@ -324,15 +325,46 @@ tr.tot td{font-weight:700;background:var(--chip);border-top:2px solid var(--line
 .regnow .regwhy p{margin:0 0 6px;line-height:1.9}
 .regnow .regwhy p.warn{color:var(--warn)}
 @media (max-width:640px){.regnow{grid-template-columns:1fr}}
-svg.regchart .rb.neg,.legend i.rb.neg{fill:var(--neg);background:var(--neg);opacity:.13}
-svg.regchart .rb.pos,.legend i.rb.pos{fill:var(--pos);background:var(--pos);opacity:.13}
-svg.regchart .rb.warn,.legend i.rb.warn{fill:var(--warn);background:var(--warn);opacity:.13}
-.legend i.rb{opacity:.45}
-svg.regchart .rl{fill:none;stroke:var(--fg);stroke-width:2}
-svg.regchart .re{stroke:var(--bg);stroke-width:2}
+.regwrap{position:relative}
+svg.regchart{width:100%;height:auto;display:block;font-family:inherit}
+svg.regchart .gl{stroke:var(--grid);stroke-width:1}
+svg.regchart .zl{stroke:var(--muted);stroke-width:1;opacity:.45;stroke-dasharray:3 4}
+svg.regchart .vl{stroke:var(--grid);stroke-width:1}
+svg.regchart .ax{fill:var(--muted);font-size:11.5px}
+svg.regchart .rbg{opacity:.045}
+svg.regchart .rbg.neg{fill:var(--neg)}svg.regchart .rbg.pos{fill:var(--pos)}svg.regchart .rbg.warn{fill:var(--warn)}
+svg.regchart .rl{fill:none;stroke:var(--fg);stroke-width:2.4;stroke-linejoin:round;stroke-linecap:round}
+svg.regchart .rl.neg{stroke:var(--neg)}svg.regchart .rl.pos{stroke:var(--pos)}svg.regchart .rl.warn{stroke:var(--warn)}
+svg.regchart .re{stroke:var(--card);stroke-width:2}
+svg.regchart .reh{opacity:.22}
+svg.regchart .reh.drop{fill:var(--neg)}svg.regchart .reh.jump_up{fill:var(--pos)}svg.regchart .reh.whipsaw{fill:var(--warn)}
+svg.regchart .rlast{fill:var(--fg);stroke:var(--card);stroke-width:2}
+svg.regchart .rpill.pos{fill:var(--pos)}svg.regchart .rpill.neg{fill:var(--neg)}
+svg.regchart .rpt{fill:#fff;font-size:11.5px;font-weight:700}
+svg.regchart .rrib{opacity:.9}
+svg.regchart .rrib.neg,.legend i.rrib.neg{fill:var(--neg);background:var(--neg)}
+svg.regchart .rrib.pos,.legend i.rrib.pos{fill:var(--pos);background:var(--pos)}
+svg.regchart .rrib.warn,.legend i.rrib.warn{fill:var(--warn);background:var(--warn)}
+svg.regchart .rribt{fill:#0b0e13;font-size:12px;font-weight:700;pointer-events:none}
+svg.regchart .rx{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}
+svg.regchart .rxd{fill:var(--fg);stroke:var(--card);stroke-width:2;pointer-events:none}
+svg.regchart .rov{fill:transparent;cursor:crosshair}
+.regtip{position:absolute;pointer-events:none;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:7px 11px;font-size:12.5px;line-height:1.8;box-shadow:var(--shadow);white-space:nowrap;z-index:5}
+.reglegend i.rrib{width:16px;height:9px;border-radius:3px}
 .re.drop,.legend i.re.drop{fill:var(--neg);background:var(--neg)}
 .re.jump_up,.legend i.re.jump_up{fill:var(--pos);background:var(--pos)}
 .re.whipsaw,.legend i.re.whipsaw{fill:var(--warn);background:var(--warn)}
-.legend i.re{border-radius:50%}
+.legend i.re{border-radius:50%;width:9px;height:9px}
 .badge.neg{background:var(--short-bg);color:var(--neg)}.badge.pos{background:var(--long-bg);color:var(--pos)}.badge.warn{background:rgba(240,185,11,.12);color:var(--warn)}
 a.sdir{display:block;color:inherit;text-decoration:none}a.sdir:hover{border-color:var(--acc)}
+/* calendar: past week accordion */
+details.calpast{border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:0 0 14px}
+details.calpast>summary{cursor:pointer;font-size:15px}
+details.calpast>p{margin:8px 0}
+details.calday{border-top:1px solid var(--line);padding:6px 0}
+details.calday>summary{cursor:pointer;padding:4px 0}
+details.calev{margin:2px 0 2px 0;padding:4px 10px;border-radius:8px}
+details.calev[open]{background:rgba(127,127,127,.06)}
+details.calev>summary{cursor:pointer;line-height:1.9;font-size:13px}
+details.calev .calbtc{margin-inline-start:6px;font-size:12px}
+.calexp p,.caltab tr.calx p{margin:4px 0;line-height:1.9;font-size:13px}
