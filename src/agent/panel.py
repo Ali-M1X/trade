@@ -14,6 +14,9 @@ after fees, slippage and funding (backtest/costs.py) is booked when it closes.
 """
 from __future__ import annotations
 
+import bisect
+import math
+
 import html
 import json
 import os
@@ -23,6 +26,7 @@ from pathlib import Path
 
 from .backtest.costs import exit_fills, trade_costs
 from .notify.formatter import fmt_price
+from .panel_regime import regime_view
 from .store.repository import Repository
 
 try:
@@ -45,7 +49,8 @@ FLAG_FA = {"not_confirmed": "تأیید ورود ندارد", "btc_weak": "BTC �
            "counter_trend_needs_A": "خلاف روند (A لازم)", "neutral_regime_needs_A": "رژیم خنثی (A لازم)",
            "grade_b_off": "رده B خاموش", "score_too_high": "امتیاز بیش از حد",
            "btc_extended": "BTC کشیده", "cycle_avoided": "سیکل نامناسب", "level_worn": "سطح فرسوده",
-           "weak_level": "سطح ضعیف", "funding_crowded": "فاندینگ شلوغ"}
+           "weak_level": "سطح ضعیف", "funding_crowded": "فاندینگ شلوغ",
+           "news_against": "خبر قوی خلاف جهت"}
 TASK_FA = {"run-1h": "بررسی سیگنال", "run-15m": "مدیریت پوزیشن‌ها", "run-4h": "قیف و شورت‌لیست",
            "run-daily": "روزانه", "run-weekly": "هفتگی"}
 STALE_MIN = 20                                      # live runs every 5 min; older than this is a problem
@@ -162,7 +167,7 @@ def _db_trades(repo: Repository, system: str, approved: bool, since: int) -> lis
 
 
 EVAL_KEYS = ("sections", "gates", "flags", "confirmations", "notes", "phase_d", "phase_4h", "cycle",
-             "labels", "trigger", "trigger_1h", "funding_pct")
+             "labels", "trigger", "trigger_1h", "funding_pct", "news")
 PLAN_KEYS = ("support", "support_kind", "support_tf", "support_touches", "tp1_r", "tp2_r", "atr",
              "sl_pct", "leverage", "order", "entry_low", "entry_high")
 
@@ -223,6 +228,12 @@ def _value(t: dict, cfg: dict, price_repo) -> None:
         t["cost_r"] = c["fee_r"] + c["slippage_r"] + c["funding_r"]
         t["net_r"] = c["net_r"]
     t["sl_pct"] = abs(t["entry"] - t["sl"]) / t["entry"] * 100 if t["entry"] else None
+    if not t.get("leverage") and t["sl_pct"]:
+        # plans from before leverage was stored, and replayed trades: the same rule as
+        # trade.size_position (liquidation >= liquidation_sl_multiple x the stop away)
+        tc = cfg.get("trade") or {}
+        lev = 1 / (tc.get("liquidation_sl_multiple", 2.5) * t["sl_pct"] / 100)
+        t["leverage"] = max(1, min(int(tc.get("leverage_cap", 10)), math.floor(lev)))
     t["open"] = t["status"] not in CLOSED + UNFILLED
     t["price"] = t["open_r"] = None
     if t["open"]:
@@ -230,46 +241,153 @@ def _value(t: dict, cfg: dict, price_repo) -> None:
         risk = abs(t["entry"] - t["sl"])
         if t["price"] and risk and t["filled_at"]:
             t["open_r"] = t["gross_r"] + t["open_frac"] * t["side"] * (t["price"] - t["entry"]) / risk
+    # partial exits (TP1, TP2) as (ts, R, fraction closed): booked as realized when they happen, like an
+    # exchange does (2026-11-16, Ali: "the same numbers in every table")
+    t["partials"] = []
+    risk = abs(t["entry"] - t["sl"]) if t["entry"] and t["sl"] else 0
+    if t["filled_at"] and risk:
+        frac = {"tp1": cfg["trade"]["tp1_close_pct"] / 100, "tp2": cfg["trade"]["tp2_close_pct"] / 100}
+        for kind, ts, px in t["events"]:
+            if kind in frac and px is not None and ts:
+                t["partials"].append((ts, frac[kind] * t["side"] * (px - t["entry"]) / risk, frac[kind]))
 
 
-def simulate(trades: list[dict], balance: float, start: int, now: int) -> dict:
-    """Book every filled trade on one account: risk = its risk % of the balance at the fill,
-    result = risk x net R at the close. Returns the account and per-trade rows (copies)."""
+def partly_closed(t: dict) -> bool:
+    return bool(t["open"] and t["filled_at"] and t.get("partials"))
+
+
+def _price_paths(repo, bases: set[str]) -> dict[str, list[tuple[int, float]]]:
+    """(close time, close) of every stored 5m/1h/4h candle per coin, oldest first."""
+    tf_ms = {"5m": 300_000, "1h": 3_600_000, "4h": 14_400_000}
+    out: dict[str, list[tuple[int, float]]] = {}
+    if repo is None:
+        return out
+    for b in bases:
+        try:
+            rows = repo.conn.execute(
+                "SELECT timeframe, ts, close FROM candles WHERE symbol LIKE ? AND timeframe IN ('5m','1h','4h')",
+                (f"{b}/%",)).fetchall()
+        except sqlite3.Error:
+            continue
+        pts = sorted({(ts + tf_ms[tf], c) for tf, ts, c in rows if c})
+        if pts:
+            out[b] = pts
+    return out
+
+
+def _price_at(path: list[tuple[int, float]] | None, ts: int) -> float | None:
+    if not path:
+        return None
+    i = bisect.bisect_right(path, (ts, float("inf"))) - 1
+    return path[i][1] if i >= 0 else None
+
+
+def simulate(trades: list[dict], balance: float, start: int, now: int, prices=None) -> dict:
+    """Book every filled trade on one account: risk = its risk % of the balance at the fill.
+    Each partial exit (TP1, TP2) is booked when it happens and the rest at the close, so the
+    whole trade books risk x net R. prices: base -> price path, for the hourly equity curve
+    (balance + open positions at that hour). Returns the account and per-trade rows (copies)."""
     rows = [dict(t) for t in trades]
     steps = []
     for t in rows:
-        if t["filled_at"]:
-            steps.append((t["filled_at"], 1, t))
-            if t["status"] in CLOSED and t["closed_at"]:
-                steps.append((t["closed_at"], 0, t))
+        if not t["filled_at"]:
+            continue
+        steps.append((t["filled_at"], 2, t, 0.0))
+        parts = [(ts, r) for ts, r, _ in t.get("partials") or []]
+        done = t["status"] in CLOSED and t["closed_at"]
+        if parts and not done and t.get("net_r") is not None:
+            # still open: what is booked so far is the banked R after costs so far
+            parts[-1] = (parts[-1][0], t["net_r"] - sum(r for _, r in parts[:-1]))
+        for ts, r in parts:
+            if not done or ts < t["closed_at"]:
+                steps.append((ts, 1, t, r))
+        if done:
+            steps.append((t["closed_at"], 0, t, None))
     bal, peak, mdd = balance, balance, 0.0
     curve = [(start, balance)]
-    for ts, kind, t in sorted(steps, key=lambda x: (x[0], x[1])):     # closes before opens
-        if kind == 1:
+    for ts, kind, t, r in sorted(steps, key=lambda x: (x[0], x[1])):     # closes before opens
+        if kind == 2:
             t["risk_usd"] = bal * t["risk_pct"] / 100
+            t["booked_usd"] = 0.0
             continue
-        t["pnl_usd"] = t["risk_usd"] * t["net_r"]
-        t["fee_usd"] = t["risk_usd"] * t["cost_r"]
-        bal += t["pnl_usd"]
+        if kind == 1:
+            amt = t["risk_usd"] * r
+        else:
+            t["pnl_usd"] = t["risk_usd"] * t["net_r"]
+            t["fee_usd"] = t["risk_usd"] * t["cost_r"]
+            amt = t["pnl_usd"] - t["booked_usd"]
+        t["booked_usd"] += amt
+        bal += amt
         t["balance_after"] = bal
         curve.append((ts, bal))
         peak = max(peak, bal)
         mdd = max(mdd, (peak - bal) / peak if peak else 0)
     closed = [t for t in rows if "pnl_usd" in t]
     open_ = [t for t in rows if t["open"] and t["filled_at"]]
-    unreal = sum(t["risk_usd"] * t["open_r"] for t in open_ if t.get("open_r") is not None)
+    partial = [t for t in open_ if partly_closed(t)]
+    for t in partial:
+        t["fee_usd"] = t["risk_usd"] * t["cost_r"]
+    # what is not booked yet: the open part, priced now
+    unreal = sum(t["risk_usd"] * t["open_r"] - t["booked_usd"] for t in open_ if t.get("open_r") is not None)
     for t in open_:
         if t["sl_pct"]:
             t["size_usd"] = t["risk_usd"] / (t["sl_pct"] / 100)
-    wins = [t for t in closed if t["pnl_usd"] > 0]
-    gain, loss = sum(t["pnl_usd"] for t in wins), -sum(t["pnl_usd"] for t in closed if t["pnl_usd"] < 0)
+    done = closed + partial                       # every trade with a booked result
+    res = [t["booked_usd"] for t in done]
+    gain, loss = sum(x for x in res if x > 0), -sum(x for x in res if x < 0)
     curve.append((now, bal + unreal))
     return {"rows": rows, "balance": bal, "equity": bal + unreal, "unrealized": unreal,
-            "start_balance": balance, "closed": closed, "open": open_, "wins": len(wins),
+            "start_balance": balance, "closed": closed, "partial": partial, "open": open_,
+            "wins": len([x for x in res if x > 0]),
             "pnl": bal - balance, "max_dd": mdd * 100, "curve": curve,
-            "pf": gain / loss if loss else None, "fees": sum(t["fee_usd"] for t in closed),
+            "eq_curve": _equity_curve(rows, balance, start, now, prices) if prices is not None else [],
+            "pf": gain / loss if loss else None, "fees": sum(t["fee_usd"] for t in done),
             "pending": [t for t in rows if t["status"] == "pending"],
             "unfilled": [t for t in rows if t["status"] in UNFILLED]}
+
+
+def _equity_curve(rows: list[dict], balance: float, start: int, now: int, prices) -> list:
+    """Equity every hour: the booked balance plus each open position at that hour's price.
+    The 24-hour change and the equity chart read this, so a day of profit on open
+    positions shows on the day it happened."""
+    ev = []                                       # (ts, amount booked)
+    for t in rows:
+        if t.get("risk_usd") is None:
+            continue
+        parts = [(ts, r) for ts, r, _ in t.get("partials") or []]
+        done = t["status"] in CLOSED and t["closed_at"]
+        booked = 0.0
+        for ts, r in parts:
+            if not done or ts < t["closed_at"]:
+                amt = t["risk_usd"] * r
+                ev.append((ts, amt))
+                booked += amt
+        if done:
+            ev.append((t["closed_at"], t["risk_usd"] * t["net_r"] - booked))
+    ev.sort()
+    out, bal, i = [], balance, 0
+    h = start
+    while True:
+        while i < len(ev) and ev[i][0] <= h:
+            bal += ev[i][1]
+            i += 1
+        floating = 0.0
+        for t in rows:
+            if t.get("risk_usd") is None or not t["filled_at"] or t["filled_at"] > h:
+                continue
+            if t["closed_at"] and t["status"] in CLOSED and t["closed_at"] <= h:
+                continue
+            risk = abs(t["entry"] - t["sl"])
+            px = _price_at(prices.get(t["base"]), h) if h < now else (t.get("price") or _price_at(prices.get(t["base"]), h))
+            if not risk or px is None:
+                continue
+            left = 1.0 - sum(f for ts, _, f in t.get("partials") or [] if ts <= h)
+            floating += t["risk_usd"] * left * t["side"] * (px - t["entry"]) / risk
+        out.append((h, bal + floating))
+        if h >= now:
+            break
+        h = min(h + 3_600_000, now)
+    return out
 
 
 def collect(cfg: dict, now_ms: int) -> dict:
@@ -282,6 +400,7 @@ def collect(cfg: dict, now_ms: int) -> dict:
         dbs.append(("سیستم ۲", s2.get("variant") or "", s2["db_path"],
                     sh.get("s2_db_path") if sh.get("enabled") else None))
     price_repo = _open(cfg["storage"]["db_path"])
+    prices: dict = {}
     out = {"systems": [], "now": now_ms, "start": start, "trades": [], "shadow_since": {}}
     try:
         for name, variant, path, shadow_path in dbs:
@@ -317,6 +436,12 @@ def collect(cfg: dict, now_ms: int) -> dict:
         out["trades"] += backfill
         for t in out["trades"]:
             _value(t, cfg, price_repo)
+        prices = _price_paths(price_repo, {t["base"] for t in out["trades"] if t["filled_at"]})
+        if price_repo is not None:
+            try:
+                out["regime"] = regime_view(price_repo, now_ms, cfg)
+            except (sqlite3.Error, ValueError, ZeroDivisionError):
+                out["regime"] = {}
     finally:
         if price_repo is not None:
             price_repo.close()
@@ -327,9 +452,9 @@ def collect(cfg: dict, now_ms: int) -> dict:
             s["funnel"] = s["funnel"] or first["funnel"]
     tr = sorted(out["trades"], key=lambda t: t["created"])
     out["accounts"] = {
-        "approved": simulate([t for t in tr if t["approved"]], bal, start, now_ms),
-        "watch": simulate([t for t in tr if not t["approved"]], bal, start, now_ms),
-        "all": simulate(tr, bal, start, now_ms),
+        "approved": simulate([t for t in tr if t["approved"]], bal, start, now_ms, prices),
+        "watch": simulate([t for t in tr if not t["approved"]], bal, start, now_ms, prices),
+        "all": simulate(tr, bal, start, now_ms, prices),
     }
     return out
 
@@ -417,6 +542,8 @@ def _account_summary(a: dict) -> dict:
     n = len(a["closed"])
     return {"balance": _num(a["balance"]), "equity": _num(a["equity"]), "unrealized": _num(a["unrealized"]),
             "start": a["start_balance"], "pnl": _num(a["pnl"]), "closed": n, "wins": a["wins"],
+            "partial": len(a.get("partial") or []), "done": n + len(a.get("partial") or []),
+            "eq_curve": [[ts, round(v, 4)] for ts, v in a.get("eq_curve") or []],
             "max_dd": _num(a["max_dd"], 4), "pf": _num(a["pf"], 4), "fees": _num(a["fees"], 6),
             "open": len(a["open"]), "pending": len(a["pending"]),
             "curve": [[ts, _num(v)] for ts, v in a["curve"]]}
@@ -479,7 +606,7 @@ def _system_view(s: dict, now: int) -> dict:
             "confirmations": it.get("confirmations") or [], "notes": it.get("notes") or [],
             "phase_d": it.get("phase_d"), "phase_4h": it.get("phase_4h"), "cycle": it.get("cycle"),
             "labels": it.get("labels") or [], "trigger": it.get("trigger"), "rejected": it.get("rejected"),
-            "funding_pct": it.get("funding_pct"),
+            "funding_pct": it.get("funding_pct"), "news": it.get("news"),
             "plan": {k: _num(plan.get(k)) if isinstance(plan.get(k), (int, float)) else plan.get(k)
                      for k in ("entry", "sl", "tp1", "tp2", "tp1_r", "tp2_r", "support", "support_kind",
                                "support_tf", "order") if plan.get(k) is not None},
@@ -539,6 +666,7 @@ def payload(cfg: dict, data: dict) -> dict:
         "now": now, "start": data["start"], "balance": (cfg.get("panel") or {}).get("balance_usd", 100),
         "accounts": {k: _account_summary(data["accounts"][k]) for k in ("approved", "watch", "all")},
         "trades": trades, "systems": systems, "compare": _compare(data),
+        "regime": data.get("regime") or {},
         "dominance": _dominance(cfg), "shadow_since": data["shadow_since"],
         "news": [{"ts": n["seen_at"], "coins": n["coins"], "level": n["level"], "title": n["title"],
                   "url": n["url"] if (n.get("url") or "").startswith(("http://", "https://")) else None,

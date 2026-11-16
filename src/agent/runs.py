@@ -16,6 +16,7 @@ from .layers.scanners import CoinData, category_growth, hot_categories
 from .layers.technical import Evaluation, evaluate
 from .layers.pairs import returns_corr_beta
 from .layers.trade import flip_level
+from .news.signal import coin_news, params as news_params
 from .notify import formatter as fmt
 from .regime_systems import live_price_regime, price_source, system_cfg
 from .signals.lifecycle import H4, on_4h_close, on_candle, on_time
@@ -179,6 +180,18 @@ def run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None,
         market.open_tfs = set()
 
 
+def _coin_news(cfg: dict, repo, now_ms: int) -> dict:
+    """News score per coin for the entry (technical.news); {} when off or unavailable."""
+    p = news_params(cfg)
+    if not p["enabled"]:
+        return {}
+    try:
+        return coin_news(repo.get_news(now_ms - int(p["window_h"] * 3_600_000), with_coins=True), now_ms, cfg)
+    except Exception as e:                       # the news table is optional
+        log.warning("news factor skipped: %s", e)
+        return {}
+
+
 def _run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None,
             book_repo=None, state_key: str = "funnel") -> list[Evaluation]:
     """book_repo: where the evaluations and signals go (system 2 keeps its own database);
@@ -191,6 +204,7 @@ def _run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None,
     regime = Regime(**state["regime"])
     cfg = system_cfg(cfg, regime.name) or cfg       # the regime's system (price regime)
     majors = Majors(**state["majors"])
+    news = _coin_news(cfg, repo, now_ms)
     out = []
     for item in state["shortlist"]:
         base, side = item["base"], item["side"]
@@ -204,7 +218,7 @@ def _run_1h(cfg: dict, repo, market: LiveMarket, now_ms: int, notifier=None,
         extra = [flip_level(item["flip_level"], cfg)] if item.get("flip_level") else []
         ev = evaluate(base, side, frames, regime, majors, cfg,
                       funding=market.funding_now(base), btc_pair_up=btc_pair_up, extra_levels=extra,
-                      labels=item["labels"])
+                      labels=item["labels"], news=news.get(base))
         out.append(ev)
     book_repo.set_state("evaluations", {"ts": now_ms, "items": [e.to_dict() for e in out]})
     if notifier is not None:

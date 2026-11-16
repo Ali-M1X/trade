@@ -12,6 +12,7 @@ from ..analysis.frame import Frame
 from ..analysis.patterns import find_patterns
 from ..analysis.phase import Phase, climax, detect_phase, reversal_signs
 from ..indicators.divergence import divergence
+from ..news.signal import news_points
 from .majors import Majors
 from .regime import Regime
 from .trade import Rejected, TradePlan, build_trade, collect_levels, size_position
@@ -241,6 +242,7 @@ class Evaluation:
     plan: TradePlan | None = None
     rejected: str | None = None
     funding_pct: float | None = None
+    news: dict | None = None         # news factor (technical.news): points, coin score, headlines
 
     @property
     def is_signal(self) -> bool:
@@ -272,7 +274,8 @@ def avoid_flags(ev: "Evaluation", plan, side: int, base: str, majors: Majors, cf
 
 def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, majors: Majors,
              cfg: dict, funding: float | None = None, btc_pair_up: bool = False,
-             extra_levels: list | None = None, labels: list[str] | None = None) -> Evaluation:
+             extra_levels: list | None = None, labels: list[str] | None = None,
+             news: dict | None = None) -> Evaluation:
     """frames: 1w, 1d, 4h, 1h for COIN/USDT. funding: latest rate as a fraction.
     extra_levels: e.g. the flip level of a coin on the breakout watch."""
     w, d, h4, h1 = frames["1w"], frames["1d"], frames["4h"], frames["1h"]
@@ -316,6 +319,16 @@ def evaluate(base: str, side: int, frames: dict[str, Frame], regime: Regime, maj
         if ev.funding_pct * side > t["funding_crowded_pct"]:
             score += t["funding_penalty"]
             ev.flags.append("funding_crowded")
+    # 2026-11-16 (Ali): strong news on the coin, by importance or by number, counts for the
+    # entry: news its way adds points, news against it takes them off, and strong news
+    # against it keeps the setup a Watch (news/signal.py)
+    pts, against = news_points(news, side, cfg)
+    if news and (pts or against):
+        score += pts
+        ev.news = {"points": pts, "score": news["score"], "n": news["n"], "pos": news["pos"],
+                   "neg": news["neg"], "top": news["top"]}
+        if against:
+            ev.flags.append("news_against")
     ev.score = max(0.0, score)
     grade = grade_for(ev.score, cfg)
 

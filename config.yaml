@@ -332,6 +332,21 @@ technical:
   # max_score, btc_extended (BTC score in the trade's direction, -6..6), cycles (notes),
   # max_touches (of the plan's level), levels (allowed "kind tf" of the plan's level)
   avoid: {}
+  # 2026-11-16 (Ali): strong news counts when a position is opened (src/agent/news/signal.py).
+  # Per coin, the classified headlines of the last window_h hours add up (exchange items count
+  # more, older ones less); for a short the sign turns. points = score x points_per_unit, at most
+  # max_points either way. Strong news against the side (score <= -against_score) keeps the
+  # setup a Watch. Not backtested. enabled: false switches it off.
+  news:
+    enabled: true
+    window_h: 72
+    half_life_h: 24
+    exchange_weight: 1.5
+    media_weight: 0.5
+    points_per_unit: 3
+    max_points: 10
+    against_score: 2
+    majors: [BTC, ETH]
   confirmation:
     min_confirmations: 2
     points_per_extra: 2.5

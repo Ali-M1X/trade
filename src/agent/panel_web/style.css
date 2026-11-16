@@ -315,3 +315,24 @@ tr.tot td{font-weight:700;background:var(--chip);border-top:2px solid var(--line
 .ksplit{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}.khalf{border:1px solid var(--line);border-radius:10px;padding:10px;border-top:3px solid var(--acc)}.khalf.w{border-top-color:var(--warn)}.kht{display:flex;justify-content:space-between;align-items:baseline;gap:6px;margin-bottom:4px}.kht small{color:var(--muted);font-size:12px}.khalf .kbig{font-size:20px}.khalf .kgrid{grid-template-columns:1fr 1fr}
 @media (max-width:700px){.ksplit{grid-template-columns:1fr}}
 .kh{flex-wrap:wrap;gap:4px 10px}.kh b{white-space:nowrap}
+
+/* market regime page (2026-11-16) */
+.regnow{display:grid;grid-template-columns:200px 1fr;gap:16px;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.regnow .regl{display:flex;flex-direction:column;gap:4px}
+.regnow .regl b{font-size:22px}
+.regnow.neg .regl b{color:var(--neg)}.regnow.pos .regl b{color:var(--pos)}.regnow.warn .regl b{color:var(--warn)}
+.regnow .regwhy p{margin:0 0 6px;line-height:1.9}
+.regnow .regwhy p.warn{color:var(--warn)}
+@media (max-width:640px){.regnow{grid-template-columns:1fr}}
+svg.regchart .rb.neg,.legend i.rb.neg{fill:var(--neg);background:var(--neg);opacity:.13}
+svg.regchart .rb.pos,.legend i.rb.pos{fill:var(--pos);background:var(--pos);opacity:.13}
+svg.regchart .rb.warn,.legend i.rb.warn{fill:var(--warn);background:var(--warn);opacity:.13}
+.legend i.rb{opacity:.45}
+svg.regchart .rl{fill:none;stroke:var(--fg);stroke-width:2}
+svg.regchart .re{stroke:var(--bg);stroke-width:2}
+.re.drop,.legend i.re.drop{fill:var(--neg);background:var(--neg)}
+.re.jump_up,.legend i.re.jump_up{fill:var(--pos);background:var(--pos)}
+.re.whipsaw,.legend i.re.whipsaw{fill:var(--warn);background:var(--warn)}
+.legend i.re{border-radius:50%}
+.badge.neg{background:var(--short-bg);color:var(--neg)}.badge.pos{background:var(--long-bg);color:var(--pos)}.badge.warn{background:rgba(240,185,11,.12);color:var(--warn)}
+a.sdir{display:block;color:inherit;text-decoration:none}a.sdir:hover{border-color:var(--acc)}
