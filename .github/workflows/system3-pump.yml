@@ -1,0 +1,140 @@
+name: system3-pump
+
+# System 3 test (2026-11-17, Ali): which high-risk system on small and mid coins is better,
+# system 1/2 rules (engine replay, top 20 coins left out, $3M floor) or a pump-and-dump catcher
+# on 1H candles (scripts/s3_pump.py)? Tuning period until TEST_FROM, test period after it.
+# Commits the report to docs/system3-pump.md on this branch. Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/system3-pump]
+    paths: [".github/workflows/system3-pump.yml", "scripts/s3_*.py"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: system3-pump
+  cancel-in-progress: true
+
+env:
+  START: "2026-01-10"
+  TEST_FROM: "2026-07-17"
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      # dominance (system 2's regime) and the cached coin categories come from the live database
+      - name: Seed from the live database
+        run: |
+          mkdir -p data
+          git fetch --depth=1 origin data
+          git show FETCH_HEAD:state.db.gz | gunzip > data/live_state.db
+          python scripts/seed_backtest_db.py data/live_state.db data/backtest.db
+      - name: Fetch candles and funding (top 1000 coins, 400 days)
+        run: |
+          set -o pipefail
+          trade-agent -v backtest --fetch-only --no-cg-charts --days 400 --top-n 1000 > fetch.log 2>&1 || { tail -80 fetch.log; exit 1; }
+          grep -E "fetched:|WARNING" fetch.log | tail -40
+          sqlite3 data/backtest.db "SELECT timeframe, COUNT(DISTINCT symbol), datetime(MIN(ts)/1000,'unixepoch') FROM candles GROUP BY 1" || true
+      - run: gzip -k data/backtest.db && ls -la data
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-db-s3
+          path: data/backtest.db.gz
+          retention-days: 7
+
+  replay:
+    needs: fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [s3_s1_small, s3_s2_small]
+        slice: ["2026-01-10_2026-03-01", "2026-03-01_2026-05-01", "2026-05-01_2026-07-01", "2026-07-01_2026-09-01", "2026-09-01_2026-12-01"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-s3
+          path: data
+      - run: gunzip data/backtest.db.gz
+      # the two variants and the rank-20 cut are made here, in this job's copy only
+      - run: python scripts/s3_config.py config.yaml data/s3_config.yaml data/backtest.db
+      - name: Replay one slice
+        run: |
+          set -o pipefail
+          s="${{ matrix.slice }}"
+          trade-agent --config data/s3_config.yaml -v backtest --variant ${{ matrix.variant }} --start "${s%_*}" --end "${s#*_}" \
+            --json ${{ matrix.variant }}-$s.json 2>&1 | tail -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s3-${{ matrix.variant }}-${{ matrix.slice }}
+          path: ${{ matrix.variant }}-${{ matrix.slice }}.json
+
+  pump:
+    needs: fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-s3
+          path: data
+      - run: gunzip data/backtest.db.gz
+      - run: python scripts/s3_pump.py data/backtest.db "$START" 2026-12-01 pump.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s3-pump
+          path: pump.json
+
+  report:
+    needs: [replay, pump]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: s3-*
+          path: results
+          merge-multiple: true
+      - run: |
+          set -o pipefail
+          ls results
+          python scripts/s3_report.py "$TEST_FROM" results/pump.json $(ls results/s3_s*.json 2>/dev/null) | tee report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit the report and the trades
+        run: |
+          mkdir -p docs/system3
+          cp report.md docs/system3-pump.md
+          cp results/*.json docs/system3/
+          git config user.name trade-signal-agent
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/system3-pump.md docs/system3
+          git commit -m "System 3 test: report and trades" || exit 0
+          for i in 1 2 3; do git pull --rebase origin "$GITHUB_REF_NAME" && git push origin "HEAD:$GITHUB_REF_NAME" && break; sleep 5; done
