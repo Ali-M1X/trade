@@ -140,8 +140,10 @@
   }
 
   // ------------------------------------------------------------------ tabs
-  var TABS = {sum: summaryTab, home: home, reg: regimeTab, chart: chartTab, hist: histTab, perf: perf, cmp: compare, mkt: market, sys: health, news: news, cal: calendarTab, ai: aiTab, strat: strategy, how: method};
+  var TABS = {sum: summaryTab, home: home, chart: chartTab, hist: histTab, perf: perf, cmp: compare, mkt: marketTab, sys: health, news: news, cal: calendarTab, ai: aiTab, strat: strategy, how: method};
+  var ALIAS = {reg: ["mkt", "mk-now"]};          // 2026-11-17: the regime page is now part of the market page
   function show(tab, push) {
+    if (ALIAS[tab]) { S.jump = ALIAS[tab][1]; tab = ALIAS[tab][0]; }
     if (!TABS[tab]) tab = "home";
     S.tab = tab;
     document.querySelectorAll("#tabs button").forEach(function (b) { b.classList.toggle("on", b.dataset.t === tab); });
@@ -1280,7 +1282,115 @@
     if (m.btc_weak && dir > 0) lines.push('<span class="warn">BTC ضعیف است؛ لانگ آلت‌ها امتیاز ۸۰ به بالا لازم دارند.</span>');
     return '<div class="take">' + lines.map(function (x) { return "<p>" + x + "</p>"; }).join("") + "</div>";
   }
-  function market() {
+  // ------------------------------------------------------------------ market (2026-11-17, Ali: «رژیم بازار» and «بازار» in one page,
+  // nothing dropped, laid out so the pieces help one decision). Top: every market reading in one table with its
+  // time frame and its vote, and what they say together; then where the market is, the last days, mood and
+  // events, the setups closest to a signal, and how our trades did in each regime.
+  function marketTab() {
+    var rp = regimeParts(), board = marketBoard(rp), mp = marketParts();
+    var parts = [["mk-now", "۱", "بازار الان کجاست", "رژیم قیمت (۴ ساعته) و رژیم هر سیستم (دامیننس و روزانه)"],
+      ["mk-trend", "۲", "چند روز اخیر", "حرکت سبد کوین‌های بزرگ و دامیننس"],
+      ["mk-mood", "۳", "حال‌وهوا و رویدادها", "ترس و طمع، فاندینگ، اوپن‌اینترست و خبرهای اقتصادی"],
+      ["mk-cand", "۴", "فرصت‌ها", "کاندیدهای نزدیک به سیگنال، شورت‌لیست و واچ‌لیست"],
+      ["mk-rec", "۵", "کارنامه‌ی ما در هر رژیم", "پوزیشن‌های رژیم فعلی، هر رژیم و روز به روز"]];
+    function part(i) { var x = parts[i]; return '<div class="mkpart" id="' + x[0] + '"><b>' + x[1] + "</b><span>" + x[2] + "</span><small>" + x[3] + "</small></div>"; }
+    var jump = '<div class="mkjump">' + parts.map(function (x) { return '<button type="button" data-jump="' + x[0] + '">' + x[1] + ". " + x[2] + "</button>"; }).join("") + "</div>";
+    var noReg = '<section><h2>رژیم بازار</h2><div class="empty">هنوز کندل کافی برای تشخیص رژیم نیست.</div></section>';
+    app.innerHTML = board + jump +
+      part(0) + (rp ? rp.head : noReg) + mp.cards +
+      part(1) + (rp ? rp.chart : "") + mp.dom +
+      part(2) + mp.mood + mp.cal +
+      part(3) + mp.cand + mp.short + mp.watch +
+      part(4) + (rp ? rp.posTab + rp.segTab + rp.days : "");
+    mp.bind();
+    if (rp) regimeHover();
+    app.querySelectorAll("[data-jump]").forEach(function (b) {
+      b.addEventListener("click", function () { var el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({behavior: "smooth", block: "start"}); });
+    });
+    if (S.jump) {
+      var el = document.getElementById(S.jump); S.jump = null;
+      if (el) setTimeout(function () { el.scrollIntoView({block: "start"}); }, 0);
+    }
+  }
+  // every reading of the market side by side: what it says now, over which time frame, and which way it votes
+  var MKDIR = 0;                              // the market page's verdict: +1 up, -1 down, 0 mixed (marks the candidates)
+  function marketBoard(rp) {
+    var sys = D.systems || [], rg = regime(), m = rg.metrics || {}, dm = rg.dominance || {}, why = rp ? rp.why : null;
+    var rows = [], votes = [];
+    function arrow(v) { return v > 0 ? '<b class="pos">صعودی ▲</b>' : v < 0 ? '<b class="neg">نزولی ▼</b>' : '<b class="warn">بی‌جهت</b>'; }
+    function add(name, tf, now, v, note) {
+      if (v !== undefined) votes.push({name: name, v: v});
+      rows.push("<tr><td><b>" + name + "</b></td><td><small>" + tf + "</small></td><td>" + now + "</td><td>" + (v === undefined ? '<small class="muted">زمینه</small>' : arrow(v)) +
+        "</td><td><small>" + (note || "") + "</small></td></tr>");
+    }
+    if (why) {
+      var lab = why.cur.label;
+      add("رژیم قیمت (سبد ۱۰ کوین بزرگ)", "کندل ۴ ساعته", '<span class="badge ' + REGCLS[lab] + '">' + REGFA[lab] + "</span> از " + dur(why.h) + " پیش",
+        lab === "trend_up" ? 1 : lab === "trend_down" ? -1 : 0, "۲۴ ساعت " + pct(m.move_24h, 2) + " · جهت‌داری " + (m.efficiency == null ? "—" : fa(Math.round(m.efficiency * 100)) + "٪"));
+    }
+    var seen = {};
+    sys.forEach(function (s) {
+      var r = s.regime || {}; if (!r.name) return;
+      var key = r.name + "|" + r.bias; if (seen[key]) { seen[key].push(sysShort(s.name)); return; }
+      seen[key] = [sysShort(s.name)];
+      var v = r.bias === "short" ? -1 : r.bias === "long" ? 1 : (r.trend || 0);
+      rows.push(null);                          // filled below once we know which systems share it
+      var i = rows.length - 1;
+      votes.push({name: "رژیم سیستم", v: v});
+      seen[key].row = function () {
+        rows[i] = "<tr><td><b>رژیم " + esc(seen[key].join(" و ")) + "</b></td><td><small>دامیننس و کندل روزانه</small></td><td>" + esc(REG[r.name] || r.name) +
+          " · " + esc(BIAS[r.bias] || r.bias || "") + "</td><td>" + arrow(v) + "</td><td><small>همین است که سیستم با آن سیگنال می‌دهد" +
+          (r.bias === "both" && r.counter_risk ? "؛ خلاف جهت با " + fa(Math.round(r.counter_risk * 100)) + "٪ ریسک" : "") + "</small></td></tr>";
+      };
+    });
+    Object.keys(seen).forEach(function (k) { seen[k].row(); });
+    var mj = (sys[0] || {}).majors || {};
+    if (mj.btc != null || mj.eth != null) {
+      var sum = (mj.btc || 0) + (mj.eth || 0);
+      add("BTC و ETH", "هفتگی، روزانه، ۴ ساعته", "BTC <span class=\"ltr\">" + (mj.btc == null ? "—" : mj.btc) + "</span> · ETH <span class=\"ltr\">" + (mj.eth == null ? "—" : mj.eth) + "</span> از ۱۰",
+        sum >= 4 ? 1 : sum <= -4 ? -1 : 0, mj.btc_weak ? "BTC ضعیف است" : "");
+    }
+    if (dm.t2_chg != null || dm.usdt_d_chg != null) {
+      var t2 = dm.t2_chg || 0, ud = dm.usdt_d_chg || 0;
+      var fv = (t2 >= 0.5 ? 1 : t2 <= -0.5 ? -1 : 0) + (ud >= 0.05 ? -1 : ud <= -0.05 ? 1 : 0);
+      add("جریان پول (TOTAL2 و USDT.D)", "۲۴ ساعت", "TOTAL2 " + pct(dm.t2_chg, 2) + " · USDT.D " + (dm.usdt_d_chg == null ? "—" : '<span class="ltr">' + (ud > 0 ? "+" : "") + ud.toFixed(2) + "</span>"),
+        fv > 0 ? 1 : fv < 0 ? -1 : 0, "بالا رفتن USDT.D یعنی پول از کوین‌ها به تتر می‌رود");
+    }
+    var fng = MK.fng || [], f = fng.length ? fng[fng.length - 1] : null;
+    if (f) add("ترس و طمع", "روزانه", fa(f[1]) + " از ۱۰۰", undefined,
+      f[1] < 25 ? "ترس شدید: معمولاً نزدیک کف‌های کوتاه‌مدت است؛ شورت دیرهنگام پرخطر است" : f[1] > 75 ? "طمع شدید: معمولاً نزدیک سقف‌های کوتاه‌مدت است؛ لانگ دیرهنگام پرخطر است" : "نه ترس شدید نه طمع شدید");
+    var bd = deriv("BTC");
+    if (bd && bd.funding != null) add("فاندینگ BTC", "هر ۸ ساعت", fpct(bd.funding * 100, 4), undefined,
+      bd.funding > 0.0003 ? "لانگ‌ها شلوغ‌اند: ریزش ناگهانی محتمل‌تر" : bd.funding < -0.0001 ? "شورت‌ها شلوغ‌اند: جهش ناگهانی (شورت‌اسکوییز) محتمل‌تر" : "عادی");
+    var now = Date.now(), next = (MK.calendar || []).filter(function (e) { return e.ts > now && e.w >= 3; })[0];
+    if (next) add("رویداد اقتصادی پراثر بعدی", "", esc((CCY[next.country] || [""])[0] + " " + next.title) + ' <small data-until="' + next.ts + '">' + esc(untilTxt(next.ts)) + "</small>", undefined,
+      next.ts - now < 3 * 3600000 ? '<span class="warn">کمتر از ۳ ساعت: استاپ‌ها ممکن است با نوسان بخورند</span>' : "");
+    if (!rows.length) return "";
+    // what they say together
+    var up = votes.filter(function (x) { return x.v > 0; }).length, dn = votes.filter(function (x) { return x.v < 0; }).length, n = votes.length;
+    var cls0 = "warn", head, lines = [];
+    MKDIR = dn && !up && dn >= n - 1 ? -1 : up && !dn && up >= n - 1 ? 1 : 0;
+    if (dn && !up && dn >= n - 1) { cls0 = "neg"; head = fa(dn) + " از " + fa(n) + " نشانه نزولی‌اند و هیچ‌کدام صعودی نیست"; lines.push("شورت در جهت بازار است؛ لانگ خلاف جهت است."); }
+    else if (up && !dn && up >= n - 1) { cls0 = "pos"; head = fa(up) + " از " + fa(n) + " نشانه صعودی‌اند و هیچ‌کدام نزولی نیست"; lines.push("لانگ در جهت بازار است؛ شورت خلاف جهت است."); }
+    else head = "نشانه‌ها هم‌جهت نیستند: " + fa(up) + " صعودی، " + fa(dn) + " نزولی، " + fa(n - up - dn) + " بی‌جهت";
+    if (why) {
+      var big = votes.filter(function (x) { return x.name === "رژیم سیستم"; }).map(function (x) { return x.v; });
+      var bigDir = big.length && big.every(function (v) { return v === big[0]; }) ? big[0] : 0;
+      if (why.cur.label === "range" && bigDir) lines.push("روند بزرگ‌تر (رژیم سیستم‌ها) " + (bigDir > 0 ? "صعودی" : "نزولی") + " است ولی قیمت در ۴ ساعته جهت ندارد. این دو با هم تناقض ندارند: سیستم‌ها روی دامیننس و کندل روزانه کندتر عوض می‌شوند و رژیم قیمت زودتر نشان می‌دهد که بازار از حرکت ایستاده. در رنج، ورودهای روندی جای حرکت ندارند.");
+      else if (why.cur.label !== "range" && bigDir && (why.cur.label === "trend_up" ? 1 : -1) !== bigDir) lines.push("قیمت در ۴ ساعته خلاف رژیم سیستم‌ها حرکت می‌کند: یا اصلاح کوتاهی درون روند بزرگ‌تر است یا شروع تغییر روند. تا هم‌جهت شوند احتیاط کنید.");
+      lines.push("از شروع رژیم فعلی: " + outcomeLine(why.c) + ".");
+      var by = {};
+      regSegs().forEach(function (sg) { var c = outcomeCount(trades().filter(function (t) { return inSeg(t, sg); })); if (!c.n) return; var o = by[sg.label] = by[sg.label] || {r: 0, u: 0, n: 0}; o.r += c.r; o.u += c.u; o.n += c.n; });
+      var ks = Object.keys(by).sort(function (a, b) { return by[b].r - by[a].r; });
+      if (ks.length > 1) lines.push("در ۷ روز اخیر بهترین نتیجه‌ی ما در «" + REGFA[ks[0]] + "» بوده (" + fa(by[ks[0]].n) + " پوزیشن، " + RU(by[ks[0]].r, by[ks[0]].u) + ") و ضعیف‌ترین در «" +
+        REGFA[ks[ks.length - 1]] + "» (" + fa(by[ks[ks.length - 1]].n) + " پوزیشن، " + RU(by[ks[ks.length - 1]].r, by[ks[ks.length - 1]].u) + ").");
+    }
+    if (next && next.ts - now < 3 * 3600000) lines.push('<span class="warn">تا انتشار ' + esc(next.title) + " کمتر از ۳ ساعت مانده.</span>");
+    return '<section><h2>جمع‌بندی بازار <small>همه‌ی نشانه‌های دو صفحه‌ی قبلی کنار هم</small></h2>' +
+      '<div class="mkverdict v-' + cls0 + '"><b>' + head + "</b>" + lines.map(function (x) { return "<p>" + x + "</p>"; }).join("") + "</div>" +
+      '<div class="scroll"><table class="mkboard"><thead><tr><th>نشانه</th><th>بازه‌ی زمانی</th><th>الان</th><th>جهت</th><th>یعنی</th></tr></thead><tbody>' + rows.join("") + "</tbody></table></div></section>";
+  }
+  function marketParts() {
     var sys = D.systems || [];
     var cards = sys.map(function (s) {
       var r = s.regime || {}, m = s.majors || {};
@@ -1311,6 +1421,7 @@
       var id = "cand-" + sysShort(s.name) + "-" + c.base;
       var clickable = p.entry != null;
       return "<tr" + (clickable ? ' class="click" data-cand="' + esc(id) + '"' : "") + "><td>" + esc(sysShort(s.name)) + "</td><td><b>" + esc(c.base) + "</b></td><td>" + side(c.side) +
+        (MKDIR ? (c.side === MKDIR ? ' <small class="pos" title="هم‌جهت با جمع‌بندی بازار">✓ هم‌جهت</small>' : ' <small class="warn" title="خلاف جهت جمع‌بندی بازار">خلاف</small>') : "") +
         '</td><td><span class="ltr">' + (c.score || 0).toFixed(0) + "</span> " + scoreBar(c.score) + "</td><td>" + esc(c.grade || "—") + '</td><td class="num">' + px(c.price) +
         '</td><td class="num">' + px(p.entry) + '</td><td class="num">' + px(p.sl) + '</td><td class="num">' + px(p.tp1) + "</td>" + derivCells(c) + "<td>" +
         (c.news && c.news.points ? '<span class="chip ' + (c.news.points > 0 ? "pos" : "neg") + '" title="' + esc((c.news.top || []).map(function (x) { return x[0]; }).join(" | ")) + '">اخبار ' +
@@ -1333,16 +1444,17 @@
       var v = s0.breakout_watch[b] || {};
       return '<span class="chip">' + esc(b) + " <small>" + esc((v.labels || []).join(", ")) + (v.level ? ' @ <span class="ltr">' + px(v.level) + "</span>" : "") + "</small></span>";
     }).join("");
-    app.innerHTML = '<div class="grid g2">' + cards + "</div>" + moodSection() + calendarSection() + domHtml +
-      '<section><h2>نزدیک‌ترین کاندیدها به سیگنال <small>کلیک = دیدن پلن روی نمودار</small></h2><div class="filters"><div class="seg" id="cf">' +
+    var P = {cards: '<div class="grid g2">' + cards + "</div>", mood: moodSection(), cal: calendarSection(), dom: domHtml};
+    P.cand = '<section><h2>نزدیک‌ترین کاندیدها به سیگنال <small>کلیک = دیدن پلن روی نمودار</small></h2><div class="filters"><div class="seg" id="cf">' +
       [["", "همه"]].concat(names.map(function (n) { return [n, n]; })).map(function (o) { return '<button data-v="' + esc(o[0]) + '" class="' + (cf === o[0] ? "on" : "") + '">' + esc(o[1]) + "</button>"; }).join("") +
       '</div><small>سیگنال = رده‌ی A یا B بدون مانع؛ Watch = ستاپ نزدیک که فقط دنبال می‌شود</small></div>' +
-      (rows ? '<div class="scroll"><table><thead><tr><th>سیستم</th><th>کوین</th><th>جهت</th><th>امتیاز</th><th>رده</th><th>قیمت</th><th>ورود</th><th>استاپ</th><th>TP1</th><th>فاندینگ</th><th>اوپن‌اینترست ۲۴س</th><th>لانگ/شورت</th><th>چرا سیگنال نشد</th></tr></thead><tbody>' + rows + "</tbody></table></div>" : '<div class="empty">در آخرین بررسی کاندیدی نبود.</div>') + "</section>" +
-      '<section><h2>شورت‌لیست <small>' + fa((s0.shortlist || []).length) + " کوین · قیف " + esc(ago(s0.funnel_ts ? Number(s0.funnel_ts) : null)) + '</small></h2><div class="grid g4">' + (sl || '<div class="muted">—</div>') + "</div></section>" +
-      '<section><h2>واچ‌لیست <small>' + fa(Object.keys(s0.watchlist || {}).length) + "</small></h2>" + (wl || "—") +
+      (rows ? '<div class="scroll"><table><thead><tr><th>سیستم</th><th>کوین</th><th>جهت</th><th>امتیاز</th><th>رده</th><th>قیمت</th><th>ورود</th><th>استاپ</th><th>TP1</th><th>فاندینگ</th><th>اوپن‌اینترست ۲۴س</th><th>لانگ/شورت</th><th>چرا سیگنال نشد</th></tr></thead><tbody>' + rows + "</tbody></table></div>" : '<div class="empty">در آخرین بررسی کاندیدی نبود.</div>') + "</section>";
+    P.short = '<section><h2>شورت‌لیست <small>' + fa((s0.shortlist || []).length) + " کوین · قیف " + esc(ago(s0.funnel_ts ? Number(s0.funnel_ts) : null)) + '</small></h2><div class="grid g4">' + (sl || '<div class="muted">—</div>') + "</div></section>";
+    P.watch = '<section><h2>واچ‌لیست <small>' + fa(Object.keys(s0.watchlist || {}).length) + "</small></h2>" + (wl || "—") +
       (bw ? '<h3>منتظر شکست</h3>' + bw : "") + ((s0.hot_categories || []).length ? '<h3>دسته‌های داغ</h3>' + s0.hot_categories.map(function (h) { return '<span class="chip">' + esc(h) + "</span>"; }).join("") : "") + "</section>";
+    P.bind = function () {
     var cfEl = document.getElementById("cf");
-    if (cfEl) cfEl.addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { S.cand.s = b.dataset.v; market(); } });
+    if (cfEl) cfEl.addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { S.cand.s = b.dataset.v; var y = window.scrollY; render(); window.scrollTo(0, y); } });
     [1, 2, 3].forEach(function (i) {
       var el = document.getElementById("dom-" + i); if (!el) return;
       var c = makeChart(el, {rightPriceScale: {visible: false}, leftPriceScale: {visible: false}, timeScale: {visible: false}, handleScroll: false, handleScale: false,
@@ -1353,6 +1465,8 @@
       s.setData(uniq(dom.map(function (r) { return {time: tsec(r[0]), value: r[i]}; })));
       c.timeScale().fitContent();
     });
+    };
+    return P;
   }
   function valueAt(rows, ms, i) {
     var v = null;
@@ -1641,9 +1755,9 @@
     svg.addEventListener("touchmove", function (e) { if (e.touches[0]) move(e.touches[0]); }, {passive: true});
     svg.addEventListener("mouseleave", hide);
   }
-  function regimeTab() {
+  function regimeParts() {
     var rg = regime(), segs = regSegs();
-    if (!segs.length) { app.innerHTML = '<section><h2>رژیم بازار</h2><div class="empty">هنوز کندل کافی برای تشخیص رژیم نیست.</div></section>'; return; }
+    if (!segs.length) return null;
     var why = regimeReason(), cur = why.cur, m = rg.metrics || {}, dm = rg.dominance || {};
     var paused = (D.systems || []).filter(function (s) { return s.paused_until && s.paused_until > Date.now(); });
     var head = '<section><h2>رژیم بازار <small>سبد ' + fa((rg.basket || []).length) + " کوین بزرگ روی کندل ۴ ساعته</small></h2>" +
@@ -1683,8 +1797,7 @@
           levCell(t) + tsCell(t.filled_at) + '<td><span class="badge ' + (o ? OUTFA[o][1] : "gray") + '">' + (o ? OUTFA[o][0] : "—") + (t.open ? " · باز" : "") + "</span></td>" +
           '<td data-v="' + (r == null ? "" : r) + '">' + RU(r, pnlUsd(t)) + splitNote(t) + "</td>" + pctCell(t) + "</tr>";
       }).join("") + "</tbody>" + totRow([{span: 7, v: "جمع " + fa(list.length) + " پوزیشن"}, RU(why.c.r, why.c.u), ""]) + "</table></div>" : '<div class="empty">در این رژیم هنوز پوزیشنی پر نشده.</div>') + "</section>";
-    app.innerHTML = head + chart + posTab + segTab + regimeDays();
-    regimeHover();
+    return {head: head, chart: chart, posTab: posTab, segTab: segTab, days: regimeDays(), why: why};
   }
   // the last days side by side: what the market did and what it did to the accounts
   function regimeDays() {
@@ -2747,13 +2860,13 @@
   var h = (location.hash || "").replace(/^#/, "").split("/");
   var saved = null; try { saved = localStorage.getItem("tab3"); } catch (e) {}
   if (h[1]) S.sel = decodeURIComponent(h[1]);
-  show(TABS[h[0]] ? h[0] : (saved && TABS[saved] ? saved : "sum"), false);
+  show(TABS[h[0]] || ALIAS[h[0]] ? h[0] : (saved && (TABS[saved] || ALIAS[saved]) ? saved : "sum"), false);
   window.addEventListener("hashchange", function () {   // in-page links such as #chart/BTC or #cal
     var p = (location.hash || "").replace(/^#/, "").split("/");
-    if (!TABS[p[0]]) return;
+    if (!TABS[p[0]] && !ALIAS[p[0]]) return;
     if (p[1]) S.sel = decodeURIComponent(p[1]);
     show(p[0], false);
-    window.scrollTo(0, 0);
+    if (!S.jump) window.scrollTo(0, 0);
   });
   loadMarks();
   bellUi();
