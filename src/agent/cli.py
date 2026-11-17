@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 import time
+from pathlib import Path
 
 from .config import live_config, load_config, load_secrets
 from .data.sources_check import as_dicts, check_sources, format_report, working_exchanges
@@ -334,6 +335,9 @@ def cmd_panel(args, cfg, secrets) -> int:
             print("data branch not found: building from the local databases")
     from .ai_review import pull_llm
     pull_llm(cfg)                                   # the LLM reviewers' scores (GitHub Actions, branch ai)
+    if (cfg.get("panel") or {}).get("translate_news"):
+        from .news.translate import pull_remote
+        pull_remote(cfg)                            # Persian titles GitHub Actions translated (branch ai)
     print(build(cfg, args.out))
     return 0
 
@@ -349,6 +353,31 @@ def cmd_ai_review(args, cfg, secrets) -> int:
     store = ai_review.run_llm(cfg, cases, now)
     n = {k: sum(1 for v in store["preds"].values() if k in v) for k in (store.get("ran") or {})}
     print(f"ai-review: {len(cases)} trades, scored {n}, errors {store.get('errors')}")
+    return 0
+
+
+def cmd_translate_news(args, cfg, secrets) -> int:
+    """Persian titles for the panel's news (GitHub Actions, ai-review.yml), in case the translation
+    hosts refuse the server: fills data/news_fa.json, which goes to the ai branch."""
+    from .news import translate
+    from .panel_insights import HOUR, NEWS_DAYS
+    from .store.repository import Repository
+    cfg = live_config(cfg)
+    path = Path(cfg["storage"]["db_path"])
+    if not path.exists():
+        print(f"translate-news: no database at {path}")
+        return 0
+    repo = Repository.open_readonly(path)
+    try:
+        news = repo.get_news(int(time.time() * 1000) - NEWS_DAYS * 24 * HOUR)
+    finally:
+        repo.close()
+    titles = [n["title"] for n in sorted(news, key=lambda n: -(n.get("ts") or n["seen_at"]))
+              if n.get("rule") != "ignored"]
+    out = translate.cache_path(cfg)
+    before = len(translate.load(out))
+    got = translate.translate_titles(out, titles, max_new=args.max, budget_s=args.budget)
+    print(f"translate-news: {len(titles)} titles, {len(got)} in Persian, {len(translate.load(out)) - before} new")
     return 0
 
 
@@ -389,6 +418,7 @@ COMMANDS = {
     "backup": cmd_backup,
     "panel-api": cmd_panel_api,
     "ai-review": cmd_ai_review,
+    "translate-news": cmd_translate_news,
 }
 
 
@@ -430,6 +460,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--pull", action="store_true",
                            help="first download the databases from the data branch (the agent "
                            "runs elsewhere, e.g. on GitHub Actions)")
+        if name == "translate-news":
+            p.add_argument("--max", type=int, default=600, help="new titles at most")
+            p.add_argument("--budget", type=float, default=300, help="seconds at most")
         if name == "panel-api":
             p.add_argument("--host", default="127.0.0.1")
             p.add_argument("--port", type=int, default=8787)

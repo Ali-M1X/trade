@@ -492,6 +492,7 @@ panel:
   url: https://signal.techfold.ir # Telegram messages link to the coin's chart here (empty: no link)
   market_data: true               # Gate futures stats, Fear & Greed, economic calendar (cached)
   api: true                       # "took it / skipped" buttons: trade-agent panel-api behind Caddy /api/
+  translate_news: true            # news titles in Persian (display only; src/agent/news/translate.py)
 
 # AI reviewers (2026-11-15, Ali): several reviewers score every signal (chance of profit), learn
 # from every closed trade and are graded themselves (panel tab "داوران هوش مصنوعی"). Advisory

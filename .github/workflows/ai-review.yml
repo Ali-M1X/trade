@@ -36,7 +36,10 @@ jobs:
           for f in state state_s2 state_shadow state_s2_shadow; do
             git show FETCH_HEAD:$f.db.gz > /tmp/$f.gz 2>/dev/null && gunzip -c /tmp/$f.gz > data/$f.db || echo "no $f"
           done
-          if git fetch --depth=1 origin ai 2>/dev/null; then git show FETCH_HEAD:ai_llm.json > data/ai_llm.json || true; fi
+          if git fetch --depth=1 origin ai 2>/dev/null; then
+            git show FETCH_HEAD:ai_llm.json > data/ai_llm.json || true
+            git show FETCH_HEAD:news_fa.json > data/news_fa.json || rm -f data/news_fa.json
+          fi
           ls -la data
       - name: Review
         env:
@@ -44,9 +47,17 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
         run: trade-agent ai-review
+      # Persian news titles for the panel (2026-11-17), in case the translation hosts refuse the server
+      - name: Translate news titles
+        continue-on-error: true
+        run: trade-agent translate-news
       - name: Save to the ai branch
         run: |
           blob=$(git hash-object -w data/ai_llm.json)
-          tree=$(printf '100644 blob %s\tai_llm.json\n' "$blob" | git mktree)
+          list=$(printf '100644 blob %s\tai_llm.json' "$blob")
+          if [ -s data/news_fa.json ]; then
+            list=$(printf '%s\n100644 blob %s\tnews_fa.json' "$list" "$(git hash-object -w data/news_fa.json)")
+          fi
+          tree=$(printf '%s\n' "$list" | git mktree)
           commit=$(git -c user.name=trade-ai -c user.email=agent@users.noreply.github.com commit-tree "$tree" -m "ai review")
           git push --force origin "$commit:refs/heads/ai"
