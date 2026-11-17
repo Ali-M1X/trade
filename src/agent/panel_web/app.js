@@ -177,9 +177,14 @@
     var e = (t.events || []).filter(function (x) { return x[0] === "tp1" || x[0] === "tp2"; }).pop();
     return e ? e[1] : t.filled_at;
   }
-  function doneUsd(t, own) {
-    var risk = own ? t.own_risk_usd : t.risk_usd;
-    if (!t.open) return own ? t.own_pnl_usd : t.pnl_usd;
+  // 2026-11-17 (Ali): a trade's $ is the same on every page: its own account's (approved signals in the
+  // approved account, Watch in the watch account). Only views of the "all" account pass all = true.
+  function tRisk(t, all) { return all || t.own_risk_usd == null ? t.risk_usd : t.own_risk_usd; }
+  function tSize(t, all) { return t.size_usd == null || !t.risk_usd ? t.size_usd : t.size_usd * tRisk(t, all) / t.risk_usd; }
+  function tPnl(t, all) { return all || t.own_risk_usd == null ? t.pnl_usd : t.own_pnl_usd; }
+  function doneUsd(t, all) {
+    var risk = tRisk(t, all);
+    if (!t.open) return tPnl(t, all);
     return risk != null ? risk * t.net_r : null;
   }
   function doneTrades(list) { return (list || trades()).filter(isDone).sort(function (a, b) { return (doneTs(a) || 0) - (doneTs(b) || 0); }); }
@@ -201,7 +206,7 @@
       if (!t.open || !t.filled_at) return;
       if (key === "approved" && !t.approved) return;
       if (key === "watch" && t.approved) return;
-      var risk = key === "all" ? t.risk_usd : t.own_risk_usd, r = openR(t);
+      var risk = tRisk(t, key === "all"), r = openR(t);
       if (risk != null && r != null) extra += risk * (r - (isPartial(t) ? t.net_r || 0 : 0));
     });
     return {equity: a.balance + extra, unreal: extra};
@@ -238,7 +243,7 @@
     return '<div class="scroll"><table data-defsort="7:desc"><thead><tr><th>کوین</th><th>جهت</th><th>سیستم</th><th>نوع</th><th>اهرم</th><th>قیمت</th><th>سود/زیان</th><th>سود٪</th></tr></thead><tbody>' +
       list.map(function (t) {
         return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + "</b></td><td>" + side(t.side) + "</td><td>" + esc(sysShort(t.system)) +
-          "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(livePrice(t)) + "</td><td>" + RU(openR(t), pnlUsd(t)) + "</td>" + pctCell(t) + "</tr>";
+          "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(livePrice(t)) + "</td><td>" + RU(openR(t), pnlUsd(t)) + splitNote(t) + "</td>" + pctCell(t) + "</tr>";
       }).join("") + "</tbody>" + totRow([{span: 6, v: "جمع " + fa(list.length) + " پوزیشن"}, posTot(list), ""]) + "</table></div>";
   }
   var BIAS = {long: "فقط لانگ", short: "فقط شورت", both: "هر دو طرف"};
@@ -386,16 +391,22 @@
   var IND = {ma7: 1, ma25: 1, ma99: 0, vol: 1};
   try { var ind0 = JSON.parse(localStorage.getItem("ind") || "null"); if (ind0) IND = Object.assign(IND, ind0); } catch (e) {}
   var MAS = [["ma7", 7, "--warn"], ["ma25", 25, "--acc2"], ["ma99", 99, "--acc"]];
-  function pnlUsd(t) {                       // $ in the "all" account; open positions at the live price
-    if (!t || t.cand || t.risk_usd == null) return null;
-    if (t.open) { if (!t.filled_at) return null; var r = openR(t); return r == null ? null : t.risk_usd * r; }
-    return t.filled_at ? t.pnl_usd : null;
+  function pnlUsd(t, all) {                  // the whole trade in $; open positions at the live price
+    if (!t || t.cand || tRisk(t, all) == null) return null;
+    if (t.open) { if (!t.filled_at) return null; var r = openR(t); return r == null ? null : tRisk(t, all) * r; }
+    return t.filled_at ? tPnl(t, all) : null;
   }
   // open P/L that is not booked yet: a partly closed trade's TP1/TP2 part is already in the balance
-  function bookedUsd(t, own) { var risk = own ? t.own_risk_usd : t.risk_usd; return isPartial(t) && risk != null ? risk * (t.net_r || 0) : 0; }
-  function floatUsd(t, own) {
-    var risk = own ? t.own_risk_usd : t.risk_usd, r = openR(t);
-    return t.open && t.filled_at && risk != null && r != null ? risk * r - bookedUsd(t, own) : null;
+  function bookedUsd(t, all) { var risk = tRisk(t, all); return isPartial(t) && risk != null ? risk * (t.net_r || 0) : 0; }
+  function floatUsd(t, all) {
+    var risk = tRisk(t, all), r = openR(t);
+    return t.open && t.filled_at && risk != null && r != null ? risk * r - bookedUsd(t, all) : null;
+  }
+  // a partly closed trade: what is banked and what is still open, under its total
+  function splitNote(t) {
+    if (!t || !t.open || !isPartial(t)) return "";
+    var f = floatUsd(t);
+    return '<br><small class="muted">قطعی ' + usd(bookedUsd(t)) + " + باز " + usd(f) + "</small>";
   }
   // totals cell of a positions table: the whole trades, and how much of it is booked / still open
   function posTot(list) {
@@ -540,11 +551,11 @@
       head = ["نماد", "جهت", "نوع", "اهرم", "حجم", "ورود", "قیمت لحظه‌ای", "سود/زیان", "سود٪", "استاپ / TP1", "زمان ورود"];
       rows = open.map(function (t) {
         return '<tr class="click ' + (t.id === S.sel ? "sel" : "") + '" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) +
-          "</td>" + levCell(t) + "<td>" + usd(t.size_usd == null ? null : t.size_usd * (t.open_frac == null ? 1 : t.open_frac), false) + '</td><td class="num">' + px(t.entry) +
+          "</td>" + levCell(t) + "<td>" + usd(tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac), false) + '</td><td class="num">' + px(t.entry) +
           '</td><td class="num xp">' + px(livePrice(t)) + '</td><td class="xu">' + pnlCell(t) + "</td>" + pctCell(t, true) + '<td class="num"><span class="neg">' + px(t.sl_now) +
           '</span> / <span class="pos">' + px(t.tp1) + "</span></td>" + tsCell(t.filled_at) + "</tr>";
       });
-      foot = totRow([{span: 3, v: "جمع " + fa(open.length) + " پوزیشن"}, "", usd(sumOf(open, function (t) { return t.size_usd == null ? null : t.size_usd * (t.open_frac == null ? 1 : t.open_frac); }), false),
+      foot = totRow([{span: 3, v: "جمع " + fa(open.length) + " پوزیشن"}, "", usd(sumOf(open, function (t) { return tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac); }), false),
         {span: 2, v: ""}, posTot(open), "", {span: 2, v: ""}]);
     } else if (S.xtab === "pend") {
       head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "قیمت لحظه‌ای", "فاصله تا ورود", "استاپ", "TP1", "ریسک / سود در TP1", "رده", "زمان سیگنال"];
@@ -552,10 +563,10 @@
         var p = livePrice(t), d = p && t.entry ? (t.entry - p) / p * 100 : null;
         return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
           '</td><td class="num xp">' + px(p) + "</td><td>" + pct(d, 2) + '</td><td class="num neg">' + px(t.sl) + '</td><td class="num pos">' + px(t.tp1) +
-          "</td><td>" + (t.risk_usd != null ? usd(-t.risk_usd) + " / " + (t.tp1 && t.entry !== t.sl ? usd(t.risk_usd * Math.abs(t.tp1 - t.entry) / Math.abs(t.entry - t.sl)) : "—") : "—") +
+          "</td><td>" + (tRisk(t) != null ? usd(-tRisk(t)) + " / " + (t.tp1 && t.entry !== t.sl ? usd(tRisk(t) * Math.abs(t.tp1 - t.entry) / Math.abs(t.entry - t.sl)) : "—") : "—") +
           "</td><td>" + esc(t.grade) + "</td>" + tsCell(t.created) + "</tr>";
       });
-      foot = totRow([{span: 9, v: "جمع " + fa(pend.length) + " سفارش"}, usd(-sumOf(pend, function (t) { return t.risk_usd; })) + ' <small class="muted">ریسک کل اگر همه پر شوند</small>', {span: 2, v: ""}]);
+      foot = totRow([{span: 9, v: "جمع " + fa(pend.length) + " سفارش"}, usd(-sumOf(pend, function (t) { return tRisk(t); })) + ' <small class="muted">ریسک کل اگر همه پر شوند</small>', {span: 2, v: ""}]);
     } else {
       head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "خروج", "نتیجه", "سود/زیان", "سود٪", "مدت", "زمان بسته شدن"];
       rows = closed.map(function (t) {
@@ -572,7 +583,7 @@
     decorateTips(el.parentNode);
   }
   function pnlCell(t) {
-    return usd(pnlUsd(t)) + " " + R(openR(t));
+    return usd(pnlUsd(t)) + " " + R(openR(t)) + splitNote(t);
   }
   function liveX(base) {                     // 24h numbers: from the live ticker, else from the last build
     var l = S.live[base], d = deriv(base) || {};
@@ -592,7 +603,7 @@
   }
   function headPnl(t) {
     if (t.cand) return "";
-    if (t.open && t.filled_at) return "سود/زیان باز: " + RU(openR(t), pnlUsd(t));
+    if (t.open && t.filled_at) return "سود/زیان باز: " + RU(openR(t), pnlUsd(t)) + (isPartial(t) ? ' <small class="muted">(قطعی ' + usd(bookedUsd(t)) + " + باز " + usd(floatUsd(t)) + ")</small>" : "");
     if (!t.open && t.filled_at) return "نتیجه: " + RU(t.net_r, pnlUsd(t));
     return "";
   }
@@ -783,18 +794,18 @@
     var rk = t.entry != null && t.sl != null ? Math.abs(t.entry - t.sl) : 0;
     function lv(label, v, ref, money) {
       var d = (ref && v != null && p) ? (v - p) / p * 100 : null;
-      var u = money && rk && t.risk_usd != null && v != null ? t.risk_usd * (t.open_frac == null ? 1 : t.open_frac) * t.side * (v - t.entry) / rk : null;
+      var u = money && rk && tRisk(t) != null && v != null ? tRisk(t) * (t.open_frac == null ? 1 : t.open_frac) * t.side * (v - t.entry) / rk : null;
       return '<div class="lv"><span class="l">' + label + '</span><span class="v">' + px(v) + "</span>" +
         (d != null ? '<span class="d ' + cls(d * (t.side || 1)) + '">' + (d > 0 ? "+" : "") + d.toFixed(2) + "% از قیمت</span>" : "") +
         (u != null ? '<span class="d">' + usd(u) + " اگر برسد</span>" : "") + "</div>";
     }
-    var risk = t.risk_usd, r = t.cand ? null : (t.open ? openR(t) : t.net_r);
+    var risk = tRisk(t), r = t.cand ? null : (t.open ? openR(t) : t.net_r);
     var money = "";
     if (!t.cand) {
-      money = '<div class="lv"><span class="l">ریسک (حساب همه)</span><span class="v">' + usd(risk, false) + "</span></div>" +
-        '<div class="lv"><span class="l">حجم پوزیشن</span><span class="v">' + usd(t.size_usd, false) + "</span></div>" +
+      money = '<div class="lv"><span class="l">ریسک (حساب ' + (t.approved ? "تأییدشده" : "Watch") + ')</span><span class="v">' + usd(risk, false) + "</span></div>" +
+        '<div class="lv"><span class="l">حجم پوزیشن</span><span class="v">' + usd(tSize(t), false) + "</span></div>" +
         '<div class="lv"><span class="l">' + (t.open ? "سود/زیان باز" : "سود/زیان") + '</span><span class="v">' +
-        usd(t.open ? (risk != null && r != null ? risk * r : null) : t.pnl_usd) + "</span></div>" +
+        usd(t.open ? (risk != null && r != null ? risk * r : null) : tPnl(t)) + "</span></div>" +
         '<div class="lv"><span class="l">درصد ریسک / فاصله‌ی استاپ</span><span class="v">' + (t.risk_pct || 0).toFixed(2) + "% / " + (t.sl_pct || 0).toFixed(2) + "%</span></div>";
     }
     return '<div class="levels">' + lv("قیمت الان", p) + lv("ورود", t.entry, 1) + lv(t.open ? "استاپ الان" : "استاپ", t.open ? t.sl_now : t.sl, 1, t.open) +
@@ -881,16 +892,15 @@
   }
   function uniqList(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }).sort(); }
   var HCOLS = [["created", "سیگنال"], ["closed", "بسته شدن"], ["kind", "نوع"], ["system", "سیستم"], ["base", "کوین"], ["side", "جهت"], ["lev", "اهرم"],
-    ["score", "رده / امتیاز"], ["status", "نتیجه"], ["hold", "مدت"], ["gross", "R خام"], ["net", "R خالص"], ["pct", "سود٪"], ["pnl", "سود/زیان (همه)"],
-    ["own", "در حساب خودش"], ["bal", "موجودی بعد"]];
+    ["score", "رده / امتیاز"], ["status", "نتیجه"], ["hold", "مدت"], ["gross", "R خام"], ["net", "R خالص"], ["pct", "سود٪"], ["own", "سود/زیان"], ["bal", "موجودی بعد"]];
   // history rows show the banked result, also for partly closed trades (net_r so far)
   function hpct(t) { return t.filled_at && t.sl_pct && t.net_r != null ? t.net_r * t.sl_pct * (t.leverage || 1) : null; }
   function hval(t, k) {
     var hp = hpct(t);
     return {created: t.created, closed: t.closed_at || t.created, kind: t.approved ? 1 : 0, system: t.system, base: t.base, side: t.side, lev: t.leverage || 0, pct: hp == null ? -1e9 : hp,
       score: t.score, status: t.status, hold: t.closed_at && t.filled_at ? t.closed_at - t.filled_at : -1,
-      gross: t.filled_at ? t.gross_r : -99, net: t.filled_at ? t.net_r : -99, pnl: t.pnl_usd == null ? -1e9 : t.pnl_usd,
-      own: t.own_pnl_usd == null ? -1e9 : t.own_pnl_usd, bal: t.own_balance_after || 0}[k];
+      gross: t.filled_at ? t.gross_r : -99, net: t.filled_at ? t.net_r : -99,
+      own: doneUsd(t) == null ? -1e9 : doneUsd(t), bal: t.own_balance_after || 0}[k];
   }
   function histTable() {
     var f = S.hist;
@@ -915,7 +925,7 @@
     var filled = rows.filter(function (t) { return t.filled_at; });
     var wins = filled.filter(function (t) { return t.net_r > 0; }).length;
     var sumR = filled.reduce(function (s, t) { return s + (t.net_r || 0); }, 0);
-    function rowUsd(t) { return t.open ? (t.risk_usd != null ? t.risk_usd * t.net_r : null) : t.pnl_usd; }     // partly closed: profit banked so far
+    function rowUsd(t) { return doneUsd(t); }     // partly closed: profit banked so far
     var sumP = sumOf(rows, rowUsd);
     var nPart = rows.filter(function (t) { return t.open; }).length;
     document.getElementById("hsum").innerHTML = plural(rows.length - nPart, "معامله‌ی کامل بسته") + (nPart ? " + " + fa(nPart) + " بخشی بسته" : "") + " · برد " + (filled.length ? fa(Math.round(wins / filled.length * 100)) + "٪" : "—") +
@@ -932,15 +942,13 @@
         "</td><td>" + esc(sysShort(t.system)) + "</td><td><b>" + esc(t.base) + "</b></td><td>" + side(t.side) + "</td>" + levCell(t) + "<td>" + esc(t.grade) +
         ' <small class="ltr">' + (t.score || 0).toFixed(0) + "</small></td><td>" + (part ? "بخشی بسته · " : "") + esc(t.status_fa) + "</td><td>" + hold + "</td><td>" +
         R(t.filled_at ? t.gross_r : null) + "</td><td>" + R(t.filled_at ? t.net_r : null) + "</td><td>" + (hpct(t) == null ? "—" : pct(hpct(t), 1)) + "</td><td>" +
-        usd(part ? (t.risk_usd != null ? t.risk_usd * t.net_r : null) : t.pnl_usd) + "</td><td>" +
-        usd(part ? (t.own_risk_usd != null ? t.own_risk_usd * t.net_r : null) : t.own_pnl_usd) + "</td><td>" +
+        usd(doneUsd(t)) + (part && t.filled_at && floatUsd(t) != null ? '<br><small class="muted">+ باز ' + usd(floatUsd(t)) + " = " + usd(pnlUsd(t)) + "</small>" : "") + "</td><td>" +
         (part ? '<small class="muted">سود قطعی تا الان</small>' : usd(t.own_balance_after, false)) + "</td></tr>";
     }).join("");
     var el = document.getElementById("htab");
     var fr = rows.filter(function (t) { return t.filled_at; });
     var foot = totRow([{span: 10, v: "جمع " + fa(rows.length) + " معامله"}, R(sumOf(fr, function (t) { return t.gross_r; })), R(sumOf(fr, function (t) { return t.net_r; })),
-      "", usd(sumP),
-      usd(sumOf(rows, function (t) { return t.open ? (t.own_risk_usd != null ? t.own_risk_usd * t.net_r : null) : t.own_pnl_usd; })), ""]);
+      "", usd(sumP), ""]);
     el.innerHTML = "<table><thead>" + head + "</thead><tbody>" + body + "</tbody>" + foot + "</table>";
     el.querySelectorAll("th.sort").forEach(function (th) {
       th.addEventListener("click", function () {
@@ -969,17 +977,17 @@
     function wr(l) { return l.length ? l.filter(function (t) { return t.net_r > 0; }).length / l.length * 100 : null; }
     var holds = closed.filter(function (t) { return !t.open && t.closed_at; }).map(function (t) { return (t.closed_at - t.filled_at) / 3600000; });
     var own = 0, ownCurve = [], rCurve = [], cr = 0;
-    closed.forEach(function (t) { own += doneUsd(t, true) || 0; cr += t.net_r; ownCurve.push([doneTs(t), own]); rCurve.push([doneTs(t), cr]); });
+    closed.forEach(function (t) { own += doneUsd(t) || 0; cr += t.net_r; ownCurve.push([doneTs(t), own]); rCurve.push([doneTs(t), cr]); });
     var rs = closed.map(function (t) { return t.net_r; });
     return {signals: list.length, closed: closed.length, unfilled: list.filter(function (t) { return !t.open && !t.filled_at; }).length,
-      own: closed.length ? own : null, all: sumOf(closed, function (t) { return doneUsd(t); }),
+      own: closed.length ? own : null, all: sumOf(closed, function (t) { return doneUsd(t, true); }),
       sum: g.sum, avg: g.avg, win: g.win, pf: g.pf, sqn: st.sqn, dd: st.dd, maxL: st.maxL, aw: st.aw, al: st.al, payoff: st.payoff,
       best: rs.length ? Math.max.apply(null, rs) : null, worst: rs.length ? Math.min.apply(null, rs) : null,
       hold: holds.length ? holds.reduce(function (a, b) { return a + b; }, 0) / holds.length : null,
       lwin: wr(closed.filter(function (t) { return t.side > 0; })), swin: wr(closed.filter(function (t) { return t.side < 0; })),
       longs: closed.filter(function (t) { return t.side > 0; }).length, shorts: closed.filter(function (t) { return t.side < 0; }).length,
-      open: open.length, openUsd: sumOf(open, function (t) { return floatUsd(t); }),
-      ownOpen: sumOf(open, function (t) { return floatUsd(t, true); }),
+      open: open.length, openUsd: sumOf(open, function (t) { return floatUsd(t, true); }),
+      ownOpen: sumOf(open, function (t) { return floatUsd(t); }),
       rs: rs, closedList: closed, ownCurve: ownCurve, rCurve: rCurve};
   }
   var CMPROWS = [
@@ -1103,7 +1111,7 @@
         var ts = doneTs(t), k = jfmt(ts, "date");
         if (!days[k]) { days[k] = {ts: ts, v: {}}; order.push(k); }
         var d = days[k].v[i] = days[k].v[i] || {u: 0, r: 0, n: 0};
-        d.u += doneUsd(t, true) || 0; d.r += t.net_r; d.n++;
+        d.u += doneUsd(t) || 0; d.r += t.net_r; d.n++;
         days[k].ts = Math.max(days[k].ts, ts);
       });
     });
@@ -1673,7 +1681,7 @@
         var o = tradeOutcome(t), r = t.open ? openR(t) : t.net_r;
         return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + "</b></td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td><td>" + esc(sysShort(t.system)) + "</td>" +
           levCell(t) + tsCell(t.filled_at) + '<td><span class="badge ' + (o ? OUTFA[o][1] : "gray") + '">' + (o ? OUTFA[o][0] : "—") + (t.open ? " · باز" : "") + "</span></td>" +
-          '<td data-v="' + (r == null ? "" : r) + '">' + RU(r, pnlUsd(t)) + "</td>" + pctCell(t) + "</tr>";
+          '<td data-v="' + (r == null ? "" : r) + '">' + RU(r, pnlUsd(t)) + splitNote(t) + "</td>" + pctCell(t) + "</tr>";
       }).join("") + "</tbody>" + totRow([{span: 7, v: "جمع " + fa(list.length) + " پوزیشن"}, RU(why.c.r, why.c.u), ""]) + "</table></div>" : '<div class="empty">در این رژیم هنوز پوزیشنی پر نشده.</div>') + "</section>";
     app.innerHTML = head + chart + posTab + segTab + regimeDays();
     regimeHover();
@@ -1688,7 +1696,7 @@
     for (var i = 1; i < bars.length; i++) day(bars[i][0]).move += bars[i][1] - bars[i - 1][1];
     trades().forEach(function (t) {
       if (t.created && days[key(t.created)]) { var d = days[key(t.created)]; if (t.approved) d.ok++; else d.w++; }
-      if (isDone(t) && days[key(doneTs(t))]) days[key(doneTs(t))].u += doneUsd(t) || 0;
+      if (isDone(t) && days[key(doneTs(t))]) days[key(doneTs(t))].u += doneUsd(t, true) || 0;
     });
     function eqAt(ms) { var v = null; eq.forEach(function (p) { if (p[0] <= ms) v = p[1]; }); return v; }
     var rows = order.slice().reverse().map(function (k) {
@@ -2105,7 +2113,7 @@
       statCard("بیشترین افت (R)", '<span class="ltr">' + st.dd.toFixed(2) + "R</span>", "سود به افت: " + (st.ret_dd == null ? "—" : st.ret_dd.toFixed(2))) +
       statCard("میانگین برد / باخت", R(st.aw) + " / " + R(st.al), "نسبت: " + (st.payoff == null ? "—" : st.payoff.toFixed(2))) +
       statCard("انحراف نتیجه‌ها", st.sd == null ? "—" : '<span class="ltr">' + st.sd.toFixed(2) + "R</span>", "هرچه کمتر، قابل‌پیش‌بینی‌تر") +
-      statCard("جمع نتیجه", R(st.sum), usd(sumOf(list, function (t) { return doneUsd(t); })) + " در حساب «همه با هم»") + "</div>" : '<div class="empty">هنوز معامله‌ی بسته‌ای در این فیلتر نیست.</div>';
+      statCard("جمع نتیجه", R(st.sum), usd(sumOf(list, function (t) { return doneUsd(t); })) + " در حساب خود هر معامله") + "</div>" : '<div class="empty">هنوز معامله‌ی بسته‌ای در این فیلتر نیست.</div>';
     var dim = DIMS.filter(function (d) { return d[0] === f.dim; })[0] || DIMS[0];
     var groups = {};
     list.forEach(function (t) { dim[2](t).forEach(function (kv) { var k = String(kv[0]); (groups[k] = groups[k] || {key: kv[0], label: kv[1], list: []}).list.push(t); }); });
@@ -2262,7 +2270,7 @@
       return '<li><span class="ft">' + esc(jfmt(e.ts, "time")) + '</span><span class="stars">' + "★★★★★".slice(0, n.stars) + "</span> " +
         (n.coins || []).slice(0, 3).map(function (c) { return "<b>" + esc(c) + "</b>"; }).join(" ") + " " + esc(n.title) + isNew + "</li>";
     }
-    var t = e.t, r = e.k === "tp1" || e.k === "tp2" || e.k === "tp3" || e.k === "sl" || e.k === "breakeven" ? (e.k === "tp1" || e.k === "tp2" ? "" : " " + RU(t.net_r, t.pnl_usd)) : "";
+    var t = e.t, r = e.k === "tp1" || e.k === "tp2" || e.k === "tp3" || e.k === "sl" || e.k === "breakeven" ? (e.k === "tp1" || e.k === "tp2" ? "" : " " + RU(t.net_r, tPnl(t))) : "";
     return '<li class="click" data-open="' + esc(t.id) + '"><span class="ft">' + esc(jfmt(e.ts, "time")) + '</span><b class="' + (EVCLS[e.k] || "") + '">' + EVFA[e.k] + "</b> · <b>" + esc(t.base) + "</b> " +
       side(t.side) + " " + kind(t) + ' <small class="muted">' + esc(sysShort(t.system)) + (e.k === "created" ? " · " + esc(t.grade) + " " + fa(Math.round(t.score || 0)) : "") + "</small>" + r + isNew + "</li>";
   }
@@ -2347,7 +2355,7 @@
       open.concat(pend).map(function (t) {
         var a = aiRow(t.id);
         return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + "</b> <small class=\"muted\">" + esc(sysShort(t.system)) + "</small></td><td>" + side(t.side) + "</td><td>" + kind(t) +
-          "</td>" + levCell(t) + "<td>" + esc(t.status_fa) + "</td><td>" + (t.filled_at ? RU(openR(t), pnlUsd(t)) : "—") + "</td>" + pctCell(t) + '<td data-v="' + (a && a.consensus != null ? a.consensus : "") + '">' + (a ? aiPill(a.consensus) : "—") + "</td></tr>";
+          "</td>" + levCell(t) + "<td>" + esc(t.status_fa) + "</td><td>" + (t.filled_at ? RU(openR(t), pnlUsd(t)) + splitNote(t) : "—") + "</td>" + pctCell(t) + '<td data-v="' + (a && a.consensus != null ? a.consensus : "") + '">' + (a ? aiPill(a.consensus) : "—") + "</td></tr>";
       }).join("") + "</tbody>" + totRow([{span: 5, v: "جمع " + fa(open.length) + " پوزیشن + " + fa(pend.length) + " سفارش"}, posTot(open), "", ""]) + "</table></div>" : '<div class="empty">الان پوزیشن یا سفارشی باز نیست.</div>';
     var revs = ((D.ai || {}).reviewers || []).filter(function (r) { return r.key !== "base" && r.n; }).sort(function (a, b) { return (b.trust || 0) - (a.trust || 0); });
     var aiLine = revs.length ? "معتبرترین داور: <b>" + esc(revs[0].name) + "</b> با اعتبار " + fa(revs[0].trust || 0) + " از ۱۰۰ (" + esc((AIV[revs[0].verdict] || AIV.few)[0]) + ")" : "داوران هنوز داده‌ی کافی ندارند.";
