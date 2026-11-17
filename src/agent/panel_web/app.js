@@ -1524,9 +1524,9 @@
     });
   }
   var liveFails = 0, liveSkip = 0, liveN = 0;
-  function liveTick() {                      // every 5 s on the chart tab, every 15 s elsewhere
+  function liveTick() {                      // every 5 s on the chart and summary tabs, every 15 s elsewhere
     if (document.hidden) return;
-    if (S.tab !== "chart" && liveN++ % 3) return;
+    if (S.tab !== "chart" && S.tab !== "sum" && liveN++ % 3) return;
     if (liveSkip > 0) { liveSkip--; return; }     // the exchanges were unreachable: try again less often
     var bases = liveBases();
     if (!bases.length) return;
@@ -1588,6 +1588,8 @@
       });
       var xs = document.getElementById("xsum");
       if (xs) xs.innerHTML = usd(sumOf(openTrades(), function (t) { return floatUsd(t); }));
+    } else if (S.tab === "sum") {
+      sumKpis();
     } else if (S.tab === "home") {          // only the live numbers: the charts and toggles stay as they are
       ACC.forEach(function (x) {
         var l = accLive(x[0]), v = document.getElementById("eqv-" + x[0]), r = document.getElementById("eqr-" + x[0]);
@@ -2454,10 +2456,9 @@
     var fng = (MK.fng || []).slice(-1)[0], btc = deriv("BTC");
     var kpis = '<div class="grid g4">' +
       ACC.map(function (x) {
-        var l = accLive(x[0]), ch = dayChange(x[0]);
-        return statCard(esc(x[1]), '<span class="ltr">$' + l.equity.toFixed(2) + "</span>", "۲۴ ساعت " + usd(ch) + " · از شروع " + pct((l.equity - D.accounts[x[0]].start) / D.accounts[x[0]].start * 100, 1));
+        return '<div class="stat"><span class="l">' + esc(x[1]) + '</span><span class="v ltr" id="sumv-' + x[0] + '"></span><small id="sums-' + x[0] + '"></small></div>';
       }).join("") +
-      statCard("پوزیشن‌های باز", fa(open.length) + ' <small class="muted">· ' + fa(pend.length) + " سفارش در انتظار</small>", "سود/زیان باز " + usd(openUsd) + " · " + fa(atRisk) + " تا هنوز در ریسک") +
+      statCard("پوزیشن‌های باز", fa(open.length) + ' <small class="muted">· ' + fa(pend.length) + " سفارش در انتظار</small>", 'سود/زیان باز <span id="sumopen">' + usd(openUsd) + "</span> · " + fa(atRisk) + " تا هنوز در ریسک") +
       "</div>";
     var rw = regimeReason();
     var mood = '<div class="grid g4 sumrow">' + (D.systems || []).map(sumDirection).join("") +
@@ -2490,6 +2491,20 @@
       }).join("") + "</ul>" : "<p class=\"muted\">رویداد اقتصادی پراثری در ۴۸ ساعت آینده نیست.</p>") +
       "<h3>هوش مصنوعی</h3><p>" + aiLine + "</p></section></div>";
     try { localStorage.setItem(SEEN_KEY, String(now)); } catch (e) {}
+    sumKpis();
+  }
+  // 2026-11-17 (Ali): each account card is the final number, booked + open together, and moves with live prices
+  function sumKpis() {
+    ACC.forEach(function (x) {
+      var v = document.getElementById("sumv-" + x[0]), sb = document.getElementById("sums-" + x[0]);
+      if (!v) return;
+      var a = D.accounts[x[0]], l = accLive(x[0]);
+      v.textContent = "$" + l.equity.toFixed(2);
+      if (sb) sb.innerHTML = "قطعی " + usd(a.balance, false) + " + باز " + usd(l.unreal) + "<br>۲۴ ساعت " + usd(dayChange(x[0])) +
+        " · از شروع " + pct((l.equity - a.start) / a.start * 100, 1);
+    });
+    var so = document.getElementById("sumopen");
+    if (so) so.innerHTML = usd(sumOf(openTrades(), function (t) { return floatUsd(t); }));
   }
 
   // ------------------------------------------------------------------ AI reviewers (2026-11-15, Ali: several AIs that score
