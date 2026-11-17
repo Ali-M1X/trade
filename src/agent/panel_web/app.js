@@ -11,6 +11,9 @@
   var candleCache = {};
 
   // ------------------------------------------------------------------ helpers
+  // news titles in Persian (2026-11-17, Ali); the English original stays on hover and in search
+  function faT(t) { return (D && D.tr && D.tr[t]) || t; }
+  function trT(t) { var f = faT(t); return f === t ? esc(t) : '<span title="' + esc(t) + '">' + esc(f) + "</span>"; }
   function esc(x) {
     return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) {
       return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
@@ -857,7 +860,7 @@
     if (plan.support) info.push(["سطح", px(plan.support) + " · " + (plan.support_kind || "") + " " + (plan.support_tf || "") + (plan.support_touches ? " · " + plan.support_touches + " برخورد" : "")]);
     if (plan.tp1_r) info.push(["R تارگت‌ها", plan.tp1_r.toFixed(1) + "R / " + (plan.tp2_r || 0).toFixed(1) + "R"]);
     if (ev.funding_pct != null) info.push(["فاندینگ", ev.funding_pct + "%"]);
-    if (ev.news) info.push(["اخبار", (ev.news.points > 0 ? "+" : "") + ev.news.points + " امتیاز · " + (ev.news.top || []).map(function (x) { return x[0]; }).join(" | ")]);
+    if (ev.news) info.push(["اخبار", (ev.news.points > 0 ? "+" : "") + ev.news.points + " امتیاز · " + (ev.news.top || []).map(function (x) { return faT(x[0]); }).join(" | ")]);
     if (t.leverage) info.push(["اهرم پیشنهادی", t.leverage + "x"]);
     var conf = (ev.confirmations || []).concat(ev.labels || []);
     var right = (ev.sections ? "<h3>امتیاز بخش‌ها</h3>" + sections(ev.sections) : "") +
@@ -1149,7 +1152,7 @@
     var NV = D.news_view;
     if (!NV) {
       var n0 = D.news || [];
-      app.innerHTML = "<section><h2>هشدارهای خبری</h2>" + (n0.length ? n0.map(function (x) { return "<div>" + esc(x.title) + "</div>"; }).join("") : '<div class="empty">—</div>') + "</section>";
+      app.innerHTML = "<section><h2>هشدارهای خبری</h2>" + (n0.length ? n0.map(function (x) { return "<div>" + trT(x.title) + "</div>"; }).join("") : '<div class="empty">—</div>') + "</section>";
       return;
     }
     var f = S.news, items = NV.items || [];
@@ -1160,7 +1163,7 @@
       if (f.st && x.stars < Number(f.st)) return false;
       if (f.src && x.kind !== f.src) return false;
       if (f.coin && !(x.coins || []).length) return false;
-      if (f.q && x.title.toUpperCase().indexOf(f.q) < 0 && (x.coins || []).join(" ").indexOf(f.q) < 0) return false;
+      if (f.q && x.title.toUpperCase().indexOf(f.q) < 0 && faT(x.title).indexOf(f.q) < 0 && (x.coins || []).join(" ").indexOf(f.q) < 0) return false;
       return true;
     });
     var day = Date.now() - 86400000;
@@ -1174,7 +1177,8 @@
       return '<div class="seg" data-g="' + g + '">' + opts.map(function (o) { return '<button data-v="' + o[0] + '" class="' + (String(f[g]) === o[0] ? "on" : "") + '">' + o[1] + "</button>"; }).join("") + "</div>";
     }
     var rows = list.slice(0, f.n).map(function (x) {
-      var title = x.url ? '<a href="' + esc(x.url) + '" target="_blank" rel="noopener noreferrer">' + esc(x.title) + "</a>" : esc(x.title);
+      var tfa = faT(x.title), title = x.url ? '<a href="' + esc(x.url) + '" target="_blank" rel="noopener noreferrer">' + esc(tfa) + "</a>" : esc(tfa);
+      if (tfa !== x.title) title += '<div class="nen">' + esc(x.title) + "</div>";
       var c0 = (x.coins || [])[0];
       return '<div class="nitem lv' + (x.level > 0 ? "p" : x.level < 0 ? "n" : "0") + '"><div class="nh">' + stars(x.stars) + lvBadge(x.level) +
         (x.rule_fa ? '<span class="chip">' + esc(x.rule_fa) + "</span>" : "") + (x.alerted ? '<span class="badge acc">ارسال‌شده به تلگرام</span>' : "") +
@@ -1424,7 +1428,7 @@
         (MKDIR ? (c.side === MKDIR ? ' <small class="pos" title="هم‌جهت با جمع‌بندی بازار">✓ هم‌جهت</small>' : ' <small class="warn" title="خلاف جهت جمع‌بندی بازار">خلاف</small>') : "") +
         '</td><td><span class="ltr">' + (c.score || 0).toFixed(0) + "</span> " + scoreBar(c.score) + "</td><td>" + esc(c.grade || "—") + '</td><td class="num">' + px(c.price) +
         '</td><td class="num">' + px(p.entry) + '</td><td class="num">' + px(p.sl) + '</td><td class="num">' + px(p.tp1) + "</td>" + derivCells(c) + "<td>" +
-        (c.news && c.news.points ? '<span class="chip ' + (c.news.points > 0 ? "pos" : "neg") + '" title="' + esc((c.news.top || []).map(function (x) { return x[0]; }).join(" | ")) + '">اخبار ' +
+        (c.news && c.news.points ? '<span class="chip ' + (c.news.points > 0 ? "pos" : "neg") + '" title="' + esc((c.news.top || []).map(function (x) { return faT(x[0]); }).join(" | ")) + '">اخبار ' +
           (c.news.points > 0 ? "+" : "") + c.news.points + "</span>" : "") +
         (c.why || []).map(function (w) { return '<span class="chip">' + esc(w) + "</span>"; }).join("") + "</td></tr>";
     }).join("");
@@ -2381,7 +2385,7 @@
     if (e.k === "news") {
       var n = e.n;
       return '<li><span class="ft">' + esc(jfmt(e.ts, "time")) + '</span><span class="stars">' + "★★★★★".slice(0, n.stars) + "</span> " +
-        (n.coins || []).slice(0, 3).map(function (c) { return "<b>" + esc(c) + "</b>"; }).join(" ") + " " + esc(n.title) + isNew + "</li>";
+        (n.coins || []).slice(0, 3).map(function (c) { return "<b>" + esc(c) + "</b>"; }).join(" ") + " " + trT(n.title) + isNew + "</li>";
     }
     var t = e.t, r = e.k === "tp1" || e.k === "tp2" || e.k === "tp3" || e.k === "sl" || e.k === "breakeven" ? (e.k === "tp1" || e.k === "tp2" ? "" : " " + RU(t.net_r, tPnl(t))) : "";
     return '<li class="click" data-open="' + esc(t.id) + '"><span class="ft">' + esc(jfmt(e.ts, "time")) + '</span><b class="' + (EVCLS[e.k] || "") + '">' + EVFA[e.k] + "</b> · <b>" + esc(t.base) + "</b> " +
@@ -2423,7 +2427,7 @@
     ((D.news_view || {}).items || []).forEach(function (n) {
       if ((n.pub || n.ts) < now - 6 * 3600000) return;
       var mine = (n.coins || []).filter(function (c) { return held[c]; });
-      if (mine.length || n.stars >= 4) out.push([n.level < 0 ? "neg" : "acc", (mine.length ? "خبر درباره‌ی پوزیشن شما: " : "خبر مهم: ") + "<b>" + esc((n.coins || []).slice(0, 3).join(" ")) + "</b> " + esc(n.title), "news"]);
+      if (mine.length || n.stars >= 4) out.push([n.level < 0 ? "neg" : "acc", (mine.length ? "خبر درباره‌ی پوزیشن شما: " : "خبر مهم: ") + "<b>" + esc((n.coins || []).slice(0, 3).join(" ")) + "</b> " + trT(n.title), "news"]);
     });
     return out;
   }
