@@ -842,6 +842,18 @@ def insights(cfg: dict, pl: dict) -> None:
     pl["marks"] = pi.read_marks(cfg)
     pl["market"] = pi.market_data(cfg, _market_bases(pl), now)
     pl["panel_api"] = bool((cfg.get("panel") or {}).get("api"))
+    pl["tr"] = news_fa(cfg, pl)
+
+
+def news_fa(cfg: dict, pl: dict) -> dict:
+    """Persian news titles (2026-11-17, Ali): {english: persian}; switched off, only the ones already translated."""
+    try:
+        from .news import translate
+        on = bool((cfg.get("panel") or {}).get("translate_news"))
+        return translate.translate_titles(translate.cache_path(cfg), translate.titles_in(pl), max_new=40 if on else 0)
+    except Exception as e:                          # noqa: BLE001  (display only: never blocks the build)
+        print(f"news translation skipped: {e}")
+        return {}
 
 
 def _app_version() -> str:
