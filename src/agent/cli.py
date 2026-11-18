@@ -150,6 +150,11 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
         repo2.close()
         if sh2 is not None:
             sh2.close()
+    try:                                        # display and hypothetical only (pulse.py)
+        from .pulse import record
+        record(cfg, repo, market, now)
+    except Exception:
+        logging.getLogger(__name__).exception("pulse failed")
     extra = {}
     if cfg.get("news", {}).get("enabled"):
         try:

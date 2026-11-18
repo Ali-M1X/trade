@@ -1290,9 +1290,112 @@
   // nothing dropped, laid out so the pieces help one decision). Top: every market reading in one table with its
   // time frame and its vote, and what they say together; then where the market is, the last days, mood and
   // events, the setups closest to a signal, and how our trades did in each regime.
+  // market pulse (2026-11-18, Ali): the large-coin basket over 1 h / 4 h / 24 h with its history, the
+  // alarms, and what two rules would have done. Hypothetical only: no trade is changed by it.
+  function pulseActual(t) {                   // [R, $] of a trade so far, as every other table shows it
+    var r = t.open ? openR(t) : t.net_r, risk = tRisk(t);
+    if (r == null) return [null, null];
+    return [r, !t.open && tPnl(t) != null ? tPnl(t) : risk == null ? null : risk * r];
+  }
+  function pulseRows() {
+    var out = [];
+    trades().forEach(function (t) {
+      var p = t.pulse; if (!p || !t.filled_at) return;
+      var a = pulseActual(t), risk = tRisk(t);
+      if (p.entry && p.entry[2] && a[1] != null)
+        out.push({t: t, rule: "half", at: t.filled_at, h1: p.entry[0], h4: p.entry[1], r: a[0], usd: a[1], wr: a[0] / 2, wusd: a[1] / 2});
+      if (p.alarm && a[1] != null && risk != null)
+        out.push({t: t, rule: "exit", at: p.alarm.t, h1: p.alarm.h1, h4: p.alarm.h4, r: a[0], usd: a[1], wr: p.alarm.r, wusd: p.alarm.r * risk, px: p.alarm.price});
+    });
+    return out.sort(function (a, b) { return b.at - a.at; });
+  }
+  var PULSE_RULE = {half: "نصف ریسک در ورود", exit: "بستن با هشدار"};
+  function pulseChart(pl) {
+    var s = pl.series || []; if (s.length < 2) return "";
+    var W = 960, Hh = 260, L = 10, Rr = 64, T = 14, B = 30, PB = Hh - B;
+    var x0 = s[0][0], x1 = s[s.length - 1][0], vals = [];
+    s.forEach(function (x) { vals.push(x[1], x[2], x[3]); });
+    var mn = Math.min.apply(null, vals.concat([-pl.params.h4_pct])), mx = Math.max.apply(null, vals.concat([pl.params.h4_pct]));
+    var step = [0.5, 1, 2, 2.5, 5, 10].filter(function (st) { return (mx - mn) / st <= 6; })[0] || 20;
+    var lo = Math.floor(mn / step) * step, hi = Math.ceil(mx / step) * step;
+    function X(t) { return L + (t - x0) / Math.max(1, x1 - x0) * (W - L - Rr); }
+    function Y(v) { return T + (hi - v) / (hi - lo) * (PB - T); }
+    function f1(v) { return v.toFixed(1); }
+    var g = "";
+    (pl.spans || []).forEach(function (sp) {
+      var a = Math.max(X(sp.from), L), b = Math.min(X(sp.to + 300000), W - Rr); if (b <= a) b = a + 2;
+      if (sp.to < x0) return;
+      g += '<rect x="' + f1(a) + '" y="' + T + '" width="' + f1(b - a) + '" height="' + (PB - T) + '" class="pspan ' + (sp.dir > 0 ? "pos" : "neg") + '"><title>' +
+        esc((sp.dir > 0 ? "هشدار برای شورت‌ها" : "هشدار برای لانگ‌ها") + " · " + jfmt(sp.from) + " تا " + jfmt(sp.to)) + "</title></rect>";
+    });
+    for (var v = lo; v <= hi + 1e-9; v += step) {
+      var y = f1(Y(v));
+      g += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + y + '" y2="' + y + '" class="' + (Math.abs(v) < 1e-9 ? "zl" : "gl") + '"/>' +
+        '<text x="' + (W - Rr + 8) + '" y="' + (Y(v) + 4).toFixed(1) + '" class="ax">' + (v > 0 ? "+" : "") + (step % 1 ? v.toFixed(1) : Math.round(v)) + "%</text>";
+    }
+    [pl.params.h4_pct, -pl.params.h4_pct].forEach(function (v) {
+      g += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + f1(Y(v)) + '" y2="' + f1(Y(v)) + '" class="pth"/>';
+    });
+    for (var t = Math.ceil((x0 + 12600000) / 86400000) * 86400000 - 12600000; t <= x1; t += 86400000) {
+      g += '<line x1="' + f1(X(t)) + '" x2="' + f1(X(t)) + '" y1="' + T + '" y2="' + PB + '" class="vl"/>';
+      if (t + 43200000 <= x1) g += '<text x="' + f1(X(t + 43200000)) + '" y="' + (Hh - 10) + '" class="ax" text-anchor="middle">' + esc(jfmt(t, "date")) + "</text>";
+    }
+    [[3, "p24"], [2, "p4"], [1, "p1"]].forEach(function (k) {
+      g += '<path d="' + s.map(function (x, i) { return (i ? "L" : "M") + f1(X(x[0])) + " " + f1(Y(x[k[0]])); }).join(" ") + '" class="pl ' + k[1] + '"/>';
+    });
+    return '<div class="regwrap pulsewrap"><svg class="regchart pulsechart" viewBox="0 0 ' + W + " " + Hh + '" direction="ltr">' + g + "</svg></div>" +
+      '<div class="legend reglegend"><span><i class="pli p1"></i>۱ ساعت</span><span><i class="pli p4"></i>۴ ساعت</span><span><i class="pli p24"></i>۲۴ ساعت</span>' +
+      '<span><i class="rrib pos"></i>هشدار برای شورت‌ها (بازار رو به بالا)</span><span><i class="rrib neg"></i>هشدار برای لانگ‌ها (بازار رو به پایین)</span>' +
+      '<span><i class="pli pth"></i>آستانه‌ی ۴ ساعته</span></div>';
+  }
+  function pulseSection() {
+    var pl = D.pulse || {};
+    if (!pl.series || !pl.series.length)
+      return '<section id="mk-pulse"><h2>نبض بازار <small>حرکت سبد ۱۰ کوین بزرگ در ۱، ۴ و ۲۴ ساعت</small></h2><div class="empty">از اجرای بعدی بات روی سرور ثبت می‌شود.</div></section>';
+    var n = pl.now, pr = pl.params, st = pl.state;
+    var stTxt = st > 0 ? '<b class="neg">هشدار برای شورت‌ها</b>' : st < 0 ? '<b class="neg">هشدار برای لانگ‌ها</b>' : '<b class="pos">بدون هشدار</b>';
+    var cards = '<div class="grid g4 pulsecards">' +
+      statCard("۱ ساعت", n ? pct(n[1], 2) : "—", "آستانه " + fa(pr.h1_pct) + "٪") +
+      statCard("۴ ساعت", n ? pct(n[2], 2) : "—", "آستانه " + fa(pr.h4_pct) + "٪") +
+      statCard("۲۴ ساعت", n ? pct(n[3], 2) : "—", n ? "ثبت " + esc(ago(n[0])) : "داده‌ی تازه نیست") +
+      statCard("وضعیت الان", stTxt, "هشدار: ۱ و ۴ ساعته هر دو از آستانه رد شوند") + "</div>";
+    var rows = pulseRows();
+    function acc(r) { return r.t.approved ? "approved" : "watch"; }
+    var sum = [];
+    ["half", "exit"].forEach(function (rule) {
+      ["approved", "watch"].forEach(function (k) {
+        var xs = rows.filter(function (r) { return r.rule === rule && acc(r) === k; });
+        var a = sumOf(xs, function (r) { return r.usd; }), w = sumOf(xs, function (r) { return r.wusd; });
+        sum.push({rule: rule, k: k, n: xs.length, a: a, w: w});
+      });
+    });
+    var sumTab = '<div class="scroll"><table><thead><tr><th>قاعده‌ی فرضی</th><th>حساب</th><th>تعداد</th><th>نتیجه‌ی واقعی</th><th>اگر اجرا می‌شد</th><th>فرق</th></tr></thead><tbody>' +
+      sum.map(function (x) {
+        return "<tr><td>" + PULSE_RULE[x.rule] + "</td><td>" + (x.k === "approved" ? '<span class="badge ok">تأییدشده</span>' : '<span class="badge watch">Watch</span>') +
+          '</td><td data-v="' + x.n + '">' + fa(x.n) + '</td><td data-v="' + x.a.toFixed(4) + '">' + usd(x.a) + '</td><td data-v="' + x.w.toFixed(4) + '">' + usd(x.w) +
+          '</td><td data-v="' + (x.w - x.a).toFixed(4) + '">' + usd(x.w - x.a) + "</td></tr>";
+      }).join("") + "</tbody>" +
+      totRow(["جمع", "", fa(sumOf(sum, function (x) { return x.n; })), usd(sumOf(sum, function (x) { return x.a; })),
+        usd(sumOf(sum, function (x) { return x.w; })), usd(sumOf(sum, function (x) { return x.w - x.a; }))]) + "</table></div>";
+    var list = rows.length ? '<details class="pulselist"><summary>معامله‌هایی که هشدار خوردند (' + fa(rows.length) + ")</summary>" +
+      '<div class="scroll"><table><thead><tr><th>زمان</th><th>کوین</th><th>جهت</th><th>سیستم</th><th>نوع</th><th>قاعده</th><th>۱ ساعت</th><th>۴ ساعت</th><th>اهرم</th><th>سود٪</th><th>واقعی</th><th>فرضی</th><th>فرق</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var t = r.t;
+        return '<tr class="click" data-open="' + esc(t.id) + '">' + tsCell(r.at) + "<td><b>" + esc(t.base) + "</b>" + (t.open ? ' <small class="muted">باز</small>' : "") +
+          "</td><td>" + side(t.side) + "</td><td>" + esc(sysShort(t.system)) + "</td><td>" + kind(t) + "</td><td>" + PULSE_RULE[r.rule] +
+          '</td><td data-v="' + r.h1 + '">' + pct(r.h1, 2) + '</td><td data-v="' + r.h4 + '">' + pct(r.h4, 2) + "</td>" + levCell(t) + pctCell(t) +
+          '<td data-v="' + r.usd.toFixed(4) + '">' + RU(r.r, r.usd) + '</td><td data-v="' + r.wusd.toFixed(4) + '">' + RU(r.wr, r.wusd) +
+          '</td><td data-v="' + (r.wusd - r.usd).toFixed(4) + '">' + usd(r.wusd - r.usd) + "</td></tr>";
+      }).join("") + "</tbody>" +
+      totRow([{span: 10, v: "جمع"}, usd(sumOf(rows, function (r) { return r.usd; })), usd(sumOf(rows, function (r) { return r.wusd; })),
+        usd(sumOf(rows, function (r) { return r.wusd - r.usd; }))]) + "</table></div></details>" : '<div class="empty">هنوز معامله‌ای با هشدار نبوده.</div>';
+    return '<section id="mk-pulse"><h2>نبض بازار <small>حرکت سبد ۱۰ کوین بزرگ در ۱، ۴ و ۲۴ ساعت · از ' + esc(jfmt(pl.since, "date")) + "</small></h2>" + cards +
+      pulseChart(pl) +
+      '<h3>اثر فرضی <small>فقط برای سنجش؛ روی هیچ معامله‌ای اثر ندارد. سبز در ستون فرق یعنی قاعده کمک می‌کرد</small></h3>' + sumTab + list + "</section>";
+  }
   function marketTab() {
     var rp = regimeParts(), board = marketBoard(rp), mp = marketParts();
-    var parts = [["mk-now", "۱", "بازار الان کجاست", "رژیم قیمت (۴ ساعته) و رژیم هر سیستم (دامیننس و روزانه)"],
+    var parts = [["mk-now", "۱", "بازار الان کجاست", "رژیم قیمت (۴ ساعته)، نبض بازار (۱، ۴ و ۲۴ ساعت) و رژیم هر سیستم"],
       ["mk-trend", "۲", "چند روز اخیر", "حرکت سبد کوین‌های بزرگ و دامیننس"],
       ["mk-mood", "۳", "حال‌وهوا و رویدادها", "ترس و طمع، فاندینگ، اوپن‌اینترست و خبرهای اقتصادی"],
       ["mk-cand", "۴", "فرصت‌ها", "کاندیدهای نزدیک به سیگنال، شورت‌لیست و واچ‌لیست"],
@@ -1301,7 +1404,7 @@
     var jump = '<div class="mkjump">' + parts.map(function (x) { return '<button type="button" data-jump="' + x[0] + '">' + x[1] + ". " + x[2] + "</button>"; }).join("") + "</div>";
     var noReg = '<section><h2>رژیم بازار</h2><div class="empty">هنوز کندل کافی برای تشخیص رژیم نیست.</div></section>';
     app.innerHTML = board + jump +
-      part(0) + (rp ? rp.head : noReg) + mp.cards +
+      part(0) + (rp ? rp.head : noReg) + pulseSection() + mp.cards +
       part(1) + (rp ? rp.chart : "") + mp.dom +
       part(2) + mp.mood + mp.cal +
       part(3) + mp.cand + mp.short + mp.watch +
@@ -1332,6 +1435,9 @@
       add("رژیم قیمت (سبد ۱۰ کوین بزرگ)", "کندل ۴ ساعته", '<span class="badge ' + REGCLS[lab] + '">' + REGFA[lab] + "</span> از " + dur(why.h) + " پیش",
         lab === "trend_up" ? 1 : lab === "trend_down" ? -1 : 0, "۲۴ ساعت " + pct(m.move_24h, 2) + " · جهت‌داری " + (m.efficiency == null ? "—" : fa(Math.round(m.efficiency * 100)) + "٪"));
     }
+    var pn = (D.pulse || {}).now;
+    if (pn) add("نبض بازار (سبد ۱۰ کوین بزرگ)", "۱، ۴ و ۲۴ ساعت", "۱س " + pct(pn[1], 2) + " · ۴س " + pct(pn[2], 2) + " · ۲۴س " + pct(pn[3], 2), undefined,
+      D.pulse.state > 0 ? '<b class="neg">هشدار برای شورت‌ها</b> (فقط نمایشی)' : D.pulse.state < 0 ? '<b class="neg">هشدار برای لانگ‌ها</b> (فقط نمایشی)' : "بدون هشدار");
     var seen = {};
     sys.forEach(function (s) {
       var r = s.regime || {}; if (!r.name) return;
@@ -1833,6 +1939,7 @@
 
   // ------------------------------------------------------------------ help tooltips (Ali, 2026-11-15)
   var TIPS = {
+    "نبض بازار": "میانگین حرکت ۱۰ کوین بزرگ (BTC، ETH، SOL، …) در ۱ ساعت، ۴ ساعت و ۲۴ ساعت گذشته که بات هر ۵ دقیقه ثبت می‌کند. هشدار وقتی است که ۱ ساعته و ۴ ساعته هر دو از آستانه رد شوند: رو به بالا برای شورت‌ها و رو به پایین برای لانگ‌ها.\nاثر فرضی دو قاعده را حساب می‌کند بی‌آنکه کاری بکند: «نصف ریسک در ورود» (معامله‌ای که در حال هشدار باز شد با نصف ریسک) و «بستن با هشدار» (معامله‌ی قبل از TP1 در اولین هشدار بسته می‌شد، با قیمت همان لحظه).",
     "رژیم بازار": "حال بازار از روی سبد ۱۰ کوین بزرگ روی کندل ۴ ساعته: روند نزولی (افت دست‌کم ۴٪ در ۲۴ ساعت، بیشترش یک‌طرفه، یا ۶٪ در سه روز که هنوز ادامه دارد)، روند صعودی (برعکس) یا رنج (هیچ‌کدام). رژیمی که کمتر از ۸ ساعت طول بکشد حساب نمی‌شود.\nجمله‌ی بالا می‌گوید بازار کی عوض شد و پوزیشن‌هایی که بعدش باز شدند چه شدند. استاپ: با ضرر بسته شده. رنج: هنوز کمتر از ۰٫۵R حرکت کرده. سود: ۰٫۵R به بالا یا رد شده از TP1.",
     "رژیم‌های ۷ روز اخیر": "خط سفید حرکت سبد بازار از ۷ روز پیش است. رنگ پس‌زمینه رژیم آن زمان است. نقطه‌ها حرکت‌های تند هستند: ریزش یا جهش ۴٪ در ۸ ساعت، یا کندلی دست‌کم ۱٫۸ برابر معمول که سر جایش برگشته (استاپ هر دو طرف را می‌زند).",
     "پوزیشن‌های رژیم فعلی": "پوزیشن‌هایی که بعد از شروع رژیم فعلی پر شدند، با وضعیت الان.",

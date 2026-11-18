@@ -501,6 +501,18 @@ panel:
     "سیستم ۱": {default: 1.0, bear: 2.0}
     "سیستم ۲": {default: 2.0}
 
+# Market pulse (2026-11-18, Ali): the large-coin basket's move over the last 1 h, 4 h and 24 h,
+# recorded every few minutes, with what two rules would have done (half risk when a trade opens
+# against the pulse, closing at the first alarm). Display and hypothetical only: no trade changes.
+# Ali reviews it after a week (about 2026-11-25). src/agent/pulse.py
+pulse:
+  enabled: true
+  every_min: 5
+  keep_days: 30
+  h1_pct: 0.5                  # alarm: the 1 h and 4 h moves both past these, against a trade's side
+  h4_pct: 1.0
+  chart_days: 7
+
 # AI reviewers (2026-11-15, Ali): several reviewers score every signal (chance of profit), learn
 # from every closed trade and are graded themselves (panel tab "داوران هوش مصنوعی"). Advisory
 # only: nothing here changes what the systems trade. src/agent/ai_review.py

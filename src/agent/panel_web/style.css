@@ -389,3 +389,14 @@ details.calev .calbtc{margin-inline-start:6px;font-size:12px}
   .mkboard td:nth-child(2),.mkboard td:nth-child(3),.mkboard td:nth-child(5){grid-column:1/-1}
   .mkpart{scroll-margin-top:20px}
 }
+
+/* market pulse (2026-11-18) */
+svg.pulsechart .pspan{opacity:.10}svg.pulsechart .pspan.pos{fill:var(--pos)}svg.pulsechart .pspan.neg{fill:var(--neg)}
+svg.pulsechart .pl{fill:none;stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}
+svg.pulsechart .pl.p1{stroke:var(--acc2);stroke-width:1.3;opacity:.8}svg.pulsechart .pl.p4{stroke:var(--acc)}svg.pulsechart .pl.p24{stroke:var(--fg);stroke-width:2.4}
+svg.pulsechart .pth{stroke:var(--acc);stroke-width:1;stroke-dasharray:5 5;opacity:.5}
+.legend i.pli{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-inline-end:4px}
+.legend i.pli.p1{background:var(--acc2)}.legend i.pli.p4{background:var(--acc)}.legend i.pli.p24{background:var(--fg)}
+.legend i.pli.pth{background:repeating-linear-gradient(90deg,var(--acc) 0 4px,transparent 4px 7px)}
+details.pulselist{margin-top:10px}details.pulselist summary{cursor:pointer;color:var(--muted);padding:6px 0}
+@media (max-width:640px){.grid.pulsecards{grid-template-columns:1fr 1fr}.pulsewrap{overflow-x:auto}.pulsewrap svg.pulsechart{min-width:640px}}
