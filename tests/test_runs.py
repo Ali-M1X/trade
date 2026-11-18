@@ -342,6 +342,25 @@ def test_bear_regime_uses_its_own_system(cfg):
     assert system_cfg(variant_cfg(cfg, "regime_combo_bear_off"), "bear") is None
 
 
+def test_live_risk_and_open_risk_caps(cfg):
+    """2026-11-18 (Ali): system 1 risks 3% in every regime (bear keeps s2_trend's rules) with at
+    most 15% open; system 2 risks 5% with at most 20% open."""
+    from agent.config import live_config
+    from agent.regime_systems import system_cfg
+    from agent.system2 import system2_config
+    live = live_config(cfg)
+    for regime in ("bull", "range", "bear"):
+        c = system_cfg(live, regime)
+        assert c["trade"]["base_risk_pct"] == 3.0 and c["lifecycle"]["max_open_risk_pct"] == 15
+    from agent.backtest.variants import merge
+    before = merge(live, cfg["backtest"]["variants"]["s2_trend"])             # the bear system until now
+    bear = system_cfg(live, "bear")
+    assert bear["technical"] == before["technical"]                           # same rules, only the risk moved
+    assert {**bear["trade"], "base_risk_pct": 2.0} == before["trade"]
+    s2 = system2_config(live)
+    assert s2["trade"]["base_risk_pct"] == 5.0 and s2["lifecycle"]["max_open_risk_pct"] == 20
+
+
 def test_hot_category_coins_skip_stablecoins(cfg):
     from agent.runs import hot_category_coins
 

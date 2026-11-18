@@ -263,7 +263,7 @@
       (s.paused_until ? '<div class="warn">توقف بعد از ضررهای پشت‌سرهم تا ' + esc(jfmt(s.paused_until)) + "</div>" : "") + "</div>";
   }
   // signals the book refused (2026-11-15, Ali: how often did a good setup find no room?)
-  var SKIPR = {max_active: ["سقف پوزیشن پر بود", "warn"], max_open_risk: ["سقف ۲۰٪ ریسک باز پر بود", "warn"], correlated: ["هم‌جهت با پوزیشن هم‌بسته", "gray"],
+  var SKIPR = {max_active: ["سقف پوزیشن پر بود", "warn"], max_open_risk: ["سقف ریسک باز پر بود", "warn"], correlated: ["هم‌جهت با پوزیشن هم‌بسته", "gray"],
     loss_streak_pause: ["توقف بعد از ضررهای پشت‌سرهم", "short"], cooldown: ["تازه استاپ خورده بود", "gray"]};
   function skips(days) { var cut = Date.now() - days * 86400000; return (D.skips || []).filter(function (s) { return s.last >= cut; }); }
   function skipsSection() {

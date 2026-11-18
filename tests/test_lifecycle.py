@@ -209,7 +209,7 @@ def test_runners_past_tp2_from_both_systems(cfg, tmp_path):
 
 
 def test_open_risk_cap(cfg):
-    """2026-11-18 (Ali): system 2 at 4% risk keeps at most 20% of the balance at risk."""
+    """2026-11-18 (Ali): at most a set share of the balance at risk in open trades."""
     c = {**cfg, "lifecycle": {**cfg["lifecycle"], "max_open_risk_pct": 20}}
     book = SignalBook(Repository(), c)
     for i in range(4):
