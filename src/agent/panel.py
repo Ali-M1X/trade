@@ -27,6 +27,7 @@ from pathlib import Path
 from .backtest.costs import exit_fills, trade_costs
 from .notify.formatter import fmt_price
 from .panel_regime import regime_view
+from .pulse import view as pulse_view
 from .store.repository import Repository
 
 try:
@@ -482,6 +483,13 @@ def collect(cfg: dict, now_ms: int) -> dict:
         for t in out["trades"]:
             _value(t, cfg, price_repo)
         prices = _price_paths(price_repo, {t["base"] for t in out["trades"] if t["filled_at"]})
+        out["pulse"] = {}
+        if price_repo is not None:
+            try:                                  # display and hypothetical only (pulse.py)
+                out["pulse"] = pulse_view(price_repo.get_state("pulse", []) or [], out["trades"], prices,
+                                          now_ms, cfg)
+            except (sqlite3.Error, ValueError, TypeError, KeyError, IndexError):
+                out["pulse"] = {}
         if price_repo is not None:
             try:
                 out["regime"] = regime_view(price_repo, now_ms, cfg)
@@ -579,6 +587,7 @@ def _trade_rows(data: dict) -> list[dict]:
             "pnl_usd": _num(t.get("pnl_usd"), 6),
             "own_risk_usd": _num(mine.get("risk_usd"), 6), "own_pnl_usd": _num(mine.get("pnl_usd"), 6),
             "own_balance_after": _num(mine.get("balance_after"), 8),
+            "pulse": t.get("pulse"),
         })
     return rows
 
@@ -712,6 +721,7 @@ def payload(cfg: dict, data: dict) -> dict:
         "accounts": {k: _account_summary(data["accounts"][k]) for k in ("approved", "watch", "all")},
         "trades": trades, "systems": systems, "compare": _compare(data),
         "regime": data.get("regime") or {},
+        "pulse": data.get("pulse") or {},
         "dominance": _dominance(cfg), "shadow_since": data["shadow_since"],
         "news": [{"ts": n["seen_at"], "coins": n["coins"], "level": n["level"], "title": n["title"],
                   "url": n["url"] if (n.get("url") or "").startswith(("http://", "https://")) else None,
