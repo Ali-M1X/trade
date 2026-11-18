@@ -374,8 +374,8 @@ def simulate(trades: list[dict], balance: float, start: int, now: int, prices=No
         t["fee_usd"] = t["risk_usd"] * t["cost_r"]
     # what is not booked yet: the open part, priced now
     unreal = sum(t["risk_usd"] * t["open_r"] - t["booked_usd"] for t in open_ if t.get("open_r") is not None)
-    for t in open_:
-        if t["sl_pct"]:
+    for t in rows:                                # every filled trade (2026-11-18: the panel shows the $ in and out)
+        if t["filled_at"] and t.get("risk_usd") is not None and t["sl_pct"]:
             t["size_usd"] = t["risk_usd"] / (t["sl_pct"] / 100)
     done = closed + partial                       # every trade with a booked result
     res = [t["booked_usd"] for t in done]

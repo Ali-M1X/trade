@@ -397,6 +397,11 @@
   var IND = {ma7: 1, ma25: 1, ma99: 0, vol: 1};
   try { var ind0 = JSON.parse(localStorage.getItem("ind") || "null"); if (ind0) IND = Object.assign(IND, ind0); } catch (e) {}
   var MAS = [["ma7", 7, "--warn"], ["ma25", 25, "--acc2"], ["ma99", 99, "--acc"]];
+  // 2026-11-18 (Ali): the dollars put into a position (its margin: size / leverage, in its own account)
+  // and the dollars that came back out (margin + P/L after costs; open trades: if closed now)
+  function marginUsd(t, all) { var z = tSize(t, all); return z == null || !t.filled_at ? null : z / (t.leverage || 1); }
+  function outUsd(t, all) { var m = marginUsd(t, all), p = pnlUsd(t, all); return m == null || p == null ? null : m + p; }
+  function usdCell(v, cls) { return '<td' + (cls ? ' class="' + cls + '"' : "") + ' data-v="' + (v == null ? "" : v.toFixed(4)) + '">' + usd(v, false) + "</td>"; }
   function pnlUsd(t, all) {                  // the whole trade in $; open positions at the live price
     if (!t || t.cand || tRisk(t, all) == null) return null;
     if (t.open) { if (!t.filled_at) return null; var r = openR(t); return r == null ? null : tRisk(t, all) * r; }
@@ -554,15 +559,15 @@
     var el = document.getElementById("xtable"), rows, head, foot = "";
     function sym(t) { return '<b>' + esc(t.base) + '</b><small class="muted">/USDT · ' + esc(sysShort(t.system)) + "</small>"; }
     if (S.xtab === "open") {
-      head = ["نماد", "جهت", "نوع", "اهرم", "حجم", "ورود", "قیمت لحظه‌ای", "سود/زیان", "سود٪", "استاپ / TP1", "زمان ورود"];
+      head = ["نماد", "جهت", "نوع", "اهرم", "حجم", "دلار ورودی", "ورود", "قیمت لحظه‌ای", "سود/زیان", "سود٪", "دلار خروجی", "استاپ / TP1", "زمان ورود"];
       rows = open.map(function (t) {
         return '<tr class="click ' + (t.id === S.sel ? "sel" : "") + '" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) +
-          "</td>" + levCell(t) + "<td>" + usd(tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac), false) + '</td><td class="num">' + px(t.entry) +
-          '</td><td class="num xp">' + px(livePrice(t)) + '</td><td class="xu">' + pnlCell(t) + "</td>" + pctCell(t, true) + '<td class="num"><span class="neg">' + px(t.sl_now) +
+          "</td>" + levCell(t) + "<td>" + usd(tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac), false) + "</td>" + usdCell(marginUsd(t)) + '<td class="num">' + px(t.entry) +
+          '</td><td class="num xp">' + px(livePrice(t)) + '</td><td class="xu">' + pnlCell(t) + "</td>" + pctCell(t, true) + usdCell(outUsd(t), "xo") + '<td class="num"><span class="neg">' + px(t.sl_now) +
           '</span> / <span class="pos">' + px(t.tp1) + "</span></td>" + tsCell(t.filled_at) + "</tr>";
       });
       foot = totRow([{span: 3, v: "جمع " + fa(open.length) + " پوزیشن"}, "", usd(sumOf(open, function (t) { return tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac); }), false),
-        {span: 2, v: ""}, posTot(open), "", {span: 2, v: ""}]);
+        usd(sumOf(open, function (t) { return marginUsd(t); }), false), {span: 2, v: ""}, posTot(open), "", '<span id="xosum">' + usd(sumOf(open, function (t) { return outUsd(t); }), false) + "</span>", {span: 2, v: ""}]);
     } else if (S.xtab === "pend") {
       head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "قیمت لحظه‌ای", "فاصله تا ورود", "استاپ", "TP1", "ریسک / سود در TP1", "رده", "زمان سیگنال"];
       rows = pend.map(function (t) {
@@ -574,17 +579,18 @@
       });
       foot = totRow([{span: 9, v: "جمع " + fa(pend.length) + " سفارش"}, usd(-sumOf(pend, function (t) { return tRisk(t); })) + ' <small class="muted">ریسک کل اگر همه پر شوند</small>', {span: 2, v: ""}]);
     } else {
-      head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "خروج", "نتیجه", "سود/زیان", "سود٪", "مدت", "زمان بسته شدن"];
+      head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "خروج", "نتیجه", "دلار ورودی", "سود/زیان", "سود٪", "دلار خروجی", "مدت", "زمان بسته شدن"];
       rows = closed.map(function (t) {
         var ex = (t.events || []).filter(function (e) { return e[2] != null && e[0] !== "filled"; }).pop();
         var h = t.closed_at && t.filled_at ? (t.closed_at - t.filled_at) / 3600000 : null;
         return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
-          '</td><td class="num">' + px(ex ? ex[2] : null) + "</td><td>" + esc(t.status_fa) + "</td><td>" + usd(pnlUsd(t)) + " " + R(t.net_r) + "</td>" + pctCell(t) +
+          '</td><td class="num">' + px(ex ? ex[2] : null) + "</td><td>" + esc(t.status_fa) + "</td>" + usdCell(marginUsd(t)) + "<td>" + usd(pnlUsd(t)) + " " + R(t.net_r) + "</td>" + pctCell(t) + usdCell(outUsd(t)) +
           '<td data-v="' + (h == null ? "" : h) + '">' + (h == null ? "—" : dur(h)) + "</td>" + tsCell(t.closed_at) + "</tr>";
       });
-      foot = totRow([{span: 7, v: "جمع " + fa(closed.length) + " معامله‌ی اخیر"}, usd(sumOf(closed, pnlUsd)) + " " + R(sumOf(closed, function (t) { return t.net_r; })), "", {span: 2, v: ""}]);
+      foot = totRow([{span: 7, v: "جمع " + fa(closed.length) + " معامله‌ی اخیر"}, usd(sumOf(closed, function (t) { return marginUsd(t); }), false),
+        usd(sumOf(closed, pnlUsd)) + " " + R(sumOf(closed, function (t) { return t.net_r; })), "", usd(sumOf(closed, function (t) { return outUsd(t); }), false), {span: 2, v: ""}]);
     }
-    el.innerHTML = rows.length ? "<table class=\"xt\"" + (S.xtab === "open" ? ' data-defsort="8:desc"' : "") + "><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody>" + foot + "</table>"
+    el.innerHTML = rows.length ? "<table class=\"xt\"" + (S.xtab === "open" ? ' data-defsort="9:desc"' : "") + "><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody>" + foot + "</table>"
       : '<div class="empty">' + (S.xtab === "open" ? "الان پوزیشن بازی نیست." : S.xtab === "pend" ? "سفارشی در انتظار نیست." : "هنوز معامله‌ی بسته‌ای نیست.") + "</div>";
     decorateTips(el.parentNode);
   }
@@ -898,15 +904,15 @@
   }
   function uniqList(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }).sort(); }
   var HCOLS = [["created", "سیگنال"], ["closed", "بسته شدن"], ["kind", "نوع"], ["system", "سیستم"], ["base", "کوین"], ["side", "جهت"], ["lev", "اهرم"],
-    ["score", "رده / امتیاز"], ["status", "نتیجه"], ["hold", "مدت"], ["gross", "R خام"], ["net", "R خالص"], ["pct", "سود٪"], ["own", "سود/زیان"], ["bal", "موجودی بعد"]];
+    ["score", "رده / امتیاز"], ["status", "نتیجه"], ["hold", "مدت"], ["in", "دلار ورودی"], ["net", "R خالص"], ["pct", "سود٪"], ["own", "سود/زیان"], ["out", "دلار خروجی"]];
   // history rows show the banked result, also for partly closed trades (net_r so far)
   function hpct(t) { return t.filled_at && t.sl_pct && t.net_r != null ? t.net_r * t.sl_pct * (t.leverage || 1) : null; }
   function hval(t, k) {
     var hp = hpct(t);
     return {created: t.created, closed: t.closed_at || t.created, kind: t.approved ? 1 : 0, system: t.system, base: t.base, side: t.side, lev: t.leverage || 0, pct: hp == null ? -1e9 : hp,
       score: t.score, status: t.status, hold: t.closed_at && t.filled_at ? t.closed_at - t.filled_at : -1,
-      gross: t.filled_at ? t.gross_r : -99, net: t.filled_at ? t.net_r : -99,
-      own: doneUsd(t) == null ? -1e9 : doneUsd(t), bal: t.own_balance_after || 0}[k];
+      in: marginUsd(t) == null ? -1e9 : marginUsd(t), net: t.filled_at ? t.net_r : -99,
+      own: doneUsd(t) == null ? -1e9 : doneUsd(t), out: outUsd(t) == null ? -1e9 : outUsd(t)}[k];
   }
   function histTable() {
     var f = S.hist;
@@ -947,14 +953,14 @@
         (part ? '<span class="badge watch">هنوز ' + fa(left) + "٪ باز</span>" : esc(jfmt(t.closed_at))) + "</td><td>" + kind(t) +
         "</td><td>" + esc(sysShort(t.system)) + "</td><td><b>" + esc(t.base) + "</b></td><td>" + side(t.side) + "</td>" + levCell(t) + "<td>" + esc(t.grade) +
         ' <small class="ltr">' + (t.score || 0).toFixed(0) + "</small></td><td>" + (part ? "بخشی بسته · " : "") + esc(t.status_fa) + "</td><td>" + hold + "</td><td>" +
-        R(t.filled_at ? t.gross_r : null) + "</td><td>" + R(t.filled_at ? t.net_r : null) + "</td><td>" + (hpct(t) == null ? "—" : pct(hpct(t), 1)) + "</td><td>" +
+        usd(marginUsd(t), false) + "</td><td>" + R(t.filled_at ? t.net_r : null) + "</td><td>" + (hpct(t) == null ? "—" : pct(hpct(t), 1)) + "</td><td>" +
         usd(doneUsd(t)) + (part && t.filled_at && floatUsd(t) != null ? '<br><small class="muted">+ باز ' + usd(floatUsd(t)) + " = " + usd(pnlUsd(t)) + "</small>" : "") + "</td><td>" +
-        (part ? '<small class="muted">سود قطعی تا الان</small>' : usd(t.own_balance_after, false)) + "</td></tr>";
+        usd(outUsd(t), false) + (part && outUsd(t) != null ? '<br><small class="muted">اگر باقی‌مانده الان بسته شود</small>' : "") + "</td></tr>";
     }).join("");
     var el = document.getElementById("htab");
     var fr = rows.filter(function (t) { return t.filled_at; });
-    var foot = totRow([{span: 10, v: "جمع " + fa(rows.length) + " معامله"}, R(sumOf(fr, function (t) { return t.gross_r; })), R(sumOf(fr, function (t) { return t.net_r; })),
-      "", usd(sumP), ""]);
+    var foot = totRow([{span: 10, v: "جمع " + fa(rows.length) + " معامله"}, usd(sumOf(fr, function (t) { return marginUsd(t); }), false), R(sumOf(fr, function (t) { return t.net_r; })),
+      "", usd(sumP), usd(sumOf(fr, function (t) { return outUsd(t); }), false)]);
     el.innerHTML = "<table><thead>" + head + "</thead><tbody>" + body + "</tbody>" + foot + "</table>";
     el.querySelectorAll("th.sort").forEach(function (th) {
       th.addEventListener("click", function () {
@@ -1818,9 +1824,13 @@
         var xp = row.querySelector(".xp"), xu = row.querySelector(".xu");
         if (xp) xp.textContent = px(livePrice(tr));
         if (xu && tr.open && tr.filled_at) xu.innerHTML = pnlCell(tr);
+        var xo = row.querySelector(".xo"), ov = outUsd(tr);
+        if (xo && tr.open && ov != null) { xo.innerHTML = usd(ov, false); xo.setAttribute("data-v", ov.toFixed(4)); }
         var xc = row.querySelector(".xpc"), pv = pnlPct(tr);
         if (xc && tr.open && pv != null) { xc.innerHTML = pctTxt(tr, true); xc.setAttribute("data-v", pv.toFixed(3)); }
       });
+      var xos = document.getElementById("xosum");
+      if (xos) xos.innerHTML = usd(sumOf(openTrades(), function (t) { return outUsd(t); }), false);
       var xs = document.getElementById("xsum");
       if (xs) xs.innerHTML = usd(sumOf(openTrades(), function (t) { return floatUsd(t); }));
     } else if (S.tab === "sum") {
@@ -2160,6 +2170,8 @@
     "موجودی بعد": "موجودی حساب نوع خودش بعد از بسته شدن این معامله.",
     "ریسک (حساب همه)": "مبلغی که اگر استاپ اول بخورد از دست می‌رود.",
     "حجم پوزیشن": "ارزش کل پوزیشن (حجم × قیمت ورود).",
+    "دلار ورودی": "پولی که برای این پوزیشن گذاشته شد: مارجین = حجم ÷ اهرم، در حساب نوع خودش (تأییدشده یا Watch).",
+    "دلار خروجی": "پولی که با بسته شدن برمی‌گردد: مارجین + سود/زیان، بعد از کارمزد. برای پوزیشن باز یا بخشی بسته: اگر همین الان بسته شود.",
     "درصد ریسک / فاصله‌ی استاپ": "درصد موجودی که در خطر است، و فاصله‌ی استاپ از ورود به درصد.",
     "استاپ الان": "استاپ فعلی. بعد از TP1 به نقطه‌ی ورود می‌رود.",
     "ورود": "قیمت ورود معامله.",
