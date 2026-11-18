@@ -494,7 +494,7 @@ panel:
   market_data: true               # Gate futures stats, Fear & Greed, economic calendar (cached)
   api: true                       # "took it / skipped" buttons: trade-agent panel-api behind Caddy /api/
   translate_news: true            # news titles in Persian (display only; src/agent/news/translate.py)
-  # 2026-11-18 (Ali): system 1 now risks 3% and system 2 5%, and the accounts show every trade
+  # 2026-11-18 (Ali): system 1 now risks 3% and system 2 4%, and the accounts show every trade
   # since the start at today's risk. Trades sized before then carry no base_risk_pct; this is the
   # base risk % they were opened with (system 1's bear regime ran system 2's rules at 2%).
   restate_risk:
@@ -599,8 +599,8 @@ backtest:
         classic: {stage: true}
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
     s2_avoid:                  # s2_trend + the loss-review fixes (2026-11-01, DECISIONS #143)
-      # 2026-11-18 (Ali): base risk 5% (was 2%), and at most 20% of the balance at risk in open trades
-      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 5.0}
+      # 2026-11-18 (Ali): base risk 4% (was 2%), and at most 20% of the balance at risk in open trades
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 4.0}
       lifecycle: {max_open_risk_pct: 20}
       technical:
         classic: {stage: true}

@@ -235,7 +235,7 @@ def test_regime_labels_trend_range_and_whipsaw():
 
 
 def test_restate_risk_scales_older_trades_to_todays_base(cfg):
-    """2026-11-18 (Ali): system 1 at 3% in every regime, system 2 at 5%, and every earlier trade
+    """2026-11-18 (Ali): system 1 at 3% in every regime, system 2 at 4%, and every earlier trade
     shown at that risk."""
     from agent.config import live_config
     from agent.panel import restate_risk
@@ -248,6 +248,6 @@ def test_restate_risk_scales_older_trades_to_todays_base(cfg):
         {"system": "سیستم ۲", "regime_name": "neutral", "base_risk": None, "risk_pct": 2.0, "entry": 100, "sl": 99.8, "leverage": 10},
     ]
     restate_risk(rows, c)
-    assert [r["risk_pct"] for r in rows[:4]] == pytest.approx([1.5, 1.5, 5.0, 5.0])
-    assert rows[4]["risk_pct"] == pytest.approx(2.0)          # 0.2% stop x 10x leverage: no room for 5%
+    assert [r["risk_pct"] for r in rows[:4]] == pytest.approx([1.5, 1.5, 4.0, 4.0])
+    assert rows[4]["risk_pct"] == pytest.approx(2.0)          # 0.2% stop x 10x leverage: no room for 4%
     assert rows[0]["risk_pct_opened"] == 0.5 and rows[1]["risk_pct_opened"] == 1.0
