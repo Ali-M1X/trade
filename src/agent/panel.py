@@ -158,6 +158,7 @@ def _db_trades(repo: Repository, system: str, approved: bool, since: int) -> lis
             "filled_at": lc.get("filled_at"), "closed_at": lc.get("closed_at"), "status": s["status"],
             "entry": lc["entry"], "sl": lc["sl"], "sl_now": lc.get("sl_now", lc["sl"]),
             "tp1": lc["tp1"], "tp2": lc["tp2"], "risk_pct": (p.get("plan") or {}).get("risk_pct") or 0.0,
+            "base_risk": p.get("base_risk_pct"), "regime_name": (p.get("regime") or {}).get("name"),
             "gross_r": lc["realized_r"], "open_frac": lc.get("open_frac", 1.0), "events": events,
             "leverage": (p.get("plan") or {}).get("leverage"),
             "why": [FLAG_FA.get(f, f) for f in (p.get("evaluation") or {}).get("flags") or []],
@@ -180,6 +181,48 @@ def _detail(p: dict) -> dict:
             "plan": {k: plan.get(k) for k in PLAN_KEYS if plan.get(k) is not None},
             "regime": reg.get("name"), "bias": reg.get("bias"), "sub_system": p.get("system"),
             "majors": {k: maj.get(k) for k in ("btc", "eth", "ethbtc", "btc_weak") if k in maj}}
+
+
+def _base_risk_now(cfg: dict, system: str, regime_name: str | None) -> float | None:
+    """The base risk % the system uses today (system 1: the config of that price regime)."""
+    try:
+        if system == "سیستم ۲":
+            from .system2 import system2_config
+            return system2_config(cfg)["trade"]["base_risk_pct"]
+        from .regime_systems import system_cfg
+        c = system_cfg(cfg, regime_name) or cfg
+        return c["trade"]["base_risk_pct"]
+    except (KeyError, SystemExit, TypeError):
+        return None
+
+
+def restate_risk(trades: list[dict], cfg: dict) -> None:
+    """2026-11-18 (Ali): the accounts show every trade at the risk the systems use today. A trade's
+    risk % (grade share, regime and counter-trend multipliers included) is scaled by today's base
+    risk / the base it was sized with: stored on the plan since then, from panel.restate_risk before.
+    Capped where the stop is so tight the leverage cap would not allow the bigger position."""
+    table = (cfg.get("panel") or {}).get("restate_risk")
+    if not table:
+        return
+    now_cache: dict = {}
+    lev_cap = cfg["trade"].get("leverage_cap") or 10
+    for t in trades:
+        old = t.get("base_risk")
+        if old is None:
+            row = table.get(t["system"]) or {}
+            old = row.get(t.get("regime_name") or "", row.get("default"))
+        key = (t["system"], t.get("regime_name"))
+        if key not in now_cache:
+            now_cache[key] = _base_risk_now(cfg, *key)
+        new = now_cache[key]
+        if not old or not new or abs(new - old) < 1e-9 or not t.get("risk_pct"):
+            continue
+        risk = t["risk_pct"] * new / old
+        sl_pct = abs(t["entry"] - t["sl"]) / t["entry"] * 100 if t.get("entry") else None
+        if sl_pct:
+            risk = min(risk, (t.get("leverage") or lev_cap) * sl_pct)
+        t["risk_pct_opened"] = t["risk_pct"]
+        t["risk_pct"] = risk
 
 
 def _backfill(cfg: dict, since: int, watch_until: dict[str, int | None]) -> tuple[list[dict], dict]:
@@ -208,7 +251,8 @@ def _backfill(cfg: dict, since: int, watch_until: dict[str, int | None]) -> tupl
             "grade": t["grade"], "score": t["score"], "created": t["created"],
             "filled_at": t["filled_at"], "closed_at": t["closed_at"], "status": t["status"],
             "entry": t["entry"], "sl": t["sl"], "sl_now": t["sl"], "tp1": t.get("tp1"), "tp2": t.get("tp2"),
-            "risk_pct": t.get("risk_pct") or 0.0, "gross_r": t["gross_r"], "open_frac": max(0.0, left),
+            "risk_pct": t.get("risk_pct") or 0.0, "base_risk": None, "regime_name": t.get("regime"),
+            "gross_r": t["gross_r"], "open_frac": max(0.0, left),
             "events": events, "leverage": None, "why": [], "detail": {},
             "costs": {k: t.get(k) for k in ("fee_r", "slippage_r", "funding_r", "net_r")},
         })
@@ -434,6 +478,7 @@ def collect(cfg: dict, now_ms: int) -> dict:
                     srepo.close()
         backfill, out["replay"] = _backfill(cfg, start, out["shadow_since"])
         out["trades"] += backfill
+        restate_risk(out["trades"], cfg)
         for t in out["trades"]:
             _value(t, cfg, price_repo)
         prices = _price_paths(price_repo, {t["base"] for t in out["trades"] if t["filled_at"]})

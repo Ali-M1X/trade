@@ -405,6 +405,7 @@ lifecycle:
   expiry_bars_4h: 6
   max_active: 5
   risk_free_outside_cap: true  # 2026-11-15 (Ali): trades past TP1 (stop at entry) don't count toward max_active
+  max_open_risk_pct: null      # cap on the summed risk % of open trades (2026-11-18: system 1 15, system 2 20)
   max_correlated_same_side: 2
   correlation_threshold: 0.8
   loss_streak_pause: 3         # after 3 consecutive SLs pause until the next D close
@@ -493,6 +494,12 @@ panel:
   market_data: true               # Gate futures stats, Fear & Greed, economic calendar (cached)
   api: true                       # "took it / skipped" buttons: trade-agent panel-api behind Caddy /api/
   translate_news: true            # news titles in Persian (display only; src/agent/news/translate.py)
+  # 2026-11-18 (Ali): system 1 now risks 3% and system 2 4%, and the accounts show every trade
+  # since the start at today's risk. Trades sized before then carry no base_risk_pct; this is the
+  # base risk % they were opened with (system 1's bear regime ran system 2's rules at 2%).
+  restate_risk:
+    "سیستم ۱": {default: 1.0, bear: 2.0}
+    "سیستم ۲": {default: 2.0}
 
 # AI reviewers (2026-11-15, Ali): several reviewers score every signal (chance of profit), learn
 # from every closed trade and are graded themselves (panel tab "داوران هوش مصنوعی"). Advisory
@@ -592,7 +599,9 @@ backtest:
         classic: {stage: true}
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
     s2_avoid:                  # s2_trend + the loss-review fixes (2026-11-01, DECISIONS #143)
-      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 2.0}
+      # 2026-11-18 (Ali): base risk 4% (was 2%), and at most 20% of the balance at risk in open trades
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 4.0}
+      lifecycle: {max_open_risk_pct: 20}
       technical:
         classic: {stage: true}
         section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
@@ -701,7 +710,10 @@ backtest:
           regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
           systems: {bear: s2_trend}
     combo_avoid:               # regime_combo + the loss-review fixes (2026-11-02, DECISIONS #144)
-      trade: {stop_mode: atr, tp1_mode: fixed_r}
+      # 2026-11-18 (Ali): base risk 3% in every regime (was 1%, and 2% in bear through s2_trend),
+      # and at most 15% of the balance at risk in open trades
+      trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 3.0}
+      lifecycle: {max_open_risk_pct: 15}
       technical:
         classic: {stage: true}
         avoid: {max_touches: 6, max_score: 85, btc_extended: 6, levels: ["cluster 1d", "cluster 1w", "prev_high 1w", "prev_low 1w", "round round"]}
@@ -709,7 +721,13 @@ backtest:
         source: price
         price:
           regimes: {bull: {bias: long}, range: {bias: long}, bear: {bias: short}}
-          systems: {bear: s2_trend}
+          # bear: s2_trend's rules, at system 1's own 3%
+          systems:
+            bear:
+              trade: {stop_mode: atr, tp1_mode: fixed_r, base_risk_pct: 3.0}
+              technical:
+                classic: {stage: true}
+                section_weights: {phase: 20, dow: 20, levels: 15, volume: 10, candles: 5, cycles: 10, patterns: 10, confirmation: 10}
     regime_combo_bear_off:     # the same without trading the bear regime
       trade: {stop_mode: atr, tp1_mode: fixed_r}
       technical: {classic: {stage: true}}
