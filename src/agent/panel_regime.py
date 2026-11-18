@@ -149,7 +149,7 @@ def regime_view(repo, now: int, cfg: dict | None = None) -> dict:
     if not bars:
         return {}
     common = sorted(set.intersection(*[set(v) for v in bars.values()]))
-    common = [t for t in common if t <= now]
+    common = [t for t in common if t + BAR <= now]   # closed candles only: the stored forming one is a stale snapshot
     if len(common) < 8:
         return {}
     moves, sizes = [], []

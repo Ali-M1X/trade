@@ -91,3 +91,19 @@ def test_panel_carries_the_pulse_without_touching_the_accounts(cfg, tmp_path):
     repo.close()
     data = collect(c, NOW)
     assert data["pulse"]["now"] == [NOW, 0.6, 1.1, 2.1] and data["pulse"]["state"] == 1
+
+
+def test_regime_view_reads_closed_4h_candles_only():
+    """2026-11-18 (Ali): the 24 h move said «up to the closed candle of 19:30» at 19:04: the forming
+    candle (stored at its last fetch) was counted."""
+    from agent.panel_regime import BAR, BASKET, regime_view
+    repo = Repository(":memory:")
+    now = NOW + 90 * 60_000                                # 1.5 h into a 4H candle
+    start = now // BAR * BAR
+    for b in BASKET:
+        rows = [[start - k * BAR, 100, 101, 99, 100, 1] for k in range(60, 0, -1)]
+        rows.append([start, 100, 120, 100, 120, 1])        # the forming candle: +20% so far
+        repo.upsert_candles("gate", f"{b}/USDT:USDT", "4h", rows)
+    rv = regime_view(repo, now)
+    assert rv["bars"][-1][0] == start - BAR
+    assert rv["metrics"]["move_24h"] == 0
