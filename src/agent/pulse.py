@@ -26,7 +26,7 @@ H = 3_600_000
 WINDOWS = (("h1", H), ("h4", 4 * H), ("h24", 24 * H))
 TF_MS = {"5m": 300_000, "1h": H}
 DEFAULTS = {"enabled": True, "every_min": 5, "keep_days": 30, "h1_pct": 0.5, "h4_pct": 1.0,
-            "chart_days": 7}
+            "h24_pct": 2.0, "chart_days": 7}
 
 
 def settings(cfg: dict) -> dict:
@@ -183,4 +183,4 @@ def view(hist: list, trades: list[dict], prices: dict, now: int, cfg: dict) -> d
     return {"now": last if now - last[0] <= 30 * 60_000 else None, "since": since,
             "series": series, "spans": spans,
             "state": state_of(last, c) if now - last[0] <= 30 * 60_000 else 0,
-            "params": {k: c[k] for k in ("h1_pct", "h4_pct")}}
+            "params": {k: c[k] for k in ("h1_pct", "h4_pct", "h24_pct")}}

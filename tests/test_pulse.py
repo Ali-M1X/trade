@@ -79,7 +79,7 @@ def test_view_marks_trades_opened_against_the_pulse_and_the_first_alarm(cfg):
     assert past_tp1["pulse"]["alarm"] is None                             # risk-free after TP1
     assert old["pulse"] is None
     assert [s["dir"] for s in pv["spans"]] == [1, 1, -1]
-    assert pv["state"] == 0 and pv["now"] == hist[-1] and pv["params"] == {"h1_pct": 0.5, "h4_pct": 1.0}
+    assert pv["state"] == 0 and pv["now"] == hist[-1] and pv["params"] == {"h1_pct": 0.5, "h4_pct": 1.0, "h24_pct": 2.0}
 
 
 def test_panel_carries_the_pulse_without_touching_the_accounts(cfg, tmp_path):

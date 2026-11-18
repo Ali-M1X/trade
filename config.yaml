@@ -511,6 +511,7 @@ pulse:
   keep_days: 30
   h1_pct: 0.5                  # alarm: the 1 h and 4 h moves both past these, against a trade's side
   h4_pct: 1.0
+  h24_pct: 2.0                 # the panel's verdict only: a 24 h move past this counts as a direction
   chart_days: 7
 
 # AI reviewers (2026-11-15, Ali): several reviewers score every signal (chance of profit), learn

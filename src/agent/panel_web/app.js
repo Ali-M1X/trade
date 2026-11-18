@@ -5,8 +5,9 @@
   var app = document.getElementById("app");
   var S = {                                   // UI state (kept across data refreshes)
     tab: "home", sel: null, tf: null, hist: {k: "", s: "", side: "", res: "", q: "", sort: "closed", dir: "desc"},
-    cand: {s: ""}, live: {}, liveOk: false, hiddenSeries: {}
+    cand: {s: ""}, live: {}, liveOk: false, hiddenSeries: {}, pdays: 3
   };
+  try { var _pd = +localStorage.getItem("pdays"); if ([1, 3, 7].indexOf(_pd) >= 0) S.pdays = _pd; } catch (e) {}
   var charts = [];                            // charts of the current tab (removed on re-render)
   var candleCache = {};
 
@@ -1310,43 +1311,167 @@
     return out.sort(function (a, b) { return b.at - a.at; });
   }
   var PULSE_RULE = {half: "نصف ریسک در ورود", exit: "بستن با هشدار"};
+  // 2026-11-18 (Ali): one panel per window (each on its own scale, so the lines don't sit on top of
+  // each other), a shared cross-hair with the three numbers, and 1 / 3 / 7 day views
+  var PULSE_WIN = [[3, "۲۴ ساعت", "h24_pct"], [2, "۴ ساعت", "h4_pct"], [1, "۱ ساعت", "h1_pct"]];
   function pulseChart(pl) {
-    var s = pl.series || []; if (s.length < 2) return "";
-    var W = 960, Hh = 260, L = 10, Rr = 64, T = 14, B = 30, PB = Hh - B;
-    var x0 = s[0][0], x1 = s[s.length - 1][0], vals = [];
-    s.forEach(function (x) { vals.push(x[1], x[2], x[3]); });
-    var mn = Math.min.apply(null, vals.concat([-pl.params.h4_pct])), mx = Math.max.apply(null, vals.concat([pl.params.h4_pct]));
-    var step = [0.5, 1, 2, 2.5, 5, 10].filter(function (st) { return (mx - mn) / st <= 6; })[0] || 20;
-    var lo = Math.floor(mn / step) * step, hi = Math.ceil(mx / step) * step;
+    var days = S.pdays || 3, all = pl.series || [];
+    var s = all.filter(function (x) { return x[0] >= all[all.length - 1][0] - days * 86400000; });
+    if (s.length < 2) return '<div class="empty">هنوز داده‌ی کافی برای نمودار نیست.</div>';
+    var W = Math.max(320, Math.min(960, (app.clientWidth || 960) - 44)), L = 10, Rr = 70, PH = W < 600 ? 80 : 92, GAP = 30, T0 = 8, XB = 28, Hh = T0 + 3 * (PH + GAP) + XB;   // drawn at the page's own width: text keeps its size on phones
+    var x0 = s[0][0], x1 = s[s.length - 1][0];
     function X(t) { return L + (t - x0) / Math.max(1, x1 - x0) * (W - L - Rr); }
-    function Y(v) { return T + (hi - v) / (hi - lo) * (PB - T); }
     function f1(v) { return v.toFixed(1); }
-    var g = "";
+    var g = "<defs>", panels = [];
+    PULSE_WIN.forEach(function (w, k) {
+      var thr = pl.params[w[2]] || 0, top = T0 + GAP + k * (PH + GAP), bot = top + PH;
+      var m = Math.max(thr * 1.5, Math.max.apply(null, s.map(function (x) { return Math.abs(x[w[0]]); })) * 1.08);
+      function Y(v) { return top + (m - v) / (2 * m) * PH; }
+      panels.push({i: w[0], name: w[1], thr: thr, top: top, bot: bot, Y: Y, m: m});
+      g += '<clipPath id="pcu' + k + '"><rect x="0" y="' + top + '" width="' + W + '" height="' + f1(Y(0) - top) + '"/></clipPath>' +
+        '<clipPath id="pcd' + k + '"><rect x="0" y="' + f1(Y(0)) + '" width="' + W + '" height="' + f1(bot - Y(0)) + '"/></clipPath>';
+    });
+    g += "</defs>";
+    // alarm stretches, across the three panels
     (pl.spans || []).forEach(function (sp) {
-      var a = Math.max(X(sp.from), L), b = Math.min(X(sp.to + 300000), W - Rr); if (b <= a) b = a + 2;
       if (sp.to < x0) return;
-      g += '<rect x="' + f1(a) + '" y="' + T + '" width="' + f1(b - a) + '" height="' + (PB - T) + '" class="pspan ' + (sp.dir > 0 ? "pos" : "neg") + '"><title>' +
-        esc((sp.dir > 0 ? "هشدار برای شورت‌ها" : "هشدار برای لانگ‌ها") + " · " + jfmt(sp.from) + " تا " + jfmt(sp.to)) + "</title></rect>";
+      var a = Math.max(X(sp.from), L), b = Math.max(Math.min(X(sp.to + 300000), W - Rr), a + 2);
+      g += '<rect x="' + f1(a) + '" y="' + (T0 + GAP - 4) + '" width="' + f1(b - a) + '" height="' + (3 * (PH + GAP) - GAP + 8) + '" class="pspan ' + (sp.dir > 0 ? "pos" : "neg") + '"/>';
     });
-    for (var v = lo; v <= hi + 1e-9; v += step) {
-      var y = f1(Y(v));
-      g += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + y + '" y2="' + y + '" class="' + (Math.abs(v) < 1e-9 ? "zl" : "gl") + '"/>' +
-        '<text x="' + (W - Rr + 8) + '" y="' + (Y(v) + 4).toFixed(1) + '" class="ax">' + (v > 0 ? "+" : "") + (step % 1 ? v.toFixed(1) : Math.round(v)) + "%</text>";
-    }
-    [pl.params.h4_pct, -pl.params.h4_pct].forEach(function (v) {
-      g += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + f1(Y(v)) + '" y2="' + f1(Y(v)) + '" class="pth"/>';
-    });
+    // days
     for (var t = Math.ceil((x0 + 12600000) / 86400000) * 86400000 - 12600000; t <= x1; t += 86400000) {
-      g += '<line x1="' + f1(X(t)) + '" x2="' + f1(X(t)) + '" y1="' + T + '" y2="' + PB + '" class="vl"/>';
-      if (t + 43200000 <= x1) g += '<text x="' + f1(X(t + 43200000)) + '" y="' + (Hh - 10) + '" class="ax" text-anchor="middle">' + esc(jfmt(t, "date")) + "</text>";
+      g += '<line x1="' + f1(X(t)) + '" x2="' + f1(X(t)) + '" y1="' + (T0 + GAP) + '" y2="' + (Hh - XB) + '" class="vl"/>' +
+        '<text x="' + f1(X(t)) + '" y="' + (Hh - 8) + '" class="ax" text-anchor="middle">' + esc(jfmt(t, "date")) + "</text>";
     }
-    [[3, "p24"], [2, "p4"], [1, "p1"]].forEach(function (k) {
-      g += '<path d="' + s.map(function (x, i) { return (i ? "L" : "M") + f1(X(x[0])) + " " + f1(Y(x[k[0]])); }).join(" ") + '" class="pl ' + k[1] + '"/>';
+    if (days === 1) for (var h = Math.ceil(x0 / 21600000) * 21600000; h <= x1; h += 21600000)
+      g += '<text x="' + f1(X(h)) + '" y="' + (Hh - 8) + '" class="ax" text-anchor="middle">' + esc(jfmt(h, "time")) + "</text>";
+    panels.forEach(function (p, k) {
+      var lv = s[s.length - 1][p.i], ly = Math.max(p.top + 9, Math.min(p.bot - 9, p.Y(lv)));
+      g += '<text x="' + (W - Rr) + '" y="' + (p.top - 9) + '" class="ptitle" text-anchor="end" direction="rtl">' + p.name + "</text>";
+      g += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + f1(p.Y(0)) + '" y2="' + f1(p.Y(0)) + '" class="zl"/>';
+      [p.thr, -p.thr].forEach(function (v) {
+        g += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + f1(p.Y(v)) + '" y2="' + f1(p.Y(v)) + '" class="pth"/>' +
+          (Math.abs(p.Y(v) - ly) < 18 ? "" : '<text x="' + (W - Rr + 8) + '" y="' + f1(p.Y(v) + 4) + '" class="ax">' + (v > 0 ? "+" : "") + v + "%</text>");
+      });
+      if (p.m > p.thr * 2) [p.m, -p.m].forEach(function (v) {     // the panel's own scale, at its edges
+        var y = p.Y(v) + (v > 0 ? 9 : -2);
+        if (Math.abs(y - ly) > 16) g += '<text x="' + (W - Rr + 8) + '" y="' + f1(y) + '" class="ax pedge">' + (v > 0 ? "+" : "−") + Math.abs(v).toFixed(1) + "%</text>";
+      });
+      var line = s.map(function (x, j) { return (j ? "L" : "M") + f1(X(x[0])) + " " + f1(p.Y(x[p.i])); }).join(" ");
+      var area = line + " L" + f1(X(x1)) + " " + f1(p.Y(0)) + " L" + f1(X(x0)) + " " + f1(p.Y(0)) + " Z";
+      g += '<path d="' + area + '" class="parea pos" clip-path="url(#pcu' + k + ')"/><path d="' + area + '" class="parea neg" clip-path="url(#pcd' + k + ')"/>' +
+        '<path d="' + line + '" class="pl"/>';
+      g += '<rect x="' + (W - Rr + 4) + '" y="' + f1(ly - 10) + '" width="' + (Rr - 6) + '" height="20" rx="6" class="rpill ' + (lv >= 0 ? "pos" : "neg") + '"/>' +
+        '<text x="' + (W - Rr / 2 + 1) + '" y="' + f1(ly + 4) + '" class="rpt" text-anchor="middle">' + (lv > 0 ? "+" : "") + lv.toFixed(2) + "%</text>";
     });
-    return '<div class="regwrap pulsewrap"><svg class="regchart pulsechart" viewBox="0 0 ' + W + " " + Hh + '" direction="ltr">' + g + "</svg></div>" +
-      '<div class="legend reglegend"><span><i class="pli p1"></i>۱ ساعت</span><span><i class="pli p4"></i>۴ ساعت</span><span><i class="pli p24"></i>۲۴ ساعت</span>' +
-      '<span><i class="rrib pos"></i>هشدار برای شورت‌ها (بازار رو به بالا)</span><span><i class="rrib neg"></i>هشدار برای لانگ‌ها (بازار رو به پایین)</span>' +
-      '<span><i class="pli pth"></i>آستانه‌ی ۴ ساعته</span></div>';
+    g += '<line class="rx" x1="0" x2="0" y1="' + (T0 + GAP - 4) + '" y2="' + (Hh - XB) + '" style="display:none"/>' +
+      panels.map(function (p, k) { return '<circle class="rxd pd' + k + '" r="4" cx="0" cy="0" style="display:none"/>'; }).join("") +
+      '<rect class="rov" x="' + L + '" y="' + T0 + '" width="' + (W - L - Rr) + '" height="' + (Hh - T0 - XB) + '"/>';
+    pulseChart.geo = {s: s, X: X, W: W, L: L, Rr: Rr, x0: x0, x1: x1, panels: panels, Hh: Hh};
+    return '<div class="regwrap pulsewrap"><svg class="regchart pulsechart" viewBox="0 0 ' + W + " " + Hh + '" direction="ltr">' + g +
+      '</svg><div class="regtip" style="display:none"></div></div>' +
+      '<div class="legend reglegend"><span><i class="rrib pos"></i>هشدار برای شورت‌ها (بازار رو به بالا)</span><span><i class="rrib neg"></i>هشدار برای لانگ‌ها (بازار رو به پایین)</span>' +
+      '<span><i class="pli pth"></i>آستانه‌ی هر بازه</span></div>';
+  }
+  function pulseBind() {
+    var box = document.getElementById("pulsechart"); if (!box) return;
+    box.parentNode.querySelectorAll("[data-pdays]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        S.pdays = +b.dataset.pdays;
+        try { localStorage.setItem("pdays", S.pdays); } catch (e) {}
+        box.parentNode.querySelectorAll("[data-pdays]").forEach(function (x) { x.classList.toggle("on", x === b); });
+        box.innerHTML = pulseChart(D.pulse || {}); pulseHover();
+      });
+    });
+    pulseHover();
+  }
+  function pulseHover() {
+    var wrap = document.querySelector("#pulsechart .regwrap"), geo = pulseChart.geo; if (!wrap || !geo) return;
+    var svg = wrap.querySelector("svg"), tip = wrap.querySelector(".regtip"), ln = svg.querySelector(".rx"), c = (D.pulse || {}).params || {};
+    function hide() { tip.style.display = ln.style.display = "none"; geo.panels.forEach(function (p, k) { svg.querySelector(".pd" + k).style.display = "none"; }); }
+    function move(ev) {
+      var r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) / r.width * geo.W;
+      var t = geo.x0 + (sx - geo.L) / (geo.W - geo.L - geo.Rr) * (geo.x1 - geo.x0), best = null;
+      geo.s.forEach(function (x) { if (!best || Math.abs(x[0] - t) < Math.abs(best[0] - t)) best = x; });
+      if (!best) return hide();
+      var cx = geo.X(best[0]);
+      ln.setAttribute("x1", cx); ln.setAttribute("x2", cx); ln.style.display = "";
+      geo.panels.forEach(function (p, k) { var d = svg.querySelector(".pd" + k); d.setAttribute("cx", cx); d.setAttribute("cy", p.Y(best[p.i])); d.style.display = ""; });
+      var st = best[1] >= c.h1_pct && best[2] >= c.h4_pct ? 1 : best[1] <= -c.h1_pct && best[2] <= -c.h4_pct ? -1 : 0;
+      tip.innerHTML = "<b>" + esc(jfmt(best[0])) + "</b><br>۲۴ ساعت " + pct(best[3], 2) + "<br>۴ ساعت " + pct(best[2], 2) + "<br>۱ ساعت " + pct(best[1], 2) +
+        "<br>" + (st > 0 ? '<b class="neg">هشدار برای شورت‌ها</b>' : st < 0 ? '<b class="neg">هشدار برای لانگ‌ها</b>' : '<span class="muted">بدون هشدار</span>');
+      tip.style.display = "";
+      var px = cx / geo.W * r.width, w = tip.offsetWidth;
+      tip.style.left = Math.max(4, Math.min(r.width - w - 4, px + (px > r.width / 2 ? -w - 14 : 14))) + "px";
+      tip.style.top = "30px";
+    }
+    svg.addEventListener("mousemove", move);
+    svg.addEventListener("touchmove", function (e) { if (e.touches[0]) move(e.touches[0]); }, {passive: true});
+    svg.addEventListener("touchstart", function (e) { if (e.touches[0]) move(e.touches[0]); }, {passive: true});
+    svg.addEventListener("mouseleave", hide);
+  }
+  // what the three windows together say, and what it means for each side (2026-11-18, Ali: «what can
+  // we conclude and what should we do»). Advice only: the systems trade by their own rules.
+  function pulseVerdict(pl, rows) {
+    var n = pl.now, c = pl.params || {};
+    if (!n) return '<div class="pverdict v-warn"><b>داده‌ی تازه نیست</b><p>آخرین ثبت نبض بازار بیشتر از نیم ساعت پیش است؛ جمع‌بندی وقتی بات دوباره ثبت کند برمی‌گردد.</p></div>';
+    function sg(v, thr) { return v >= thr ? 1 : v <= -thr ? -1 : 0; }
+    var d1 = sg(n[1], c.h1_pct), d4 = sg(n[2], c.h4_pct), d24 = sg(n[3], c.h24_pct || 2);
+    var UP = {1: "بالا", "-1": "پایین"}, SIDE = {1: "لانگ‌ها", "-1": "شورت‌ها"};
+    var title, why, adv = {}, cls = "v-warn", dir = 0;
+    if (d4 && d1 === d4) {
+      dir = d4;
+      if (d24 === d4) {
+        title = "حرکت یکپارچه رو به " + UP[dir]; cls = "v-neg";
+        why = "هر سه بازه هم‌جهت‌اند: بازار در ۲۴ ساعت، ۴ ساعت و ۱ ساعت گذشته رو به " + UP[dir] + " رفته و هنوز ادامه دارد.";
+        adv[dir] = "هم‌جهت با بازارند. فرصت خوب است، ولی دنبال قیمت نرو: بعد از یک حرکت بزرگ، ورود دیر با استاپ نزدیک زود می‌خورد.";
+        adv[-dir] = "در بیشترین خطرند. همان حالتی است که استاپ‌ها با هم می‌خورند: ورود جدید نه، و پوزیشن‌های باز قبل از TP1 را زیر نظر داشته باش.";
+      } else if (d24 === -d4) {
+        title = (dir > 0 ? "برگشت رو به بالا در یک روز نزولی" : "اصلاح رو به پایین در یک روز صعودی");
+        why = "روند ۲۴ ساعته رو به " + UP[-dir] + " است، ولی ۴ ساعت و ۱ ساعت اخیر رو به " + UP[dir] + " برگشته‌اند. این برگشت‌ها معمولاً همان‌جایی است که استاپ‌های " + SIDE[-dir] + " می‌خورد.";
+        adv[-dir] = "هم‌جهت با روند بزرگ‌ترند ولی الان خلاف موج کوتاه‌اند. ورود جدید را صبر کن تا ۱ ساعته دوباره رو به " + UP[-dir] + " برگردد؛ هم نقطه‌ی ورود بهتر است هم استاپ امن‌تر. پوزیشن‌های باز در خطر استاپ‌اند.";
+        adv[dir] = "حرکت کوتاه با آن‌هاست ولی خلاف روند ۲۴ ساعته؛ اگر ورود است، کوتاه‌مدت و با احتیاط.";
+      } else {
+        title = "حرکت تازه رو به " + UP[dir]; cls = "v-neg";
+        why = "۴ ساعت و ۱ ساعت اخیر با هم رو به " + UP[dir] + " رفته‌اند ولی ۲۴ ساعته هنوز جهت روشنی ندارد؛ ممکن است شروع یک حرکت باشد.";
+        adv[dir] = "هم‌جهت با موج تازه‌اند؛ اگر سیستم سیگنال داد، با جهت بازار است.";
+        adv[-dir] = "هشدار فعال است: ورود جدید نه، و پوزیشن‌های باز قبل از TP1 در خطرند.";
+      }
+    } else if (d4 && d1 === -d4) {
+      dir = d4;
+      title = "حرکت ۴ ساعته رو به " + UP[dir] + " دارد برمی‌گردد";
+      why = "۴ ساعت اخیر رو به " + UP[dir] + " بوده ولی ۱ ساعت گذشته خلافش رفته؛ فشار کم شده یا برگشت شروع شده.";
+      adv[dir] = "سود باز را نگه دار ولی پوزیشن تازه هم‌جهت با این حرکت دیر است.";
+      adv[-dir] = "فشار از رویشان برداشته شده؛ اگر ۴ ساعته هم برگردد، حرکت با آن‌ها می‌شود.";
+    } else if (d4) {
+      dir = d4;
+      title = "حرکت ۴ ساعته رو به " + UP[dir] + "، ۱ ساعته آرام";
+      why = "بازار در ۴ ساعت گذشته رو به " + UP[dir] + " رفته ولی ساعت اخیر حرکت خاصی نداشته؛ حرکت ایستاده.";
+      adv[dir] = "عادی؛ دنبال قیمت نرو.";
+      adv[-dir] = "هنوز هشدار نیست، ولی اگر ۱ ساعته هم رو به " + UP[dir] + " برود هشدار فعال می‌شود.";
+    } else if (d1) {
+      dir = d1;
+      title = "جهش کوتاه ۱ ساعته رو به " + UP[dir];
+      why = "فقط ساعت اخیر حرکت داشته و ۴ ساعته هنوز تأییدش نکرده؛ بیشتر این جهش‌ها نویزند.";
+      adv[dir] = "عادی؛ یک ساعت حرکت، دلیل ورود نیست.";
+      adv[-dir] = "عادی؛ تا وقتی ۴ ساعته هم رد نشده، هشدار نیست.";
+    } else {
+      cls = "v-pos"; dir = d24;
+      title = d24 ? "روند ۲۴ ساعته رو به " + UP[d24] + "، ساعت‌های اخیر آرام" : "بازار آرام و بی‌جهت";
+      why = d24 ? "بازار در ۲۴ ساعت رو به " + UP[d24] + " رفته ولی ۴ و ۱ ساعت اخیر آرام بوده‌اند." : "هیچ‌کدام از سه بازه حرکت معناداری ندارند.";
+      adv[1] = adv[-1] = "نبض بازار حرفی ندارد؛ قوانین عادی سیستم‌ها کافی است.";
+    }
+    // open trades before TP1 against the short-term move: what is at stake
+    var against = dir ? openTrades().filter(function (t) { return t.side === -dir && !isPartial(t); }) : [];
+    var risk = sumOf(against, function (t) { return tRisk(t); });
+    var stake = against.length ? '<p><b>الان ' + fa(against.length) + " پوزیشن باز " + (dir > 0 ? "شورت" : "لانگ") + "</b> خلاف این حرکت است؛ اگر همه استاپ بخورند " + usd(-risk) + " ضرر می‌شود.</p>" : "";
+    // what the hypothetical rules have shown so far
+    var ex = rows.filter(function (r) { return r.rule === "exit"; }), hf = rows.filter(function (r) { return r.rule === "half"; });
+    function diff(xs) { return sumOf(xs, function (r) { return r.wusd - r.usd; }); }
+    var ev = "<p class=\"muted\">شاهد تا الان: «بستن با هشدار» روی " + fa(ex.length) + " معامله " + (ex.length ? usd(diff(ex)) : "—") +
+      " و «نصف ریسک در ورود» روی " + fa(hf.length) + " معامله " + (hf.length ? usd(diff(hf)) : "—") + " فرق داشت (مثبت یعنی کمک می‌کرد). این جمع‌بندی فقط راهنماست و روی معامله‌ها اثر ندارد.</p>";
+    return '<div class="pverdict ' + cls + '"><b>' + title + "</b><p>" + why + "</p>" +
+      '<div class="padv"><div><span class="badge short">شورت</span> ' + adv[-1] + '</div><div><span class="badge long">لانگ</span> ' + adv[1] + "</div></div>" + stake + ev + "</div>";
   }
   function pulseSection() {
     var pl = D.pulse || {};
@@ -1389,8 +1514,11 @@
       }).join("") + "</tbody>" +
       totRow([{span: 10, v: "جمع"}, usd(sumOf(rows, function (r) { return r.usd; })), usd(sumOf(rows, function (r) { return r.wusd; })),
         usd(sumOf(rows, function (r) { return r.wusd - r.usd; }))]) + "</table></div></details>" : '<div class="empty">هنوز معامله‌ای با هشدار نبوده.</div>';
+    var pd = S.pdays || 3;
+    var range = '<div class="seg pseg">' + [[1, "۱ روز"], [3, "۳ روز"], [7, "۷ روز"]].map(function (x) {
+      return '<button type="button" data-pdays="' + x[0] + '" class="' + (x[0] === pd ? "on" : "") + '">' + x[1] + "</button>"; }).join("") + "</div>";
     return '<section id="mk-pulse"><h2>نبض بازار <small>حرکت سبد ۱۰ کوین بزرگ در ۱، ۴ و ۲۴ ساعت · از ' + esc(jfmt(pl.since, "date")) + "</small></h2>" + cards +
-      pulseChart(pl) +
+      pulseVerdict(pl, rows) + range + '<div id="pulsechart">' + pulseChart(pl) + "</div>" +
       '<h3>اثر فرضی <small>فقط برای سنجش؛ روی هیچ معامله‌ای اثر ندارد. سبز در ستون فرق یعنی قاعده کمک می‌کرد</small></h3>' + sumTab + list + "</section>";
   }
   function marketTab() {
@@ -1411,6 +1539,7 @@
       part(4) + (rp ? rp.posTab + rp.segTab + rp.days : "");
     mp.bind();
     if (rp) regimeHover();
+    pulseBind();
     app.querySelectorAll("[data-jump]").forEach(function (b) {
       b.addEventListener("click", function () { var el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({behavior: "smooth", block: "start"}); });
     });
