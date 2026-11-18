@@ -232,3 +232,22 @@ def test_regime_labels_trend_range_and_whipsaw():
     assert labs[25] == "trend_down" and labs[-2] == "range_quiet" and labs[-1] == "whipsaw"
     segs = segments(list(range(0, len(moves) * 10, 10)), labs, moves, sizes, 2)
     assert [s["label"] for s in segs] == ["range", "trend_down", "range"]
+
+
+def test_restate_risk_scales_older_trades_to_todays_base(cfg):
+    """2026-11-18 (Ali): system 1 at 2% (its bear regime already was), system 2 at 4%, and every
+    earlier trade shown at that risk."""
+    from agent.config import live_config
+    from agent.panel import restate_risk
+    c = live_config(cfg)
+    rows = [
+        {"system": "سیستم ۱", "regime_name": "btc_led", "base_risk": None, "risk_pct": 0.5, "entry": 100, "sl": 95, "leverage": 4},
+        {"system": "سیستم ۱", "regime_name": "bear", "base_risk": None, "risk_pct": 1.0, "entry": 100, "sl": 95, "leverage": 4},
+        {"system": "سیستم ۲", "regime_name": "risk_off", "base_risk": None, "risk_pct": 2.0, "entry": 100, "sl": 95, "leverage": 4},
+        {"system": "سیستم ۲", "regime_name": "risk_off", "base_risk": 4.0, "risk_pct": 4.0, "entry": 100, "sl": 95, "leverage": 4},
+        {"system": "سیستم ۲", "regime_name": "neutral", "base_risk": None, "risk_pct": 2.0, "entry": 100, "sl": 99.8, "leverage": 10},
+    ]
+    restate_risk(rows, c)
+    assert [r["risk_pct"] for r in rows[:4]] == [1.0, 1.0, 4.0, 4.0]
+    assert rows[4]["risk_pct"] == pytest.approx(2.0)          # 0.2% stop x 10x leverage: no room for 4%
+    assert rows[0]["risk_pct_opened"] == 0.5 and "risk_pct_opened" not in rows[1]

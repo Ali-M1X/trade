@@ -38,8 +38,10 @@ class SignalBook:
         return self.repo.get_state("loss_streak", {"count": 0, "paused_until": 0})
 
     # ---- admission
-    def admit(self, base: str, side: int, score: float, now_ms: int, corr=None) -> Admission:
-        """corr(base_a, base_b) -> correlation of daily returns (or None if unknown)."""
+    def admit(self, base: str, side: int, score: float, now_ms: int, corr=None,
+              risk_pct: float | None = None) -> Admission:
+        """corr(base_a, base_b) -> correlation of daily returns (or None if unknown).
+        risk_pct: the new trade's risk, for lifecycle.max_open_risk_pct."""
         lc, g = self.cfg["lifecycle"], self.cfg["grades"]
         if now_ms < self.pause()["paused_until"]:
             return Admission(False, "loss_streak_pause")
@@ -60,6 +62,12 @@ class SignalBook:
         # 2026-11-15 (Ali): a trade past TP1 has its stop at entry and profit taken, so it risks
         # nothing more and no longer takes one of the max_active places
         at_risk = [x for x in open_ if not (lc.get("risk_free_outside_cap") and risk_free(x))]
+        # 2026-11-18 (Ali, system 2 at 4%): the risk of all open trades together stays under the cap
+        cap = lc.get("max_open_risk_pct")
+        if cap and risk_pct:
+            open_risk = sum((x["payload"].get("plan") or {}).get("risk_pct") or 0.0 for x in at_risk)
+            if open_risk + risk_pct > cap + 1e-9:
+                return Admission(False, "max_open_risk")
         if len(at_risk) >= lc["max_active"]:
             if score >= g["a_plus"]:
                 return Admission(True, out_of_cap=True)
@@ -70,7 +78,9 @@ class SignalBook:
     def create(self, ev, now_ms: int, meta: dict) -> tuple[int, dict]:
         """Store a new signal from an Evaluation. Returns (id, payload)."""
         plan = ev.plan.to_dict()
-        payload = {"plan": plan, "lifecycle": new_signal(plan, now_ms, self.cfg), **meta}
+        payload = {"plan": plan, "lifecycle": new_signal(plan, now_ms, self.cfg), **meta,
+                   # the base risk it was sized with (2026-11-18: the panel restates older trades)
+                   "base_risk_pct": (self.cfg.get("trade") or {}).get("base_risk_pct")}
         sid = self.repo.add_signal(now_ms, ev.base, "long" if ev.side == 1 else "short",
                                    ev.grade, ev.score, payload["lifecycle"]["status"], payload)
         self.repo.add_event(now_ms, "created", {"grade": ev.grade, "score": ev.score}, sid)
