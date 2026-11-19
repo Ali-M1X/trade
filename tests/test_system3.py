@@ -129,3 +129,34 @@ def test_scan_opens_one_pending_short_and_the_panel_shows_it(cfg, tmp_path):
     repo.close()
     v = S3.panel_view(c, now)
     assert v["trades"][0]["status"] == "pending" and v["account"]["balance"] == 100
+
+
+class FakeClient:
+    class Ex:
+        markets = {"AAA/USDT:USDT": {"swap": True, "linear": True, "quote": "USDT", "base": "AAA"}}
+
+    def call(self, method):
+        return "gate", {"AAA/USDT:USDT": {"last": 1.36, "high": 1.45, "low": 1.1}}
+
+    def exchange(self, name):
+        return self.Ex()
+
+
+def test_the_fast_copy_signals_on_the_forming_candle_with_its_own_account(cfg, tmp_path):
+    bars = pump_bars()
+    now = bars[-1][0] + 20 * 60_000                         # 20 minutes into the last (forming) candle
+    c = {**cfg, "system3": {"enabled": True, "fast": True, "db_path": str(tmp_path / "s3.db")}}
+    repo = Repository(c["system3"]["db_path"])
+    out = Sent()
+    assert S3.scan_fast(c, repo, FakeMarket(bars), FakeClient(), out, now) == []   # no universe before the hourly scan
+    repo.set_state("s3_universe", ["AAA"])
+    found = S3.scan_fast(c, repo, FakeMarket(bars), FakeClient(), out, now)
+    assert [f["base"] for f in found] == ["AAA"] and "سریع" in out.msgs[0]
+    S3.scan_fast(c, repo, FakeMarket(bars), FakeClient(), out, now + 60_000)   # once per forming candle
+    sig = repo.get_signals()
+    assert len(sig) == 1 and sig[0]["payload"]["s3"]["mode"] == "fast"
+    assert sig[0]["payload"]["s3"]["expires_at"] == now + 6 * H
+    repo.close()
+    v = S3.panel_view(c, now)
+    assert v["trades"][0]["mode"] == "fast" and v["accounts"]["fast"]["pending"] == 1
+    assert v["accounts"]["hourly"]["pending"] == 0

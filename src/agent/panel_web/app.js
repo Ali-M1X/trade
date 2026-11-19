@@ -8,6 +8,7 @@
     cand: {s: ""}, live: {}, liveOk: false, hiddenSeries: {}, pdays: 3
   };
   try { var _pd = +localStorage.getItem("pdays"); if ([1, 3, 7].indexOf(_pd) >= 0) S.pdays = _pd; } catch (e) {}
+  try { S.s3mode = localStorage.getItem("s3mode") || "hourly"; } catch (e) {}
   var charts = [];                            // charts of the current tab (removed on re-render)
   var candleCache = {};
 
@@ -1790,8 +1791,12 @@
   // reaches systems 1 and 2's tables, accounts or the measurement period.
   var S3DONE = ["tp", "sl", "time"];
   function s3() { return D.system3 || {}; }
+  var S3MODE = {hourly: ["ساعتی (تست‌شده)", "بعد از بسته شدن هر کندل ۱ ساعته؛ همان قانون بک‌تست"],
+    fast: ["سریع (هر دقیقه)", "هر دقیقه روی کندل ۱ ساعته‌ای که هنوز باز است؛ زودتر وارد می‌شود ولی بک‌تست ندارد"]};
+  function s3Mode() { return S.s3mode === "fast" && s3().fast ? "fast" : "hourly"; }
   function s3Rows() {
-    return (s3().trades || []).map(function (t) {
+    var m = s3Mode();
+    return (s3().trades || []).filter(function (t) { return (t.mode || "hourly") === m; }).map(function (t) {
       t.open = t.status === "active" || t.status === "pending";
       t.system = "سیستم ۳";
       t.tp1_label = "تارگت";
@@ -1801,13 +1806,17 @@
   function s3Px(v, extra) { return '<td data-v="' + (v == null ? "" : v) + '"><span class="ltr">' + px(v) + "</span>" + (extra || "") + "</td>"; }
   function s3Pct(t) { return '<td class="xpc" data-v="' + (t.pnl_pct == null ? "" : t.pnl_pct.toFixed(3)) + '">' + pct(t.pnl_pct) + "</td>"; }
   function s3Tab() {
-    var d = s3(), a = d.account || {}, rows = s3Rows(), sc = d.scan || {};
+    var d = s3(), mode = s3Mode(), a = (d.accounts || {})[mode] || d.account || {}, rows = s3Rows(), sc = d.scan || {};
     if (!d.enabled && !rows.length) { app.innerHTML = '<section><h2>سیستم ۳</h2><div class="empty">سیستم ۳ خاموش است.</div></section>'; return; }
     var DAYMS = 86400000, end = d.since + (d.review_days || 30) * DAYMS, left = Math.ceil((end - Date.now()) / DAYMS);
     var live = rows.filter(function (t) { return t.open; }).sort(byCreated);
     var done = rows.filter(function (t) { return S3DONE.indexOf(t.status) >= 0; }).sort(function (x, y) { return y.closed_at - x.closed_at; });
     var gone = rows.filter(function (t) { return !t.open && S3DONE.indexOf(t.status) < 0; }).sort(byCreated);
     var pnl = a.balance != null ? a.balance - a.start : null;
+    var modes = d.fast ? '<div class="xtabs s3modes">' + ["hourly", "fast"].map(function (m) {
+      var acc = (d.accounts || {})[m] || {};
+      return '<button data-s3m="' + m + '" class="' + (m === mode ? "on" : "") + '">' + S3MODE[m][0] + ' <small class="muted">' + fa(acc.closed || 0) + " بسته · " + fa((acc.open || 0) + (acc.pending || 0)) + " باز</small></button>";
+    }).join("") + '<small class="muted s3mnote">' + S3MODE[mode][1] + "</small></div>" : "";
     var verdict = left > 0
       ? "دوره‌ی آزمایشی کاغذی: از " + esc(jfmt(d.since, "date")) + " تا " + esc(jfmt(end, "date")) + " (" + fa(left) + " روز مانده). بعد از آن نتیجه را با بک‌تست مقایسه می‌کنیم و تصمیم با توست."
       : "یک ماه آزمایش کاغذی تمام شد. وقت مقایسه با بک‌تست و تصمیم است.";
@@ -1816,7 +1825,7 @@
       statCard("معامله‌های بسته", fa(a.closed || 0), a.closed ? "برد " + fa(a.wins) + " از " + fa(a.closed) + " (" + fa(Math.round(a.wins / a.closed * 100)) + "٪)" : "هنوز معامله‌ای بسته نشده") +
       statCard("جمع R خالص", R(a.net_r || 0), "میانگین " + (a.avg_r == null ? "—" : R(a.avg_r)) + " · ضریب سود " + (a.pf == null ? "—" : '<span class="ltr">' + a.pf.toFixed(2) + "</span>")) +
       statCard("الان", fa(a.open || 0) + ' <small class="muted">باز · ' + fa(a.pending || 0) + " سفارش</small>",
-        "اسکن آخر " + ago(sc.ts) + (sc.coins ? " · " + fa(sc.movers || 0) + " کوین پرنوسان از " + fa(sc.coins) : "")) + "</div>";
+        "اسکن " + (mode === "fast" && sc.fast_ts ? "سریع " + ago(sc.fast_ts) : "ساعتی " + ago(sc.ts)) + (sc.coins ? " · " + fa(sc.movers || 0) + " کوین پرنوسان از " + fa(sc.coins) : "")) + "</div>";
     var sel = rows.filter(function (t) { return t.id === S.s3sel; })[0] || live.filter(function (t) { return t.status === "active"; })[0] || live[0] || done[0] || null;
     var chart = sel ? '<section class="xview"><h2 class="s3head"><b>' + esc(sel.base) + "</b> " + side(sel.side) + ' <span class="muted">' + esc(sel.status_fa) + " · ۱ ساعته</span></h2>" +
       '<div class="chartbox tall" id="s3chart"><div class="empty">در حال گرفتن کندل‌ها از صرافی…</div></div></section>' : "";
@@ -1827,7 +1836,7 @@
           tsCell(t.created) + levCell(t) + s3Px(t.entry) + s3Px(t.sl, ' <small class="muted">' + fa(t.sl_pct) + "٪</small>") + s3Px(t.target) +
           s3Px(t.price) + "<td>" + (t.status === "active" ? RU(t.open_r, t.pnl_usd) : "—") + "</td>" + s3Pct(t) + "</tr>";
       }).join("") + "</tbody>" + totRow([{span: 8, v: "جمع " + fa(live.length)}, RU(sumOf(live, function (t) { return t.open_r; }), sumOf(live, function (t) { return t.pnl_usd; })), ""]) + "</table></div>"
-      : '<div class="empty">الان پوزیشن یا سفارشی باز نیست. هر ساعت، یک دقیقه بعد از بسته شدن کندل، کوین‌های پرنوسان اسکن می‌شوند.</div>';
+      : '<div class="empty">الان پوزیشن یا سفارشی باز نیست. ' + (mode === "fast" ? "کوین‌های پرنوسان هر دقیقه بررسی می‌شوند." : "هر ساعت، یک دقیقه بعد از بسته شدن کندل، کوین‌های پرنوسان اسکن می‌شوند.") + "</div>";
     var doneHtml = done.length ? '<div class="scroll"><table data-defsort="3:desc"><thead><tr><th>کوین</th><th>نتیجه</th><th>ورود</th><th>خروج</th><th>قیمت ورود</th><th>قیمت خروج</th><th>اهرم</th><th>R خالص</th><th>سود٪</th></tr></thead><tbody>' +
       done.map(function (t) {
         return "<tr " + rowCls(t) + "><td><b>" + esc(t.base) + "</b> " + side(t.side) + '</td><td class="' + (t.net_r > 0 ? "pos" : "neg") + '">' + esc(t.status_fa) + "</td>" + tsCell(t.filled_at) + tsCell(t.closed_at) +
@@ -1845,12 +1854,16 @@
       "<li>ورود: لیمیت فروش وسط بسته شدن و سقف همان کندل، " + fa(r.fill_bars || 6) + " ساعت معتبر؛ اگر قیمت زودتر به تارگت برسد لغو می‌شود.</li>" +
       "<li>استاپ: ۰٫۵٪ بالای سقف پامپ و دست‌کم " + fa(Math.round((r.min_stop || 0.03) * 100)) + "٪ از ورود. تارگت: برگشت " + fa(Math.round((r.tp_retrace || 0.62) * 100)) + "٪ کل پامپ (دست‌کم ۱R). خروج زمانی بعد از " + fa(r.max_bars || 48) + " ساعت.</li>" +
       "<li>حداکثر " + fa(r.max_open || 3) + " معامله‌ی باز، یک معامله برای هر کوین، و بعد از " + fa(r.day_losses || 3) + " باخت در یک روز تا فردا معامله‌ی تازه نمی‌گیرد. ریسک " + fa(d.risk_pct) + "٪.</li>" +
-      "<li>بک‌تست (کارمزد و لغزش حساب شده): آموزش تا ۲۶ تیر ۱۱۵ معامله و ‎+20.1R، آزمون بعد از آن ۹۶ معامله و ‎+11.9R، ضریب سود ۱٫۲۲، هر ۵ ماه آزمون مثبت.</li>" +
+      "<li>نسخه‌ی سریع: همین قانون‌ها، ولی هر دقیقه روی کندل ۱ ساعته‌ی باز بررسی می‌شود (قیمت لحظه‌ای به‌جای بسته شدن کندل)، سفارش از لحظه‌ی سیگنال ۶ ساعت معتبر است، و حساب و سقف معامله‌هایش جداست. بک‌تست ندارد؛ بعد از یک ماه با نسخه‌ی ساعتی مقایسه می‌شود.</li>" +
+      "<li>بک‌تست نسخه‌ی ساعتی (کارمزد و لغزش حساب شده): آموزش تا ۲۶ تیر ۱۱۵ معامله و ‎+20.1R، آزمون بعد از آن ۹۶ معامله و ‎+11.9R، ضریب سود ۱٫۲۲، هر ۵ ماه آزمون مثبت.</li>" +
       "</ul></section>";
-    app.innerHTML = '<section><h2>سیستم ۳ · شورت ته پامپ <small class="muted">آزمایشی، کاغذی</small></h2><div class="pverdict">' + verdict + "</div>" + kpis + "</section>" +
+    app.innerHTML = '<section><h2>سیستم ۳ · شورت ته پامپ <small class="muted">آزمایشی، کاغذی</small></h2>' + modes + '<div class="pverdict">' + verdict + "</div>" + kpis + "</section>" +
       '<div class="xfull">' + chart + "</div>" +
       "<section><h2>پوزیشن‌ها و سفارش‌های باز</h2>" + liveHtml + "</section>" +
       "<section><h2>معامله‌های بسته</h2>" + doneHtml + goneHtml + "</section>" + rules;
+    app.querySelectorAll("button[data-s3m]").forEach(function (b) {
+      b.addEventListener("click", function () { S.s3mode = b.getAttribute("data-s3m"); S.s3sel = null; try { localStorage.setItem("s3mode", S.s3mode); } catch (e) {} render(); });
+    });
     app.querySelectorAll("tr[data-s3]").forEach(function (tr) {
       tr.addEventListener("click", function () { S.s3sel = tr.getAttribute("data-s3"); render(); var v = app.querySelector(".xview"); if (v) v.scrollIntoView({behavior: "smooth", block: "start"}); });
     });
