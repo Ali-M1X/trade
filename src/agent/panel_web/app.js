@@ -194,12 +194,18 @@
     return risk != null ? risk * t.net_r : null;
   }
   function doneTrades(list) { return (list || trades()).filter(isDone).sort(function (a, b) { return (doneTs(a) || 0) - (doneTs(b) || 0); }); }
-  function openTrade(id) { S.sel = id; S.tf = null; show("chart"); window.scrollTo(0, 0); }
+  function openTrade(id) {                  // from another page: the chart on that trade, its row open in the table
+    var t = findSel(id);
+    S.sel = id; S.tf = null;
+    if (t) { S.xtab = xGroup(t); S.xopen = t.id; S.lq = ""; }
+    show("chart"); window.scrollTo(0, 0);
+  }
   app.addEventListener("click", function (e) {
     var el = e.target.closest("[data-open]");
+    if (el && S.tab === "chart" && el.tagName === "TR" && el.closest("#xtable")) { toggleRow(el.getAttribute("data-open")); return; }
     if (el) { openTrade(el.getAttribute("data-open")); return; }
     var c = e.target.closest("[data-cand]");
-    if (c) { S.sel = c.getAttribute("data-cand"); S.tf = null; show("chart"); window.scrollTo(0, 0); }
+    if (c) openTrade(c.getAttribute("data-cand"));
   });
 
   // ------------------------------------------------------------------ home
@@ -393,7 +399,7 @@
   // ------------------------------------------------------------------ chart tab
   // chart tab, exchange style (2026-11-15, Ali): market list | ticker bar, chart with MAs and an
   // OHLC readout, positions / orders / history tables under it, then the trade's details
-  S.xtab = "open"; S.lq = ""; S.lk = "";
+  S.xtab = "open"; S.lq = ""; S.xopen = null;
   var IND = {ma7: 1, ma25: 1, ma99: 0, vol: 1};
   try { var ind0 = JSON.parse(localStorage.getItem("ind") || "null"); if (ind0) IND = Object.assign(IND, ind0); } catch (e) {}
   var MAS = [["ma7", 7, "--warn"], ["ma25", 25, "--acc2"], ["ma99", 99, "--acc"]];
@@ -460,7 +466,9 @@
   function sortTable(tb, col, dir) {
     var body = tb.tBodies[0]; if (!body) return;
     tb._cur = [col, dir];
-    var rows = Array.prototype.slice.call(body.rows);
+    var all = Array.prototype.slice.call(body.rows);
+    var dets = all.filter(function (r) { return r.classList.contains("xdet"); });   // a trade's open details stay under it
+    var rows = all.filter(function (r) { return !r.classList.contains("xdet"); });
     rows.sort(function (a, b) {
       var x = cellVal(a.cells[col]), y = cellVal(b.cells[col]);
       if (x == null && y == null) return 0;
@@ -470,6 +478,9 @@
       return dir === "asc" ? c : -c;
     });
     rows.forEach(function (r) { body.appendChild(r); });
+    dets.forEach(function (d) {
+      rows.forEach(function (r) { if (r.getAttribute("data-open") === d.getAttribute("data-for")) body.insertBefore(d, r.nextSibling); });
+    });
     Array.prototype.forEach.call(tb.tHead.rows[0].cells, function (c, i) { if (i === col) c.setAttribute("data-dir", dir); else c.removeAttribute("data-dir"); });
   }
   function makeSortable(root) {
@@ -503,65 +514,76 @@
   function sumOf(list, f) { return list.reduce(function (s, x) { var v = f(x); return s + (v == null || isNaN(v) ? 0 : v); }, 0); }
   function RU(r, u) { return R(r) + (u == null ? "" : ' <small class="usdv">' + usd(u) + "</small>"); }
   function byCreated(a, b) { return b.created - a.created; }
+  // 2026-11-19 (Ali): the chart takes the whole page width; under it one table holds every position (all of it, no
+  // inner scroll). Clicking a row moves the chart to that trade and opens its details inside the table; a second
+  // click closes them.
+  function xGroup(t) { return t.cand ? "cand" : t.status === "pending" ? "pend" : t.open && t.filled_at ? "open" : "closed"; }
   function chartTab() {
     var open = openTrades().sort(byCreated), pend = pendingTrades();
     var closed = closedTrades().filter(function (t) { return t.filled_at; }).sort(function (a, b) { return (b.closed_at || 0) - (a.closed_at || 0); });
-    var cands = candidates();
     var f0 = findSel(S.sel);
-    S.sel = f0 ? f0.id : (open[0] || pend[0] || closed[0] || cands[0] || {}).id || null;   // #chart/BTC -> that coin's trade
-    app.innerHTML = '<div class="xlayout"><aside class="card tlist" id="tlist"><input class="search" id="lq" placeholder="جستجوی کوین…" value="' + esc(S.lq) + '">' +
-      '<div class="seg lseg" id="lk"></div><div id="litems"></div></aside>' +
-      '<div class="xmain"><section class="xview" id="tview"></section>' +
-      '<section class="xbottom"><div class="xtabs" id="xtabs"></div><div class="scroll" id="xtable"></div></section>' +
-      '<section id="tinfo"></section></div></div>';
-    document.getElementById("lq").addEventListener("input", function (e) { S.lq = e.target.value.trim().toUpperCase(); fillList(); });
-    document.getElementById("lk").addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { S.lk = b.dataset.v; fillList(); } });
-    fillList();
+    S.sel = f0 ? f0.id : (open[0] || pend[0] || closed[0] || candidates()[0] || {}).id || null;   // #chart/BTC -> that coin's trade
+    app.innerHTML = '<div class="xfull"><section class="xview" id="tview"></section>' +
+      '<section class="xbottom"><div class="xtabs" id="xtabs"></div><div class="scroll" id="xtable"></div></section></div>';
     renderBottom();
     tradeView(findSel(S.sel));
   }
-  function fillList() {
-    var el = document.getElementById("litems"); if (!el) return;
-    var open = openTrades().sort(byCreated), pend = pendingTrades();
-    var closed = closedTrades().filter(function (t) { return t.filled_at; }).sort(function (a, b) { return (b.closed_at || 0) - (a.closed_at || 0); });
-    var cands = candidates();
-    var G = [["open", "باز", open, function (t) { return RU(openR(t), pnlUsd(t)); }],
-             ["pend", "در انتظار", pend, function (t) { return '<small>' + esc(t.grade) + "</small>"; }],
-             ["cand", "کاندید", cands, function (t) { return '<small class="ltr">' + (t.score || 0).toFixed(0) + "</small>"; }],
-             ["closed", "بسته", closed.slice(0, 80), function (t) { return RU(t.net_r, pnlUsd(t)); }]];
-    document.getElementById("lk").innerHTML = [["", "همه"]].concat(G.map(function (g) { return [g[0], g[1]]; })).map(function (o) {
-      return '<button data-v="' + o[0] + '" class="' + (S.lk === o[0] ? "on" : "") + '">' + o[1] + "</button>";
-    }).join("");
-    function item(t, r) {
-      var lp = S.live[t.base];
-      return '<div class="titem ' + (t.id === S.sel ? "sel" : "") + '" data-open="' + esc(t.id) + '"><span class="c">' + esc(t.base) +
-        '<small class="ltr">' + (lp ? px(lp.price) : "") + "</small></span>" + side(t.side) +
-        ' <small>' + esc(sysShort(t.system)) + (t.cand ? "" : " · " + (t.approved ? "تأیید" : "Watch")) + '</small><span class="r">' + r + "</span></div>";
+  function toggleRow(id) {
+    var t = findSel(id); if (!t) return;
+    var was = S.xopen === id;
+    closeDetail();
+    if (S.sel !== id) {
+      S.sel = id; S.tf = null;
+      document.querySelectorAll("#xtable tr[data-open]").forEach(function (r) { r.classList.toggle("sel", r.getAttribute("data-open") === id); });
+      tradeView(t);
     }
-    el.innerHTML = G.filter(function (g) { return !S.lk || S.lk === g[0]; }).map(function (g) {
-      var list = g[2].filter(function (t) { return !S.lq || t.base.indexOf(S.lq) >= 0; });
-      if (!list.length && g[0] !== "open") return "";
-      var titles = {open: "پوزیشن‌های باز (", pend: "سفارش در انتظار (", cand: "کاندیدهای نزدیک به سیگنال", closed: "معاملات بسته ("};
-      return "<h4>" + titles[g[0]] + (g[0] === "cand" ? "" : fa(list.length) + ")") + "</h4>" +
-        (list.map(function (t) { return item(t, g[3](t)); }).join("") || '<small class="muted" style="padding:6px">—</small>');
-    }).join("");
-    decorateTips(el);
+    if (!was) { S.xopen = id; openDetail(); }
+  }
+  function closeDetail() {
+    S.xopen = null;
+    document.querySelectorAll("#xtable tr.xdet").forEach(function (r) { r.parentNode.removeChild(r); });
+    document.querySelectorAll("#xtable tr.xopen").forEach(function (r) { r.classList.remove("xopen"); });
+  }
+  function openDetail() {
+    var t = findSel(S.xopen), row = null;
+    document.querySelectorAll("#xtable tr[data-open]").forEach(function (r) { if (r.getAttribute("data-open") === S.xopen) row = r; });
+    if (!t || !row) { S.xopen = null; return; }
+    row.classList.add("xopen");
+    var d = document.createElement("tr"), p = livePrice(t);
+    d.className = "xdet"; d.setAttribute("data-for", t.id);
+    d.innerHTML = '<td colspan="' + row.cells.length + '"><div class="xdetbox"><div class="xdethead"><b>' + esc(t.base) + "</b> " + side(t.side) +
+      ' <small class="muted">' + esc(t.system) + "</small>" + '<button class="btn ghost xup" type="button">دیدن نمودار ↑</button></div>' +
+      levels(t, p) + markBox(t) + aiBox(t) + '<div class="grid g2 tools"><div>' + derivBox(t.base, t.side) + excBox(t) + "</div><div>" + calcBox(t) + "</div></div>" + detail(t) + "</div></td>";
+    row.parentNode.insertBefore(d, row.nextSibling);
+    d.querySelector(".xup").addEventListener("click", function () {
+      var v = document.getElementById("tview"); if (v) v.scrollIntoView({behavior: "smooth", block: "start"});
+    });
+    wireCalc(t); wireMarks(t); decorateTips(d);
   }
   function renderBottom() {
     var tabs = document.getElementById("xtabs"); if (!tabs) return;
-    var open = openTrades().sort(byCreated), pend = pendingTrades().sort(byCreated);
-    var closed = closedTrades().filter(function (t) { return t.filled_at; }).sort(function (a, b) { return (b.closed_at || 0) - (a.closed_at || 0); }).slice(0, 40);
+    var open = openTrades(), pend = pendingTrades(), cands = candidates();
+    var closedN = closedTrades().filter(function (t) { return t.filled_at; }).length;
     var openUsd = sumOf(open, function (t) { return floatUsd(t); });
-    tabs.innerHTML = [["open", "پوزیشن‌های باز", open.length], ["pend", "سفارش‌های در انتظار", pend.length], ["closed", "معاملات بسته‌ی اخیر", null]].map(function (b) {
-      return '<button data-x="' + b[0] + '" class="' + (S.xtab === b[0] ? "on" : "") + '">' + b[1] + (b[2] != null ? " <small>(" + fa(b[2]) + ")</small>" : "") + "</button>";
-    }).join("") + (open.length ? '<span class="xsum">سود/زیان باز: <span id="xsum">' + usd(openUsd) + "</span></span>" : "");
+    tabs.innerHTML = [["open", "پوزیشن‌های باز", open.length], ["pend", "سفارش‌های در انتظار", pend.length], ["closed", "معاملات بسته", closedN], ["cand", "کاندیدها", cands.length]].map(function (b) {
+      return '<button data-x="' + b[0] + '" class="' + (S.xtab === b[0] ? "on" : "") + '">' + b[1] + " <small>(" + fa(b[2]) + ")</small></button>";
+    }).join("") + '<input class="search xq" id="xq" placeholder="جستجوی کوین…" value="' + esc(S.lq) + '">' +
+      (open.length ? '<span class="xsum">سود/زیان باز: <span id="xsum">' + usd(openUsd) + "</span></span>" : "");
     tabs.onclick = function (e) { var b = e.target.closest("button"); if (b) { S.xtab = b.dataset.x; renderBottom(); } };
+    document.getElementById("xq").oninput = function (e) { S.lq = e.target.value.trim().toUpperCase(); fillTable(); };
+    fillTable();
+  }
+  function fillTable() {
+    function q(list) { return list.filter(function (t) { return !S.lq || t.base.indexOf(S.lq) >= 0; }); }
+    var open = q(openTrades().sort(byCreated)), pend = q(pendingTrades().sort(byCreated)), cands = q(candidates());
+    var closed = q(closedTrades().filter(function (t) { return t.filled_at; }).sort(function (a, b) { return (b.closed_at || 0) - (a.closed_at || 0); }));
     var el = document.getElementById("xtable"), rows, head, foot = "";
-    function sym(t) { return '<b>' + esc(t.base) + '</b><small class="muted">/USDT · ' + esc(sysShort(t.system)) + "</small>"; }
+    function rowOpen(t) { return '<tr class="click' + (t.id === S.sel ? " sel" : "") + '" data-open="' + esc(t.id) + '">'; }
+    function sym(t) { return '<i class="chev"></i><b>' + esc(t.base) + '</b><small class="muted">/USDT · ' + esc(sysShort(t.system)) + "</small>"; }
     if (S.xtab === "open") {
       head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "قیمت لحظه‌ای", "استاپ / TP1", "حجم", "دلار ورودی", "دلار خروجی", "سود/زیان", "سود٪", "زمان ورود"];
       rows = open.map(function (t) {
-        return '<tr class="click ' + (t.id === S.sel ? "sel" : "") + '" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) +
+        return rowOpen(t) + "<td>" + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) +
           "</td>" + levCell(t) + '<td class="num">' + px(t.entry) + '</td><td class="num xp">' + px(livePrice(t)) + '</td><td class="num"><span class="neg">' + px(t.sl_now) +
           '</span> / <span class="pos">' + px(t.tp1) + "</span></td><td>" + usd(tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac), false) + "</td>" +
           usdCell(marginUsd(t)) + usdCell(outUsd(t), "xo") + '<td class="xu">' + pnlCell(t) + "</td>" + pctCell(t, true) + tsCell(t.filled_at) + "</tr>";
@@ -572,27 +594,36 @@
       head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "قیمت لحظه‌ای", "فاصله تا ورود", "استاپ", "TP1", "ریسک / سود در TP1", "رده", "زمان سیگنال"];
       rows = pend.map(function (t) {
         var p = livePrice(t), d = p && t.entry ? (t.entry - p) / p * 100 : null;
-        return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
+        return rowOpen(t) + "<td>" + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
           '</td><td class="num xp">' + px(p) + "</td><td>" + pct(d, 2) + '</td><td class="num neg">' + px(t.sl) + '</td><td class="num pos">' + px(t.tp1) +
           "</td><td>" + (tRisk(t) != null ? usd(-tRisk(t)) + " / " + (t.tp1 && t.entry !== t.sl ? usd(tRisk(t) * Math.abs(t.tp1 - t.entry) / Math.abs(t.entry - t.sl)) : "—") : "—") +
           "</td><td>" + esc(t.grade) + "</td>" + tsCell(t.created) + "</tr>";
       });
       foot = totRow([{span: 9, v: "جمع " + fa(pend.length) + " سفارش"}, usd(-sumOf(pend, function (t) { return tRisk(t); })) + ' <small class="muted">ریسک کل اگر همه پر شوند</small>', {span: 2, v: ""}]);
+    } else if (S.xtab === "cand") {
+      head = ["نماد", "جهت", "رده", "امتیاز", "قیمت لحظه‌ای", "ورود", "فاصله تا ورود", "استاپ", "TP1", "چرا هنوز سیگنال نیست"];
+      rows = cands.map(function (t) {
+        var p = livePrice(t), d = p && t.entry ? (t.entry - p) / p * 100 : null;
+        return rowOpen(t) + "<td>" + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + esc(t.grade || "—") + '</td><td class="num">' + (t.score || 0).toFixed(1) +
+          '</td><td class="num xp">' + px(p) + '</td><td class="num">' + px(t.entry) + "</td><td>" + pct(d, 2) + '</td><td class="num neg">' + px(t.sl) +
+          '</td><td class="num pos">' + px(t.tp1) + "</td><td>" + ((t.why || []).slice(0, 3).map(function (w) { return '<span class="chip">' + esc(w) + "</span>"; }).join("") || "—") + "</td></tr>";
+      });
     } else {
       head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "خروج", "نتیجه", "دلار ورودی", "دلار خروجی", "سود/زیان", "سود٪", "مدت", "زمان بسته شدن"];
       rows = closed.map(function (t) {
         var ex = (t.events || []).filter(function (e) { return e[2] != null && e[0] !== "filled"; }).pop();
         var h = t.closed_at && t.filled_at ? (t.closed_at - t.filled_at) / 3600000 : null;
-        return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
+        return rowOpen(t) + "<td>" + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
           '</td><td class="num">' + px(ex ? ex[2] : null) + "</td><td>" + esc(t.status_fa) + "</td>" + usdCell(marginUsd(t)) + usdCell(outUsd(t)) + "<td>" + usd(pnlUsd(t)) + " " + R(t.net_r) + "</td>" + pctCell(t) +
           '<td data-v="' + (h == null ? "" : h) + '">' + (h == null ? "—" : dur(h)) + "</td>" + tsCell(t.closed_at) + "</tr>";
       });
-      foot = totRow([{span: 7, v: "جمع " + fa(closed.length) + " معامله‌ی اخیر"}, usd(sumOf(closed, function (t) { return marginUsd(t); }), false),
+      foot = totRow([{span: 7, v: "جمع " + fa(closed.length) + " معامله"}, usd(sumOf(closed, function (t) { return marginUsd(t); }), false),
         usd(sumOf(closed, function (t) { return outUsd(t); }), false), usd(sumOf(closed, pnlUsd)) + " " + R(sumOf(closed, function (t) { return t.net_r; })), "", {span: 2, v: ""}]);
     }
     el.innerHTML = rows.length ? "<table class=\"xt\"" + (S.xtab === "open" ? ' data-defsort="11:desc"' : "") + "><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody>" + foot + "</table>"
-      : '<div class="empty">' + (S.xtab === "open" ? "الان پوزیشن بازی نیست." : S.xtab === "pend" ? "سفارشی در انتظار نیست." : "هنوز معامله‌ی بسته‌ای نیست.") + "</div>";
+      : '<div class="empty">' + (S.xtab === "open" ? "الان پوزیشن بازی نیست." : S.xtab === "pend" ? "سفارشی در انتظار نیست." : S.xtab === "cand" ? "الان کاندیدی نزدیک سیگنال نیست." : "هنوز معامله‌ی بسته‌ای نیست.") + "</div>";
     decorateTips(el.parentNode);
+    if (S.xopen) openDetail();
   }
   function pnlCell(t) {
     return usd(pnlUsd(t)) + " " + R(openR(t)) + splitNote(t);
@@ -620,8 +651,8 @@
     return "";
   }
   function tradeView(t) {
-    var box = document.getElementById("tview"), info = document.getElementById("tinfo");
-    if (!t) { box.innerHTML = '<div class="empty">معامله‌ای برای نمایش نیست.</div>'; info.innerHTML = ""; return; }
+    var box = document.getElementById("tview");
+    if (!t) { box.innerHTML = '<div class="empty">معامله‌ای برای نمایش نیست.</div>'; return; }
     var p = livePrice(t);
     box.innerHTML = tickerBar(t, p) +
       '<div class="xtool"><div class="seg tfs" id="tfs"></div><div class="seg ind" id="ind">' +
@@ -630,8 +661,7 @@
       '<div class="chartbox tall" id="tv-chart"><div class="empty">در حال بارگذاری نمودار…</div></div>' +
       '<div class="legend"><span><i style="background:' + cssv("--acc") + '"></i>ورود</span><span><i style="background:' + cssv("--neg") + '"></i>استاپ</span>' +
       '<span><i style="background:' + cssv("--pos") + '"></i>تارگت‌ها</span><small>فلش‌ها: زمان سیگنال، ورود و خروج‌ها · کندل آخر با قیمت زنده جلو می‌رود</small></div>';
-    info.innerHTML = levels(t, p) + markBox(t) + aiBox(t) + '<div class="grid g2 tools"><div>' + derivBox(t.base, t.side) + excBox(t) + "</div><div>" + calcBox(t) + "</div></div>" + detail(t);
-    wireCalc(t); wireMarks(t); decorateTips(box); decorateTips(info);
+    decorateTips(box);
     document.getElementById("ind").onclick = function (e) {
       var b = e.target.closest("button"); if (!b) return;
       var k = b.dataset.i; IND[k] = IND[k] ? 0 : 1; b.classList.toggle("on", !!IND[k]);
@@ -1736,7 +1766,7 @@
           D = j; MK = D.market || {}; candleCache = {};
           notifyChanges(prev, j);
           if (S.tab !== "chart") { render(); return; }
-          status(); fillList(); renderBottom();             // the chart keeps its zoom; only a changed trade is redrawn
+          status(); renderBottom();             // the chart keeps its zoom; only a changed trade is redrawn
           var t = findSel(S.sel);
           if (t && JSON.stringify([t.status, t.sl_now, (t.events || []).length]) !== was) tradeView(t);
         });
@@ -1746,6 +1776,7 @@
     var set = {};
     openTrades().forEach(function (t) { set[t.base] = 1; });
     var sel = findSel(S.sel); if (sel && S.tab === "chart") set[sel.base] = 1;
+    if (S.tab === "chart" && S.xtab === "cand") candidates().forEach(function (t) { set[t.base] = 1; });
     if (S.tab === "chart" && S.xtab === "pend") pendingTrades().forEach(function (t) { set[t.base] = 1; });
     return Object.keys(set);
   }
@@ -1816,10 +1847,6 @@
           var e2 = document.getElementById(k[0]); if (e2) e2.innerHTML = k[1];
         });
       }
-      document.querySelectorAll(".titem").forEach(function (it) {
-        var tr = byId(it.getAttribute("data-open"));
-        if (tr && tr.open && tr.filled_at) { var r = it.querySelector(".r"); if (r) r.innerHTML = RU(openR(tr), pnlUsd(tr)); }
-      });
       document.querySelectorAll("#xtable tr[data-open]").forEach(function (row) {
         var tr = byId(row.getAttribute("data-open")); if (!tr) return;
         var xp = row.querySelector(".xp"), xu = row.querySelector(".xu");
@@ -2335,7 +2362,7 @@
       document.getElementById("mark-st").textContent = "در حال ثبت…";
       fetch("api/mark", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: t.id, taken: taken})})
         .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-        .then(function (m) { S.marks = m; S.apiOk = true; tradeView(t); })
+        .then(function (m) { S.marks = m; S.apiOk = true; if (S.xopen === t.id) { closeDetail(); S.xopen = t.id; openDetail(); } })
         .catch(function () { S.apiOk = false; document.getElementById("mark-st").textContent = "ثبت نشد: بخش ثبت روی سرور هنوز فعال نیست"; });
     });
   }

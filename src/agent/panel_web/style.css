@@ -410,6 +410,22 @@ svg.pulsechart .rx{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}svg.p
 .pverdict>b{font-size:15.5px}.pverdict p{margin:4px 0}
 .pverdict .padv{display:grid;gap:6px;margin:8px 0}.pverdict .padv>div{background:var(--card);border-radius:8px;padding:6px 10px}
 svg.pulsechart .pedge{opacity:.6;font-size:10.5px}
+/* positions page (2026-11-19): full-width chart, one full table, details open inside it */
+.xfull{display:block}
+.xfull .xview{margin-bottom:12px}
+.xfull .chartbox.tall{height:max(440px,calc(100vh - 290px))}
+.xfull .xbottom .scroll{max-height:none}
+.xtabs .xq{margin:6px 8px;width:180px;max-width:100%}
+table.xt tr.click{cursor:pointer}
+table.xt .chev{display:inline-block;width:7px;height:7px;border:solid var(--muted);border-width:0 2px 2px 0;transform:rotate(45deg);margin:0 2px 3px 8px;transition:transform .15s}
+table.xt tr.xopen .chev{transform:rotate(-135deg);margin-bottom:-1px}
+table.xt tr.xopen td{background:var(--hover);border-bottom-color:transparent}
+table.xt tr.xdet>td{padding:0;background:var(--card2);white-space:normal;text-align:start;border-bottom:2px solid var(--acc)}
+.xdetbox{padding:12px 16px 16px;animation:xdrop .18s ease-out;max-width:calc(100vw - 48px);position:sticky;inset-inline-start:0}
+.xdethead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.xdethead .xup{margin-inline-start:auto}
+@keyframes xdrop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (max-width:900px){.xfull .chartbox.tall{height:62vh;min-height:340px}.xtabs .xq{width:100%;margin:6px 0}}
 /* measurement period (2026-11-19) */
 .sctab td.scmain{background:var(--card2);font-weight:600}
 .sctab td.sc-pos{color:var(--pos)}.sctab td.sc-neg{color:var(--neg)}
