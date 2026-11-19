@@ -269,7 +269,7 @@ svg.scatter rect{opacity:.9}svg.scatter rect:hover{opacity:1}
 .nitem{border:1px solid var(--line);border-inline-start:4px solid var(--line);border-radius:10px;padding:9px 12px;margin:8px 0;background:var(--card2)}
 .nitem.lvp{border-inline-start-color:var(--pos)}.nitem.lvn{border-inline-start-color:var(--neg)}
 .nh{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.nh small{margin-inline-start:auto}
-.nt{margin:6px 0 2px;font-size:14px;line-height:1.7;direction:ltr;text-align:left}.nt a{color:var(--fg);text-decoration:none}.nt a:hover{color:var(--acc)}
+.nt{margin:6px 0 2px;font-size:14px;line-height:1.7}.nt .nen{direction:ltr;text-align:left;font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:2px}.nt a{color:var(--fg);text-decoration:none}.nt a:hover{color:var(--acc)}
 .nc{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
 .moves{display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--muted);margin-inline-start:6px}
 .mv{display:inline-flex;gap:3px;align-items:center}.mv small{color:var(--muted)}
@@ -368,3 +368,67 @@ details.calev[open]{background:rgba(127,127,127,.06)}
 details.calev>summary{cursor:pointer;line-height:1.9;font-size:13px}
 details.calev .calbtc{margin-inline-start:6px;font-size:12px}
 .calexp p,.caltab tr.calx p{margin:4px 0;line-height:1.9;font-size:13px}
+
+/* market page (2026-11-17): regime + market in one page */
+.mkverdict{border:1px solid var(--line);border-inline-start:4px solid var(--warn);border-radius:12px;padding:12px 14px;margin-bottom:12px;line-height:1.9;background:var(--card2)}
+.mkverdict.v-neg{border-inline-start-color:var(--neg)}.mkverdict.v-pos{border-inline-start-color:var(--pos)}
+.mkverdict>b{font-size:16px}.mkverdict.v-neg>b{color:var(--neg)}.mkverdict.v-pos>b{color:var(--pos)}.mkverdict.v-warn>b{color:var(--warn)}
+.mkverdict p{margin:4px 0 0}
+.mkboard td{vertical-align:top}
+.mkjump{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.mkjump button{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+.mkjump button:hover{border-color:var(--acc);color:var(--acc)}
+.mkpart{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:22px 2px 10px;scroll-margin-top:110px}
+.mkpart b{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--acc);color:#fff;font-size:14px}
+.mkpart span{font-size:17px;font-weight:700}.mkpart small{color:var(--muted)}
+@media (max-width:640px){
+  .mkboard thead{display:none}
+  .mkboard tr{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 2px;border-bottom:1px solid var(--line)}
+  .mkboard td{border:0;padding:0;white-space:normal}
+  .mkboard td:nth-child(1){grid-column:1;grid-row:1}.mkboard td:nth-child(4){grid-column:2;grid-row:1}
+  .mkboard td:nth-child(2),.mkboard td:nth-child(3),.mkboard td:nth-child(5){grid-column:1/-1}
+  .mkpart{scroll-margin-top:20px}
+}
+
+/* market pulse (2026-11-18) */
+svg.pulsechart .pspan{opacity:.10}svg.pulsechart .pspan.pos{fill:var(--pos)}svg.pulsechart .pspan.neg{fill:var(--neg)}
+svg.pulsechart .pl{fill:none;stroke:var(--fg);stroke-width:1.7;stroke-linejoin:round;stroke-linecap:round}
+svg.pulsechart .pl.p1{stroke:var(--acc2);stroke-width:1.3;opacity:.8}svg.pulsechart .pl.p4{stroke:var(--acc)}svg.pulsechart .pl.p24{stroke:var(--fg);stroke-width:2.4}
+svg.pulsechart .pth{stroke:var(--acc);stroke-width:1;stroke-dasharray:5 5;opacity:.5}
+.legend i.pli{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-inline-end:4px}
+.legend i.pli.p1{background:var(--acc2)}.legend i.pli.p4{background:var(--acc)}.legend i.pli.p24{background:var(--fg)}
+.legend i.pli.pth{background:repeating-linear-gradient(90deg,var(--acc) 0 4px,transparent 4px 7px)}
+details.pulselist{margin-top:10px}details.pulselist summary{cursor:pointer;color:var(--muted);padding:6px 0}
+@media (max-width:640px){.grid.pulsecards{grid-template-columns:1fr 1fr}}
+svg.pulsechart .parea{opacity:.22;stroke:none}svg.pulsechart .parea.pos{fill:var(--pos)}svg.pulsechart .parea.neg{fill:var(--neg)}
+svg.pulsechart .ptitle{fill:var(--fg);font-size:13px;font-weight:700}
+svg.pulsechart .pspan{opacity:.07}
+svg.pulsechart .rx{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}svg.pulsechart .rxd{fill:var(--fg);stroke:var(--card);stroke-width:2}
+.pseg{margin:14px 0 6px}
+.pverdict{border:1px solid var(--line);border-inline-start:4px solid var(--warn);border-radius:12px;padding:12px 16px;margin:12px 0;background:var(--card2);line-height:1.9}
+.pverdict.v-neg{border-inline-start-color:var(--neg)}.pverdict.v-pos{border-inline-start-color:var(--pos)}
+.pverdict>b{font-size:15.5px}.pverdict p{margin:4px 0}
+.pverdict .padv{display:grid;gap:6px;margin:8px 0}.pverdict .padv>div{background:var(--card);border-radius:8px;padding:6px 10px}
+svg.pulsechart .pedge{opacity:.6;font-size:10.5px}
+/* positions page (2026-11-19): full-width chart, one full table, details open inside it */
+.xfull{display:block}
+.xfull .xview{margin-bottom:12px}
+.xfull .chartbox.tall{height:max(440px,calc(100vh - 290px))}
+.xfull .xbottom .scroll{max-height:none}
+.xtabs .xq{margin:6px 8px;width:180px;max-width:100%}
+table.xt tr.click{cursor:pointer}
+table.xt .chev{display:inline-block;width:7px;height:7px;border:solid var(--muted);border-width:0 2px 2px 0;transform:rotate(45deg);margin:0 2px 3px 8px;transition:transform .15s}
+table.xt tr.xopen .chev{transform:rotate(-135deg);margin-bottom:-1px}
+table.xt tr.xopen td{background:var(--hover);border-bottom-color:transparent}
+table.xt tr.xdet>td{padding:0;background:var(--card2);white-space:normal;text-align:start;border-bottom:2px solid var(--acc)}
+.xdetbox{padding:12px 16px 16px;animation:xdrop .18s ease-out;max-width:calc(100vw - 48px);position:sticky;inset-inline-start:0}
+.xdethead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.xdethead .xup{margin-inline-start:auto}
+@keyframes xdrop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (max-width:900px){.xfull .chartbox.tall{height:62vh;min-height:340px}.xtabs .xq{width:100%;margin:6px 0}}
+/* measurement period (2026-11-19) */
+.sctab td.scmain{background:var(--card2);font-weight:600}
+.sctab td.sc-pos{color:var(--pos)}.sctab td.sc-neg{color:var(--neg)}
+.sctab td.sc-pos b,.sctab td.sc-neg b{color:inherit}
+.scsec .pverdict{margin-top:4px}
+.lv.lvexit{border-color:var(--warn)}.lv.lvexit .l{color:var(--warn)}

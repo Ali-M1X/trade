@@ -1,6 +1,7 @@
 import pytest
 
 from agent.signals.lifecycle import H4, new_signal, on_4h_close, on_candle, on_time
+from agent.layers.trade import size_position
 from agent.signals.manager import SignalBook
 from agent.store.repository import Repository
 
@@ -205,3 +206,21 @@ def test_runners_past_tp2_from_both_systems(cfg, tmp_path):
         SignalBook(repo, cfg).save(s, [], T0 + 10)
     r2.close()
     assert sorted(runners(c, r1)) == ["CYS", "WIF"]                # BASED is still at risk
+
+
+def test_open_risk_cap(cfg):
+    """2026-11-18 (Ali): at most a set share of the balance at risk in open trades."""
+    c = {**cfg, "lifecycle": {**cfg["lifecycle"], "max_open_risk_pct": 20}}
+    book = SignalBook(Repository(), c)
+    for i in range(4):
+        ev = Ev(f"C{i}")
+        size_position(ev.plan, 4.0, c)
+        book.create(ev, T0, {})
+    assert book.admit("NEW", 1, 70, T0, risk_pct=4.0).ok              # 16% + 4% = 20%
+    assert book.admit("NEW", 1, 70, T0, risk_pct=5.0).reason == "max_open_risk"
+    assert book.admit("NEW", 1, 70, T0).ok                            # risk unknown: no check
+    s = book.open_signals()[0]                                       # past TP1: risks nothing
+    s["payload"]["lifecycle"].update(status="tp1", sl_now=s["payload"]["lifecycle"]["entry"])
+    book.save(s, [], T0)
+    assert book.admit("NEW", 1, 70, T0, risk_pct=8.0).ok
+    assert book.open_signals()[0]["payload"]["base_risk_pct"] == cfg["trade"]["base_risk_pct"]

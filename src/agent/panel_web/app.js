@@ -5,12 +5,16 @@
   var app = document.getElementById("app");
   var S = {                                   // UI state (kept across data refreshes)
     tab: "home", sel: null, tf: null, hist: {k: "", s: "", side: "", res: "", q: "", sort: "closed", dir: "desc"},
-    cand: {s: ""}, live: {}, liveOk: false, hiddenSeries: {}
+    cand: {s: ""}, live: {}, liveOk: false, hiddenSeries: {}, pdays: 3
   };
+  try { var _pd = +localStorage.getItem("pdays"); if ([1, 3, 7].indexOf(_pd) >= 0) S.pdays = _pd; } catch (e) {}
   var charts = [];                            // charts of the current tab (removed on re-render)
   var candleCache = {};
 
   // ------------------------------------------------------------------ helpers
+  // news titles in Persian (2026-11-17, Ali); the English original stays on hover and in search
+  function faT(t) { return (D && D.tr && D.tr[t]) || t; }
+  function trT(t) { var f = faT(t); return f === t ? esc(t) : '<span title="' + esc(t) + '">' + esc(f) + "</span>"; }
   function esc(x) {
     return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) {
       return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
@@ -140,8 +144,10 @@
   }
 
   // ------------------------------------------------------------------ tabs
-  var TABS = {sum: summaryTab, home: home, reg: regimeTab, chart: chartTab, hist: histTab, perf: perf, cmp: compare, mkt: market, sys: health, news: news, cal: calendarTab, ai: aiTab, strat: strategy, how: method};
+  var TABS = {sum: summaryTab, home: home, chart: chartTab, hist: histTab, perf: perf, cmp: compare, mkt: marketTab, sys: health, news: news, cal: calendarTab, ai: aiTab, strat: strategy, how: method};
+  var ALIAS = {reg: ["mkt", "mk-now"]};          // 2026-11-17: the regime page is now part of the market page
   function show(tab, push) {
+    if (ALIAS[tab]) { S.jump = ALIAS[tab][1]; tab = ALIAS[tab][0]; }
     if (!TABS[tab]) tab = "home";
     S.tab = tab;
     document.querySelectorAll("#tabs button").forEach(function (b) { b.classList.toggle("on", b.dataset.t === tab); });
@@ -166,6 +172,14 @@
   function openTrades() { return trades().filter(function (t) { return t.open && t.filled_at; }); }
   function pendingTrades() { return trades().filter(function (t) { return t.status === "pending"; }); }
   function closedTrades() { return trades().filter(function (t) { return !t.open; }); }
+  // 2026-11-19 (Ali): a closed trade's exit (price, time, why) in the tables, the details and on its chart
+  var EXIT_FA = {sl: "استاپ", tp3: "خروج با سود", tp2: "TP2", tp1: "TP1", breakeven: "سر به سر"};
+  function exitOf(t) {
+    if (!t || t.cand || t.open || !t.filled_at) return null;
+    var ev = (t.events || []).filter(function (e) { return e[2] != null && e[0] !== "filled"; });
+    var e = ev.filter(function (x) { return x[1] === t.closed_at; }).pop() || ev.pop();
+    return e ? {price: e[2], ts: e[1] || t.closed_at, kind: e[0], why: EXIT_FA[e[0]] || t.status_fa} : null;
+  }
   function isPartial(t) { return !!(t.open && t.filled_at && t.open_frac != null && t.open_frac < 0.999); }
   function partlyClosed() { return trades().filter(isPartial); }
   // one rule for every result in the panel (2026-11-16, Ali: "the same numbers everywhere"):
@@ -188,12 +202,18 @@
     return risk != null ? risk * t.net_r : null;
   }
   function doneTrades(list) { return (list || trades()).filter(isDone).sort(function (a, b) { return (doneTs(a) || 0) - (doneTs(b) || 0); }); }
-  function openTrade(id) { S.sel = id; S.tf = null; show("chart"); window.scrollTo(0, 0); }
+  function openTrade(id) {                  // from another page: the chart on that trade, its row open in the table
+    var t = findSel(id);
+    S.sel = id; S.tf = null;
+    if (t) { S.xtab = xGroup(t); S.xopen = t.id; S.lq = ""; }
+    show("chart"); window.scrollTo(0, 0);
+  }
   app.addEventListener("click", function (e) {
     var el = e.target.closest("[data-open]");
+    if (el && S.tab === "chart" && el.tagName === "TR" && el.closest("#xtable")) { toggleRow(el.getAttribute("data-open")); return; }
     if (el) { openTrade(el.getAttribute("data-open")); return; }
     var c = e.target.closest("[data-cand]");
-    if (c) { S.sel = c.getAttribute("data-cand"); S.tf = null; show("chart"); window.scrollTo(0, 0); }
+    if (c) openTrade(c.getAttribute("data-cand"));
   });
 
   // ------------------------------------------------------------------ home
@@ -258,7 +278,7 @@
       (s.paused_until ? '<div class="warn">توقف بعد از ضررهای پشت‌سرهم تا ' + esc(jfmt(s.paused_until)) + "</div>" : "") + "</div>";
   }
   // signals the book refused (2026-11-15, Ali: how often did a good setup find no room?)
-  var SKIPR = {max_active: ["سقف پوزیشن پر بود", "warn"], correlated: ["هم‌جهت با پوزیشن هم‌بسته", "gray"],
+  var SKIPR = {max_active: ["سقف پوزیشن پر بود", "warn"], max_open_risk: ["سقف ریسک باز پر بود", "warn"], correlated: ["هم‌جهت با پوزیشن هم‌بسته", "gray"],
     loss_streak_pause: ["توقف بعد از ضررهای پشت‌سرهم", "short"], cooldown: ["تازه استاپ خورده بود", "gray"]};
   function skips(days) { var cut = Date.now() - days * 86400000; return (D.skips || []).filter(function (s) { return s.last >= cut; }); }
   function skipsSection() {
@@ -387,10 +407,15 @@
   // ------------------------------------------------------------------ chart tab
   // chart tab, exchange style (2026-11-15, Ali): market list | ticker bar, chart with MAs and an
   // OHLC readout, positions / orders / history tables under it, then the trade's details
-  S.xtab = "open"; S.lq = ""; S.lk = "";
+  S.xtab = "open"; S.lq = ""; S.xopen = null;
   var IND = {ma7: 1, ma25: 1, ma99: 0, vol: 1};
   try { var ind0 = JSON.parse(localStorage.getItem("ind") || "null"); if (ind0) IND = Object.assign(IND, ind0); } catch (e) {}
   var MAS = [["ma7", 7, "--warn"], ["ma25", 25, "--acc2"], ["ma99", 99, "--acc"]];
+  // 2026-11-18 (Ali): the dollars put into a position (its margin: size / leverage, in its own account)
+  // and the dollars that came back out (margin + P/L after costs; open trades: if closed now)
+  function marginUsd(t, all) { var z = tSize(t, all); return z == null || !t.filled_at ? null : z / (t.leverage || 1); }
+  function outUsd(t, all) { var m = marginUsd(t, all), p = pnlUsd(t, all); return m == null || p == null ? null : m + p; }
+  function usdCell(v, cls) { return '<td' + (cls ? ' class="' + cls + '"' : "") + ' data-v="' + (v == null ? "" : v.toFixed(4)) + '">' + usd(v, false) + "</td>"; }
   function pnlUsd(t, all) {                  // the whole trade in $; open positions at the live price
     if (!t || t.cand || tRisk(t, all) == null) return null;
     if (t.open) { if (!t.filled_at) return null; var r = openR(t); return r == null ? null : tRisk(t, all) * r; }
@@ -449,7 +474,9 @@
   function sortTable(tb, col, dir) {
     var body = tb.tBodies[0]; if (!body) return;
     tb._cur = [col, dir];
-    var rows = Array.prototype.slice.call(body.rows);
+    var all = Array.prototype.slice.call(body.rows);
+    var dets = all.filter(function (r) { return r.classList.contains("xdet"); });   // a trade's open details stay under it
+    var rows = all.filter(function (r) { return !r.classList.contains("xdet"); });
     rows.sort(function (a, b) {
       var x = cellVal(a.cells[col]), y = cellVal(b.cells[col]);
       if (x == null && y == null) return 0;
@@ -459,6 +486,9 @@
       return dir === "asc" ? c : -c;
     });
     rows.forEach(function (r) { body.appendChild(r); });
+    dets.forEach(function (d) {
+      rows.forEach(function (r) { if (r.getAttribute("data-open") === d.getAttribute("data-for")) body.insertBefore(d, r.nextSibling); });
+    });
     Array.prototype.forEach.call(tb.tHead.rows[0].cells, function (c, i) { if (i === col) c.setAttribute("data-dir", dir); else c.removeAttribute("data-dir"); });
   }
   function makeSortable(root) {
@@ -492,95 +522,116 @@
   function sumOf(list, f) { return list.reduce(function (s, x) { var v = f(x); return s + (v == null || isNaN(v) ? 0 : v); }, 0); }
   function RU(r, u) { return R(r) + (u == null ? "" : ' <small class="usdv">' + usd(u) + "</small>"); }
   function byCreated(a, b) { return b.created - a.created; }
+  // 2026-11-19 (Ali): the chart takes the whole page width; under it one table holds every position (all of it, no
+  // inner scroll). Clicking a row moves the chart to that trade and opens its details inside the table; a second
+  // click closes them.
+  function xGroup(t) { return t.cand ? "cand" : t.status === "pending" ? "pend" : t.open && t.filled_at ? "open" : "closed"; }
   function chartTab() {
     var open = openTrades().sort(byCreated), pend = pendingTrades();
     var closed = closedTrades().filter(function (t) { return t.filled_at; }).sort(function (a, b) { return (b.closed_at || 0) - (a.closed_at || 0); });
-    var cands = candidates();
     var f0 = findSel(S.sel);
-    S.sel = f0 ? f0.id : (open[0] || pend[0] || closed[0] || cands[0] || {}).id || null;   // #chart/BTC -> that coin's trade
-    app.innerHTML = '<div class="xlayout"><aside class="card tlist" id="tlist"><input class="search" id="lq" placeholder="جستجوی کوین…" value="' + esc(S.lq) + '">' +
-      '<div class="seg lseg" id="lk"></div><div id="litems"></div></aside>' +
-      '<div class="xmain"><section class="xview" id="tview"></section>' +
-      '<section class="xbottom"><div class="xtabs" id="xtabs"></div><div class="scroll" id="xtable"></div></section>' +
-      '<section id="tinfo"></section></div></div>';
-    document.getElementById("lq").addEventListener("input", function (e) { S.lq = e.target.value.trim().toUpperCase(); fillList(); });
-    document.getElementById("lk").addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { S.lk = b.dataset.v; fillList(); } });
-    fillList();
+    S.sel = f0 ? f0.id : (open[0] || pend[0] || closed[0] || candidates()[0] || {}).id || null;   // #chart/BTC -> that coin's trade
+    app.innerHTML = '<div class="xfull"><section class="xview" id="tview"></section>' +
+      '<section class="xbottom"><div class="xtabs" id="xtabs"></div><div class="scroll" id="xtable"></div></section></div>';
     renderBottom();
     tradeView(findSel(S.sel));
   }
-  function fillList() {
-    var el = document.getElementById("litems"); if (!el) return;
-    var open = openTrades().sort(byCreated), pend = pendingTrades();
-    var closed = closedTrades().filter(function (t) { return t.filled_at; }).sort(function (a, b) { return (b.closed_at || 0) - (a.closed_at || 0); });
-    var cands = candidates();
-    var G = [["open", "باز", open, function (t) { return RU(openR(t), pnlUsd(t)); }],
-             ["pend", "در انتظار", pend, function (t) { return '<small>' + esc(t.grade) + "</small>"; }],
-             ["cand", "کاندید", cands, function (t) { return '<small class="ltr">' + (t.score || 0).toFixed(0) + "</small>"; }],
-             ["closed", "بسته", closed.slice(0, 80), function (t) { return RU(t.net_r, pnlUsd(t)); }]];
-    document.getElementById("lk").innerHTML = [["", "همه"]].concat(G.map(function (g) { return [g[0], g[1]]; })).map(function (o) {
-      return '<button data-v="' + o[0] + '" class="' + (S.lk === o[0] ? "on" : "") + '">' + o[1] + "</button>";
-    }).join("");
-    function item(t, r) {
-      var lp = S.live[t.base];
-      return '<div class="titem ' + (t.id === S.sel ? "sel" : "") + '" data-open="' + esc(t.id) + '"><span class="c">' + esc(t.base) +
-        '<small class="ltr">' + (lp ? px(lp.price) : "") + "</small></span>" + side(t.side) +
-        ' <small>' + esc(sysShort(t.system)) + (t.cand ? "" : " · " + (t.approved ? "تأیید" : "Watch")) + '</small><span class="r">' + r + "</span></div>";
+  function toggleRow(id) {
+    var t = findSel(id); if (!t) return;
+    var was = S.xopen === id;
+    closeDetail();
+    if (S.sel !== id) {
+      S.sel = id; S.tf = null;
+      document.querySelectorAll("#xtable tr[data-open]").forEach(function (r) { r.classList.toggle("sel", r.getAttribute("data-open") === id); });
+      tradeView(t);
     }
-    el.innerHTML = G.filter(function (g) { return !S.lk || S.lk === g[0]; }).map(function (g) {
-      var list = g[2].filter(function (t) { return !S.lq || t.base.indexOf(S.lq) >= 0; });
-      if (!list.length && g[0] !== "open") return "";
-      var titles = {open: "پوزیشن‌های باز (", pend: "سفارش در انتظار (", cand: "کاندیدهای نزدیک به سیگنال", closed: "معاملات بسته ("};
-      return "<h4>" + titles[g[0]] + (g[0] === "cand" ? "" : fa(list.length) + ")") + "</h4>" +
-        (list.map(function (t) { return item(t, g[3](t)); }).join("") || '<small class="muted" style="padding:6px">—</small>');
-    }).join("");
-    decorateTips(el);
+    if (!was) { S.xopen = id; openDetail(); }
+  }
+  function closeDetail() {
+    S.xopen = null;
+    document.querySelectorAll("#xtable tr.xdet").forEach(function (r) { r.parentNode.removeChild(r); });
+    document.querySelectorAll("#xtable tr.xopen").forEach(function (r) { r.classList.remove("xopen"); });
+  }
+  function openDetail() {
+    var t = findSel(S.xopen), row = null;
+    document.querySelectorAll("#xtable tr[data-open]").forEach(function (r) { if (r.getAttribute("data-open") === S.xopen) row = r; });
+    if (!t || !row) { S.xopen = null; return; }
+    row.classList.add("xopen");
+    var d = document.createElement("tr"), p = livePrice(t);
+    d.className = "xdet"; d.setAttribute("data-for", t.id);
+    d.innerHTML = '<td colspan="' + row.cells.length + '"><div class="xdetbox"><div class="xdethead"><b>' + esc(t.base) + "</b> " + side(t.side) +
+      ' <small class="muted">' + esc(t.system) + "</small>" + '<button class="btn ghost xup" type="button">دیدن نمودار ↑</button></div>' +
+      levels(t, p) + markBox(t) + aiBox(t) + '<div class="grid g2 tools"><div>' + derivBox(t.base, t.side) + excBox(t) + "</div><div>" + calcBox(t) + "</div></div>" + detail(t) + "</div></td>";
+    row.parentNode.insertBefore(d, row.nextSibling);
+    d.querySelector(".xup").addEventListener("click", function () {
+      var v = document.getElementById("tview"); if (v) v.scrollIntoView({behavior: "smooth", block: "start"});
+    });
+    wireCalc(t); wireMarks(t); decorateTips(d);
   }
   function renderBottom() {
     var tabs = document.getElementById("xtabs"); if (!tabs) return;
-    var open = openTrades().sort(byCreated), pend = pendingTrades().sort(byCreated);
-    var closed = closedTrades().filter(function (t) { return t.filled_at; }).sort(function (a, b) { return (b.closed_at || 0) - (a.closed_at || 0); }).slice(0, 40);
+    var open = openTrades(), pend = pendingTrades(), cands = candidates();
+    var closedN = closedTrades().filter(function (t) { return t.filled_at; }).length;
     var openUsd = sumOf(open, function (t) { return floatUsd(t); });
-    tabs.innerHTML = [["open", "پوزیشن‌های باز", open.length], ["pend", "سفارش‌های در انتظار", pend.length], ["closed", "معاملات بسته‌ی اخیر", null]].map(function (b) {
-      return '<button data-x="' + b[0] + '" class="' + (S.xtab === b[0] ? "on" : "") + '">' + b[1] + (b[2] != null ? " <small>(" + fa(b[2]) + ")</small>" : "") + "</button>";
-    }).join("") + (open.length ? '<span class="xsum">سود/زیان باز: <span id="xsum">' + usd(openUsd) + "</span></span>" : "");
+    tabs.innerHTML = [["open", "پوزیشن‌های باز", open.length], ["pend", "سفارش‌های در انتظار", pend.length], ["closed", "معاملات بسته", closedN], ["cand", "کاندیدها", cands.length]].map(function (b) {
+      return '<button data-x="' + b[0] + '" class="' + (S.xtab === b[0] ? "on" : "") + '">' + b[1] + " <small>(" + fa(b[2]) + ")</small></button>";
+    }).join("") + '<input class="search xq" id="xq" placeholder="جستجوی کوین…" value="' + esc(S.lq) + '">' +
+      (open.length ? '<span class="xsum">سود/زیان باز: <span id="xsum">' + usd(openUsd) + "</span></span>" : "");
     tabs.onclick = function (e) { var b = e.target.closest("button"); if (b) { S.xtab = b.dataset.x; renderBottom(); } };
+    document.getElementById("xq").oninput = function (e) { S.lq = e.target.value.trim().toUpperCase(); fillTable(); };
+    fillTable();
+  }
+  function fillTable() {
+    function q(list) { return list.filter(function (t) { return !S.lq || t.base.indexOf(S.lq) >= 0; }); }
+    var open = q(openTrades().sort(byCreated)), pend = q(pendingTrades().sort(byCreated)), cands = q(candidates());
+    var closed = q(closedTrades().filter(function (t) { return t.filled_at; }).sort(function (a, b) { return (b.closed_at || 0) - (a.closed_at || 0); }));
     var el = document.getElementById("xtable"), rows, head, foot = "";
-    function sym(t) { return '<b>' + esc(t.base) + '</b><small class="muted">/USDT · ' + esc(sysShort(t.system)) + "</small>"; }
+    function rowOpen(t) { return '<tr class="click' + (t.id === S.sel ? " sel" : "") + '" data-open="' + esc(t.id) + '">'; }
+    function sym(t) { return '<i class="chev"></i><b>' + esc(t.base) + '</b><small class="muted">/USDT · ' + esc(sysShort(t.system)) + "</small>"; }
     if (S.xtab === "open") {
-      head = ["نماد", "جهت", "نوع", "اهرم", "حجم", "ورود", "قیمت لحظه‌ای", "سود/زیان", "سود٪", "استاپ / TP1", "زمان ورود"];
+      head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "قیمت لحظه‌ای", "استاپ / TP1", "حجم", "دلار ورودی", "دلار خروجی", "سود/زیان", "سود٪", "زمان ورود"];
       rows = open.map(function (t) {
-        return '<tr class="click ' + (t.id === S.sel ? "sel" : "") + '" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) +
-          "</td>" + levCell(t) + "<td>" + usd(tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac), false) + '</td><td class="num">' + px(t.entry) +
-          '</td><td class="num xp">' + px(livePrice(t)) + '</td><td class="xu">' + pnlCell(t) + "</td>" + pctCell(t, true) + '<td class="num"><span class="neg">' + px(t.sl_now) +
-          '</span> / <span class="pos">' + px(t.tp1) + "</span></td>" + tsCell(t.filled_at) + "</tr>";
+        return rowOpen(t) + "<td>" + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) +
+          "</td>" + levCell(t) + '<td class="num">' + px(t.entry) + '</td><td class="num xp">' + px(livePrice(t)) + '</td><td class="num"><span class="neg">' + px(t.sl_now) +
+          '</span> / <span class="pos">' + px(t.tp1) + "</span></td><td>" + usd(tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac), false) + "</td>" +
+          usdCell(marginUsd(t)) + usdCell(outUsd(t), "xo") + '<td class="xu">' + pnlCell(t) + "</td>" + pctCell(t, true) + tsCell(t.filled_at) + "</tr>";
       });
-      foot = totRow([{span: 3, v: "جمع " + fa(open.length) + " پوزیشن"}, "", usd(sumOf(open, function (t) { return tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac); }), false),
-        {span: 2, v: ""}, posTot(open), "", {span: 2, v: ""}]);
+      foot = totRow([{span: 7, v: "جمع " + fa(open.length) + " پوزیشن"}, usd(sumOf(open, function (t) { return tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac); }), false),
+        usd(sumOf(open, function (t) { return marginUsd(t); }), false), '<span id="xosum">' + usd(sumOf(open, function (t) { return outUsd(t); }), false) + "</span>", posTot(open), "", ""]);
     } else if (S.xtab === "pend") {
       head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "قیمت لحظه‌ای", "فاصله تا ورود", "استاپ", "TP1", "ریسک / سود در TP1", "رده", "زمان سیگنال"];
       rows = pend.map(function (t) {
         var p = livePrice(t), d = p && t.entry ? (t.entry - p) / p * 100 : null;
-        return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
+        return rowOpen(t) + "<td>" + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
           '</td><td class="num xp">' + px(p) + "</td><td>" + pct(d, 2) + '</td><td class="num neg">' + px(t.sl) + '</td><td class="num pos">' + px(t.tp1) +
           "</td><td>" + (tRisk(t) != null ? usd(-tRisk(t)) + " / " + (t.tp1 && t.entry !== t.sl ? usd(tRisk(t) * Math.abs(t.tp1 - t.entry) / Math.abs(t.entry - t.sl)) : "—") : "—") +
           "</td><td>" + esc(t.grade) + "</td>" + tsCell(t.created) + "</tr>";
       });
       foot = totRow([{span: 9, v: "جمع " + fa(pend.length) + " سفارش"}, usd(-sumOf(pend, function (t) { return tRisk(t); })) + ' <small class="muted">ریسک کل اگر همه پر شوند</small>', {span: 2, v: ""}]);
+    } else if (S.xtab === "cand") {
+      head = ["نماد", "جهت", "رده", "امتیاز", "قیمت لحظه‌ای", "ورود", "فاصله تا ورود", "استاپ", "TP1", "چرا هنوز سیگنال نیست"];
+      rows = cands.map(function (t) {
+        var p = livePrice(t), d = p && t.entry ? (t.entry - p) / p * 100 : null;
+        return rowOpen(t) + "<td>" + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + esc(t.grade || "—") + '</td><td class="num">' + (t.score || 0).toFixed(1) +
+          '</td><td class="num xp">' + px(p) + '</td><td class="num">' + px(t.entry) + "</td><td>" + pct(d, 2) + '</td><td class="num neg">' + px(t.sl) +
+          '</td><td class="num pos">' + px(t.tp1) + "</td><td>" + ((t.why || []).slice(0, 3).map(function (w) { return '<span class="chip">' + esc(w) + "</span>"; }).join("") || "—") + "</td></tr>";
+      });
     } else {
-      head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "خروج", "نتیجه", "سود/زیان", "سود٪", "مدت", "زمان بسته شدن"];
+      head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "خروج", "نتیجه", "دلار ورودی", "دلار خروجی", "سود/زیان", "سود٪", "مدت", "زمان بسته شدن"];
       rows = closed.map(function (t) {
-        var ex = (t.events || []).filter(function (e) { return e[2] != null && e[0] !== "filled"; }).pop();
+        var ex = exitOf(t);
         var h = t.closed_at && t.filled_at ? (t.closed_at - t.filled_at) / 3600000 : null;
-        return '<tr class="click" data-open="' + esc(t.id) + '"><td>' + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
-          '</td><td class="num">' + px(ex ? ex[2] : null) + "</td><td>" + esc(t.status_fa) + "</td><td>" + usd(pnlUsd(t)) + " " + R(t.net_r) + "</td>" + pctCell(t) +
+        return rowOpen(t) + "<td>" + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
+          '</td><td class="num">' + px(ex ? ex.price : null) + "</td><td>" + esc(t.status_fa) + "</td>" + usdCell(marginUsd(t)) + usdCell(outUsd(t)) + "<td>" + usd(pnlUsd(t)) + " " + R(t.net_r) + "</td>" + pctCell(t) +
           '<td data-v="' + (h == null ? "" : h) + '">' + (h == null ? "—" : dur(h)) + "</td>" + tsCell(t.closed_at) + "</tr>";
       });
-      foot = totRow([{span: 7, v: "جمع " + fa(closed.length) + " معامله‌ی اخیر"}, usd(sumOf(closed, pnlUsd)) + " " + R(sumOf(closed, function (t) { return t.net_r; })), "", {span: 2, v: ""}]);
+      foot = totRow([{span: 7, v: "جمع " + fa(closed.length) + " معامله"}, usd(sumOf(closed, function (t) { return marginUsd(t); }), false),
+        usd(sumOf(closed, function (t) { return outUsd(t); }), false), usd(sumOf(closed, pnlUsd)) + " " + R(sumOf(closed, function (t) { return t.net_r; })), "", {span: 2, v: ""}]);
     }
-    el.innerHTML = rows.length ? "<table class=\"xt\"" + (S.xtab === "open" ? ' data-defsort="8:desc"' : "") + "><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody>" + foot + "</table>"
-      : '<div class="empty">' + (S.xtab === "open" ? "الان پوزیشن بازی نیست." : S.xtab === "pend" ? "سفارشی در انتظار نیست." : "هنوز معامله‌ی بسته‌ای نیست.") + "</div>";
+    el.innerHTML = rows.length ? "<table class=\"xt\"" + (S.xtab === "open" ? ' data-defsort="11:desc"' : "") + "><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody>" + foot + "</table>"
+      : '<div class="empty">' + (S.xtab === "open" ? "الان پوزیشن بازی نیست." : S.xtab === "pend" ? "سفارشی در انتظار نیست." : S.xtab === "cand" ? "الان کاندیدی نزدیک سیگنال نیست." : "هنوز معامله‌ی بسته‌ای نیست.") + "</div>";
     decorateTips(el.parentNode);
+    if (S.xopen) openDetail();
   }
   function pnlCell(t) {
     return usd(pnlUsd(t)) + " " + R(openR(t)) + splitNote(t);
@@ -608,8 +659,8 @@
     return "";
   }
   function tradeView(t) {
-    var box = document.getElementById("tview"), info = document.getElementById("tinfo");
-    if (!t) { box.innerHTML = '<div class="empty">معامله‌ای برای نمایش نیست.</div>'; info.innerHTML = ""; return; }
+    var box = document.getElementById("tview");
+    if (!t) { box.innerHTML = '<div class="empty">معامله‌ای برای نمایش نیست.</div>'; return; }
     var p = livePrice(t);
     box.innerHTML = tickerBar(t, p) +
       '<div class="xtool"><div class="seg tfs" id="tfs"></div><div class="seg ind" id="ind">' +
@@ -617,9 +668,8 @@
       '<button data-i="vol" class="' + (IND.vol ? "on" : "") + '">حجم</button></div><span class="ohlc ltr" id="ohlc"></span></div>' +
       '<div class="chartbox tall" id="tv-chart"><div class="empty">در حال بارگذاری نمودار…</div></div>' +
       '<div class="legend"><span><i style="background:' + cssv("--acc") + '"></i>ورود</span><span><i style="background:' + cssv("--neg") + '"></i>استاپ</span>' +
-      '<span><i style="background:' + cssv("--pos") + '"></i>تارگت‌ها</span><small>فلش‌ها: زمان سیگنال، ورود و خروج‌ها · کندل آخر با قیمت زنده جلو می‌رود</small></div>';
-    info.innerHTML = levels(t, p) + markBox(t) + aiBox(t) + '<div class="grid g2 tools"><div>' + derivBox(t.base, t.side) + excBox(t) + "</div><div>" + calcBox(t) + "</div></div>" + detail(t);
-    wireCalc(t); wireMarks(t); decorateTips(box); decorateTips(info);
+      '<span><i style="background:' + cssv("--pos") + '"></i>تارگت‌ها</span>' + (exitOf(t) ? '<span><i style="background:' + cssv("--warn") + '"></i>خروج</span>' : "") + '<small>فلش‌ها: زمان سیگنال، ورود و خروج‌ها · کندل آخر با قیمت زنده جلو می‌رود</small></div>';
+    decorateTips(box);
     document.getElementById("ind").onclick = function (e) {
       var b = e.target.closest("button"); if (!b) return;
       var k = b.dataset.i; IND[k] = IND[k] ? 0 : 1; b.classList.toggle("on", !!IND[k]);
@@ -694,8 +744,41 @@
     var mas = MAS.map(function (m) {
       return c.addLineSeries({color: cssv(m[2]), lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false});
     });
+    // the marks follow the candles on screen: the exchange's fresh candles can reach past the stored ones (2026-11-19)
+    function barOf(rs, ms) {
+      if (!rs.length || ms == null) return null;
+      var st = TFSEC[tf] || 3600, s = Math.floor(tsec(ms) / st) * st;
+      return s >= rs[0][0] && s <= rs[rs.length - 1][0] + st ? Math.min(s, rs[rs.length - 1][0]) : null;
+    }
+    function setMarks(rs) {
+      var long = t.side > 0, marks = [];
+      function mark(ms, text, color, pos, shape) { var s = barOf(rs, ms); if (s != null) marks.push({time: s, position: pos, color: color, shape: shape, text: text}); }
+      if (t.cand) mark(t.created || D.now, "کاندید", cssv("--warn"), long ? "belowBar" : "aboveBar", long ? "arrowUp" : "arrowDown");
+      else {
+        mark(t.created, "سیگنال", cssv("--muted"), long ? "belowBar" : "aboveBar", "circle");
+        if (t.filled_at) mark(t.filled_at, "ورود " + px(t.entry), cssv("--acc"), long ? "belowBar" : "aboveBar", long ? "arrowUp" : "arrowDown");
+        var EV = {tp1: ["TP1", up], tp2: ["TP2", up], tp3: ["خروج با سود", up], sl: ["استاپ", dn], breakeven: ["سر به سر", cssv("--muted")],
+          expired: ["منقضی", cssv("--muted")], cancelled: ["لغو", cssv("--muted")]};
+        (t.events || []).forEach(function (e) {
+          var m = EV[e[0]]; if (!m) return;
+          if (xo && e[1] === xo.ts && e[0] === xo.kind) return;          // the exit gets its own mark below
+          mark(e[1], m[0], m[1], long ? "aboveBar" : "belowBar", long ? "arrowDown" : "arrowUp");
+        });
+        if (xo) mark(xo.ts, (xo.why.indexOf("خروج") === 0 ? xo.why : "خروج · " + xo.why) + " " + px(xo.price), cssv("--warn"), long ? "aboveBar" : "belowBar", long ? "arrowDown" : "arrowUp");
+      }
+      marks.sort(function (a, b) { return a.time - b.time; });
+      cs.setMarkers(marks);
+      if (current && current.series === cs && current.refit) current.refit(rs);
+    }
     function apply(rs) {
-      cs.setData(rs.map(function (r) { return {time: r[0], open: r[1], high: r[2], low: r[3], close: r[4]}; }));
+      var xb = xo ? barOf(rs, xo.ts) : null, eb = t.filled_at ? barOf(rs, t.filled_at) : null;
+      cs.setData(rs.map(function (r) {
+        var b = {time: r[0], open: r[1], high: r[2], low: r[3], close: r[4]};
+        var hc = r[0] === xb ? cssv("--warn") : r[0] === eb ? cssv("--acc") : null;   // the entry and exit candles stand out
+        if (hc) { b.color = hc; b.borderColor = hc; b.wickColor = hc; }
+        return b;
+      }));
+      setMarks(rs);
       vol.setData(rs.map(function (r) { return {time: r[0], value: r[5] || 0, color: r[4] >= r[1] ? hexA(up, 0.35) : hexA(dn, 0.35)}; }));
       mas.forEach(function (s, i) { s.setData(sma(rs, MAS[i][1])); });
       var lb = rs[rs.length - 1];
@@ -719,8 +802,10 @@
     if (t.sl_now != null && Math.abs(t.sl_now - t.sl) > 1e-12) line(t.sl_now, dn, "استاپ الان", 0);
     line(t.tp1, up, "TP1", 2);
     line(t.tp2, up, "TP2", 2);
+    var xo = exitOf(t);
+    if (xo) line(xo.price, cssv("--warn"), "خروج", 0);
     // keep the entry, the current stop and TP1 on screen, even when price has moved far away
-    var keep = [t.entry, t.sl_now != null ? t.sl_now : t.sl, t.tp1].filter(function (v) { return v != null && isFinite(v) && v > 0; });
+    var keep = [t.entry, t.sl_now != null ? t.sl_now : t.sl, t.tp1, xo ? xo.price : null].filter(function (v) { return v != null && isFinite(v) && v > 0; });
     if (keep.length) cs.applyOptions({autoscaleInfoProvider: function (orig) {
       var r = orig(); if (!r || !r.priceRange) return r;
       return {priceRange: {minValue: Math.min.apply(null, keep.concat([r.priceRange.minValue])),
@@ -731,30 +816,17 @@
       last: {time: lb0[0], open: lb0[1], high: lb0[2], low: lb0[3], close: lb0[4]}};
     apply(rows);
     showInd();
-    var step = TFSEC[tf] || 3600, first = rows[0][0], last = lb0[0];
-    function snap(ms) { var s = Math.floor(tsec(ms) / step) * step; return s >= first && s <= last + step ? Math.min(s, last) : null; }
-    var long = t.side > 0, marks = [];
-    function mark(ms, text, color, pos, shape) { var s = snap(ms); if (s != null) marks.push({time: s, position: pos, color: color, shape: shape, text: text}); }
-    if (t.cand) mark(t.created || D.now, "کاندید", cssv("--warn"), long ? "belowBar" : "aboveBar", long ? "arrowUp" : "arrowDown");
-    else {
-      mark(t.created, "سیگنال", cssv("--muted"), long ? "belowBar" : "aboveBar", "circle");
-      if (t.filled_at) mark(t.filled_at, "ورود", cssv("--acc"), long ? "belowBar" : "aboveBar", long ? "arrowUp" : "arrowDown");
-      var EV = {tp1: ["TP1", up], tp2: ["TP2", up], tp3: ["خروج با سود", up], sl: ["استاپ", dn], breakeven: ["سر به سر", cssv("--muted")],
-        expired: ["منقضی", cssv("--muted")], cancelled: ["لغو", cssv("--muted")]};
-      (t.events || []).forEach(function (e) {
-        var m = EV[e[0]]; if (!m) return;
-        mark(e[1], m[0], m[1], long ? "aboveBar" : "belowBar", long ? "arrowDown" : "arrowUp");
-      });
+    var fitted = false;
+    function fit(rs) {                       // show the trade: from a little before the signal to its end (or now)
+      var st = TFSEC[tf] || 3600, first = rs[0][0], last = rs[rs.length - 1][0];
+      var from = t.created ? barOf(rs, t.created) : null, to = t.closed_at ? barOf(rs, t.closed_at) : last;
+      if (from != null) c.timeScale().setVisibleRange({from: Math.max(first, from - st * 40), to: Math.min(last, (to || last) + st * 25)});
+      else c.timeScale().fitContent();
+      fitted = !t.closed_at || to != null;
     }
-    marks.sort(function (a, b) { return a.time - b.time; });
-    cs.setMarkers(marks);
+    current.refit = function (rs) { if (!fitted) fit(rs); };
     c.subscribeCrosshairMove(function (p) { ohlc(p && p.time && p.seriesData ? p.seriesData.get(cs) : null); });
-    // show the trade: from a little before the signal to its end (or now)
-    var from = t.created ? snap(t.created) : null, to = t.closed_at ? snap(t.closed_at) : last;
-    if (from != null) {
-      var pad = step * 40;
-      c.timeScale().setVisibleRange({from: Math.max(first, from - pad), to: Math.min(last, (to || last) + step * 25)});
-    } else c.timeScale().fitContent();
+    fit(rows);
   }
   function candidates() {
     var out = [];
@@ -808,7 +880,11 @@
         usd(t.open ? (risk != null && r != null ? risk * r : null) : tPnl(t)) + "</span></div>" +
         '<div class="lv"><span class="l">درصد ریسک / فاصله‌ی استاپ</span><span class="v">' + (t.risk_pct || 0).toFixed(2) + "% / " + (t.sl_pct || 0).toFixed(2) + "%</span></div>";
     }
-    return '<div class="levels">' + lv("قیمت الان", p) + lv("ورود", t.entry, 1) + lv(t.open ? "استاپ الان" : "استاپ", t.open ? t.sl_now : t.sl, 1, t.open) +
+    var xo = exitOf(t), xd = xo && t.entry ? (xo.price - t.entry) / t.entry * 100 : null;
+    var exit = xo ? '<div class="lv lvexit"><span class="l">خروج · ' + esc(xo.why) + '</span><span class="v">' + px(xo.price) + "</span>" +
+      (xd != null ? '<span class="d ' + cls(xd * (t.side || 1)) + '">' + (xd > 0 ? "+" : "") + xd.toFixed(2) + "% از ورود</span>" : "") +
+      '<span class="d">' + esc(jfmt(xo.ts, "dt")) + "</span></div>" : "";
+    return '<div class="levels">' + (xo ? exit : lv("قیمت الان", p)) + lv("ورود", t.entry, 1) + lv(t.open ? "استاپ الان" : "استاپ", t.open ? t.sl_now : t.sl, 1, t.open) +
       lv("TP1", t.tp1, 1, t.open) + lv("TP2", t.tp2, 1, t.open) + money + "</div>";
   }
   var SEC = {phase: "فاز", dow: "ساختار داو", levels: "سطوح", volume: "حجم", candles: "کندل", cycles: "سیکل", patterns: "الگو و روند", confirmation: "تأیید ورود"};
@@ -855,7 +931,7 @@
     if (plan.support) info.push(["سطح", px(plan.support) + " · " + (plan.support_kind || "") + " " + (plan.support_tf || "") + (plan.support_touches ? " · " + plan.support_touches + " برخورد" : "")]);
     if (plan.tp1_r) info.push(["R تارگت‌ها", plan.tp1_r.toFixed(1) + "R / " + (plan.tp2_r || 0).toFixed(1) + "R"]);
     if (ev.funding_pct != null) info.push(["فاندینگ", ev.funding_pct + "%"]);
-    if (ev.news) info.push(["اخبار", (ev.news.points > 0 ? "+" : "") + ev.news.points + " امتیاز · " + (ev.news.top || []).map(function (x) { return x[0]; }).join(" | ")]);
+    if (ev.news) info.push(["اخبار", (ev.news.points > 0 ? "+" : "") + ev.news.points + " امتیاز · " + (ev.news.top || []).map(function (x) { return faT(x[0]); }).join(" | ")]);
     if (t.leverage) info.push(["اهرم پیشنهادی", t.leverage + "x"]);
     var conf = (ev.confirmations || []).concat(ev.labels || []);
     var right = (ev.sections ? "<h3>امتیاز بخش‌ها</h3>" + sections(ev.sections) : "") +
@@ -892,15 +968,15 @@
   }
   function uniqList(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }).sort(); }
   var HCOLS = [["created", "سیگنال"], ["closed", "بسته شدن"], ["kind", "نوع"], ["system", "سیستم"], ["base", "کوین"], ["side", "جهت"], ["lev", "اهرم"],
-    ["score", "رده / امتیاز"], ["status", "نتیجه"], ["hold", "مدت"], ["gross", "R خام"], ["net", "R خالص"], ["pct", "سود٪"], ["own", "سود/زیان"], ["bal", "موجودی بعد"]];
+    ["score", "رده / امتیاز"], ["status", "نتیجه"], ["hold", "مدت"], ["in", "دلار ورودی"], ["out", "دلار خروجی"], ["own", "سود/زیان"], ["pct", "سود٪"], ["net", "R خالص"]];
   // history rows show the banked result, also for partly closed trades (net_r so far)
   function hpct(t) { return t.filled_at && t.sl_pct && t.net_r != null ? t.net_r * t.sl_pct * (t.leverage || 1) : null; }
   function hval(t, k) {
     var hp = hpct(t);
     return {created: t.created, closed: t.closed_at || t.created, kind: t.approved ? 1 : 0, system: t.system, base: t.base, side: t.side, lev: t.leverage || 0, pct: hp == null ? -1e9 : hp,
       score: t.score, status: t.status, hold: t.closed_at && t.filled_at ? t.closed_at - t.filled_at : -1,
-      gross: t.filled_at ? t.gross_r : -99, net: t.filled_at ? t.net_r : -99,
-      own: doneUsd(t) == null ? -1e9 : doneUsd(t), bal: t.own_balance_after || 0}[k];
+      in: marginUsd(t) == null ? -1e9 : marginUsd(t), net: t.filled_at ? t.net_r : -99,
+      own: doneUsd(t) == null ? -1e9 : doneUsd(t), out: outUsd(t) == null ? -1e9 : outUsd(t)}[k];
   }
   function histTable() {
     var f = S.hist;
@@ -941,14 +1017,15 @@
         (part ? '<span class="badge watch">هنوز ' + fa(left) + "٪ باز</span>" : esc(jfmt(t.closed_at))) + "</td><td>" + kind(t) +
         "</td><td>" + esc(sysShort(t.system)) + "</td><td><b>" + esc(t.base) + "</b></td><td>" + side(t.side) + "</td>" + levCell(t) + "<td>" + esc(t.grade) +
         ' <small class="ltr">' + (t.score || 0).toFixed(0) + "</small></td><td>" + (part ? "بخشی بسته · " : "") + esc(t.status_fa) + "</td><td>" + hold + "</td><td>" +
-        R(t.filled_at ? t.gross_r : null) + "</td><td>" + R(t.filled_at ? t.net_r : null) + "</td><td>" + (hpct(t) == null ? "—" : pct(hpct(t), 1)) + "</td><td>" +
+        usd(marginUsd(t), false) + "</td><td>" +
+        usd(outUsd(t), false) + (part && outUsd(t) != null ? '<br><small class="muted">اگر باقی‌مانده الان بسته شود</small>' : "") + "</td><td>" +
         usd(doneUsd(t)) + (part && t.filled_at && floatUsd(t) != null ? '<br><small class="muted">+ باز ' + usd(floatUsd(t)) + " = " + usd(pnlUsd(t)) + "</small>" : "") + "</td><td>" +
-        (part ? '<small class="muted">سود قطعی تا الان</small>' : usd(t.own_balance_after, false)) + "</td></tr>";
+        (hpct(t) == null ? "—" : pct(hpct(t), 1)) + "</td><td>" + R(t.filled_at ? t.net_r : null) + "</td></tr>";
     }).join("");
     var el = document.getElementById("htab");
     var fr = rows.filter(function (t) { return t.filled_at; });
-    var foot = totRow([{span: 10, v: "جمع " + fa(rows.length) + " معامله"}, R(sumOf(fr, function (t) { return t.gross_r; })), R(sumOf(fr, function (t) { return t.net_r; })),
-      "", usd(sumP), ""]);
+    var foot = totRow([{span: 10, v: "جمع " + fa(rows.length) + " معامله"}, usd(sumOf(fr, function (t) { return marginUsd(t); }), false),
+      usd(sumOf(fr, function (t) { return outUsd(t); }), false), usd(sumP), "", R(sumOf(fr, function (t) { return t.net_r; }))]);
     el.innerHTML = "<table><thead>" + head + "</thead><tbody>" + body + "</tbody>" + foot + "</table>";
     el.querySelectorAll("th.sort").forEach(function (th) {
       th.addEventListener("click", function () {
@@ -1147,7 +1224,7 @@
     var NV = D.news_view;
     if (!NV) {
       var n0 = D.news || [];
-      app.innerHTML = "<section><h2>هشدارهای خبری</h2>" + (n0.length ? n0.map(function (x) { return "<div>" + esc(x.title) + "</div>"; }).join("") : '<div class="empty">—</div>') + "</section>";
+      app.innerHTML = "<section><h2>هشدارهای خبری</h2>" + (n0.length ? n0.map(function (x) { return "<div>" + trT(x.title) + "</div>"; }).join("") : '<div class="empty">—</div>') + "</section>";
       return;
     }
     var f = S.news, items = NV.items || [];
@@ -1158,7 +1235,7 @@
       if (f.st && x.stars < Number(f.st)) return false;
       if (f.src && x.kind !== f.src) return false;
       if (f.coin && !(x.coins || []).length) return false;
-      if (f.q && x.title.toUpperCase().indexOf(f.q) < 0 && (x.coins || []).join(" ").indexOf(f.q) < 0) return false;
+      if (f.q && x.title.toUpperCase().indexOf(f.q) < 0 && faT(x.title).indexOf(f.q) < 0 && (x.coins || []).join(" ").indexOf(f.q) < 0) return false;
       return true;
     });
     var day = Date.now() - 86400000;
@@ -1172,7 +1249,8 @@
       return '<div class="seg" data-g="' + g + '">' + opts.map(function (o) { return '<button data-v="' + o[0] + '" class="' + (String(f[g]) === o[0] ? "on" : "") + '">' + o[1] + "</button>"; }).join("") + "</div>";
     }
     var rows = list.slice(0, f.n).map(function (x) {
-      var title = x.url ? '<a href="' + esc(x.url) + '" target="_blank" rel="noopener noreferrer">' + esc(x.title) + "</a>" : esc(x.title);
+      var tfa = faT(x.title), title = x.url ? '<a href="' + esc(x.url) + '" target="_blank" rel="noopener noreferrer">' + esc(tfa) + "</a>" : esc(tfa);
+      if (tfa !== x.title) title += '<div class="nen">' + esc(x.title) + "</div>";
       var c0 = (x.coins || [])[0];
       return '<div class="nitem lv' + (x.level > 0 ? "p" : x.level < 0 ? "n" : "0") + '"><div class="nh">' + stars(x.stars) + lvBadge(x.level) +
         (x.rule_fa ? '<span class="chip">' + esc(x.rule_fa) + "</span>" : "") + (x.alerted ? '<span class="badge acc">ارسال‌شده به تلگرام</span>' : "") +
@@ -1280,7 +1358,349 @@
     if (m.btc_weak && dir > 0) lines.push('<span class="warn">BTC ضعیف است؛ لانگ آلت‌ها امتیاز ۸۰ به بالا لازم دارند.</span>');
     return '<div class="take">' + lines.map(function (x) { return "<p>" + x + "</p>"; }).join("") + "</div>";
   }
-  function market() {
+  // ------------------------------------------------------------------ market (2026-11-17, Ali: «رژیم بازار» and «بازار» in one page,
+  // nothing dropped, laid out so the pieces help one decision). Top: every market reading in one table with its
+  // time frame and its vote, and what they say together; then where the market is, the last days, mood and
+  // events, the setups closest to a signal, and how our trades did in each regime.
+  // market pulse (2026-11-18, Ali): the large-coin basket over 1 h / 4 h / 24 h with its history, the
+  // alarms, and what two rules would have done. Hypothetical only: no trade is changed by it.
+  function pulseActual(t) {                   // [R, $] of a trade so far, as every other table shows it
+    var r = t.open ? openR(t) : t.net_r, risk = tRisk(t);
+    if (r == null) return [null, null];
+    return [r, !t.open && tPnl(t) != null ? tPnl(t) : risk == null ? null : risk * r];
+  }
+  function pulseRows() {
+    var out = [];
+    trades().forEach(function (t) {
+      var p = t.pulse; if (!p || !t.filled_at) return;
+      var a = pulseActual(t), risk = tRisk(t);
+      if (p.entry && p.entry[2] && a[1] != null)
+        out.push({t: t, rule: "half", at: t.filled_at, h1: p.entry[0], h4: p.entry[1], r: a[0], usd: a[1], wr: a[0] / 2, wusd: a[1] / 2});
+      if (p.alarm && a[1] != null && risk != null)
+        out.push({t: t, rule: "exit", at: p.alarm.t, h1: p.alarm.h1, h4: p.alarm.h4, r: a[0], usd: a[1], wr: p.alarm.r, wusd: p.alarm.r * risk, px: p.alarm.price});
+    });
+    return out.sort(function (a, b) { return b.at - a.at; });
+  }
+  var PULSE_RULE = {half: "نصف ریسک در ورود", exit: "بستن با هشدار"};
+  // 2026-11-18 (Ali): one panel per window (each on its own scale, so the lines don't sit on top of
+  // each other), a shared cross-hair with the three numbers, and 1 / 3 / 7 day views
+  var PULSE_WIN = [[3, "۲۴ ساعت", "h24_pct"], [2, "۴ ساعت", "h4_pct"], [1, "۱ ساعت", "h1_pct"]];
+  function pulseChart(pl) {
+    var days = S.pdays || 3, all = pl.series || [];
+    var s = all.filter(function (x) { return x[0] >= all[all.length - 1][0] - days * 86400000; });
+    if (s.length < 2) return '<div class="empty">هنوز داده‌ی کافی برای نمودار نیست.</div>';
+    var W = Math.max(320, Math.min(960, (app.clientWidth || 960) - 44)), L = 10, Rr = 70, PH = W < 600 ? 80 : 92, GAP = 30, T0 = 8, XB = 28, Hh = T0 + 3 * (PH + GAP) + XB;   // drawn at the page's own width: text keeps its size on phones
+    var x0 = s[0][0], x1 = s[s.length - 1][0];
+    function X(t) { return L + (t - x0) / Math.max(1, x1 - x0) * (W - L - Rr); }
+    function f1(v) { return v.toFixed(1); }
+    var g = "<defs>", panels = [];
+    PULSE_WIN.forEach(function (w, k) {
+      var thr = pl.params[w[2]] || 0, top = T0 + GAP + k * (PH + GAP), bot = top + PH;
+      var m = Math.max(thr * 1.5, Math.max.apply(null, s.map(function (x) { return Math.abs(x[w[0]]); })) * 1.08);
+      function Y(v) { return top + (m - v) / (2 * m) * PH; }
+      panels.push({i: w[0], name: w[1], thr: thr, top: top, bot: bot, Y: Y, m: m});
+      g += '<clipPath id="pcu' + k + '"><rect x="0" y="' + top + '" width="' + W + '" height="' + f1(Y(0) - top) + '"/></clipPath>' +
+        '<clipPath id="pcd' + k + '"><rect x="0" y="' + f1(Y(0)) + '" width="' + W + '" height="' + f1(bot - Y(0)) + '"/></clipPath>';
+    });
+    g += "</defs>";
+    // alarm stretches, across the three panels
+    (pl.spans || []).forEach(function (sp) {
+      if (sp.to < x0) return;
+      var a = Math.max(X(sp.from), L), b = Math.max(Math.min(X(sp.to + 300000), W - Rr), a + 2);
+      g += '<rect x="' + f1(a) + '" y="' + (T0 + GAP - 4) + '" width="' + f1(b - a) + '" height="' + (3 * (PH + GAP) - GAP + 8) + '" class="pspan ' + (sp.dir > 0 ? "pos" : "neg") + '"/>';
+    });
+    // days
+    for (var t = Math.ceil((x0 + 12600000) / 86400000) * 86400000 - 12600000; t <= x1; t += 86400000) {
+      g += '<line x1="' + f1(X(t)) + '" x2="' + f1(X(t)) + '" y1="' + (T0 + GAP) + '" y2="' + (Hh - XB) + '" class="vl"/>' +
+        '<text x="' + f1(X(t)) + '" y="' + (Hh - 8) + '" class="ax" text-anchor="middle">' + esc(jfmt(t, "date")) + "</text>";
+    }
+    if (days === 1) for (var h = Math.ceil(x0 / 21600000) * 21600000; h <= x1; h += 21600000)
+      g += '<text x="' + f1(X(h)) + '" y="' + (Hh - 8) + '" class="ax" text-anchor="middle">' + esc(jfmt(h, "time")) + "</text>";
+    panels.forEach(function (p, k) {
+      var lv = s[s.length - 1][p.i], ly = Math.max(p.top + 9, Math.min(p.bot - 9, p.Y(lv)));
+      g += '<text x="' + (W - Rr) + '" y="' + (p.top - 9) + '" class="ptitle" text-anchor="end" direction="rtl">' + p.name + "</text>";
+      g += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + f1(p.Y(0)) + '" y2="' + f1(p.Y(0)) + '" class="zl"/>';
+      [p.thr, -p.thr].forEach(function (v) {
+        g += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + f1(p.Y(v)) + '" y2="' + f1(p.Y(v)) + '" class="pth"/>' +
+          (Math.abs(p.Y(v) - ly) < 18 ? "" : '<text x="' + (W - Rr + 8) + '" y="' + f1(p.Y(v) + 4) + '" class="ax">' + (v > 0 ? "+" : "") + v + "%</text>");
+      });
+      if (p.m > p.thr * 2) [p.m, -p.m].forEach(function (v) {     // the panel's own scale, at its edges
+        var y = p.Y(v) + (v > 0 ? 9 : -2);
+        if (Math.abs(y - ly) > 16) g += '<text x="' + (W - Rr + 8) + '" y="' + f1(y) + '" class="ax pedge">' + (v > 0 ? "+" : "−") + Math.abs(v).toFixed(1) + "%</text>";
+      });
+      var line = s.map(function (x, j) { return (j ? "L" : "M") + f1(X(x[0])) + " " + f1(p.Y(x[p.i])); }).join(" ");
+      var area = line + " L" + f1(X(x1)) + " " + f1(p.Y(0)) + " L" + f1(X(x0)) + " " + f1(p.Y(0)) + " Z";
+      g += '<path d="' + area + '" class="parea pos" clip-path="url(#pcu' + k + ')"/><path d="' + area + '" class="parea neg" clip-path="url(#pcd' + k + ')"/>' +
+        '<path d="' + line + '" class="pl"/>';
+      g += '<rect x="' + (W - Rr + 4) + '" y="' + f1(ly - 10) + '" width="' + (Rr - 6) + '" height="20" rx="6" class="rpill ' + (lv >= 0 ? "pos" : "neg") + '"/>' +
+        '<text x="' + (W - Rr / 2 + 1) + '" y="' + f1(ly + 4) + '" class="rpt" text-anchor="middle">' + (lv > 0 ? "+" : "") + lv.toFixed(2) + "%</text>";
+    });
+    g += '<line class="rx" x1="0" x2="0" y1="' + (T0 + GAP - 4) + '" y2="' + (Hh - XB) + '" style="display:none"/>' +
+      panels.map(function (p, k) { return '<circle class="rxd pd' + k + '" r="4" cx="0" cy="0" style="display:none"/>'; }).join("") +
+      '<rect class="rov" x="' + L + '" y="' + T0 + '" width="' + (W - L - Rr) + '" height="' + (Hh - T0 - XB) + '"/>';
+    pulseChart.geo = {s: s, X: X, W: W, L: L, Rr: Rr, x0: x0, x1: x1, panels: panels, Hh: Hh};
+    return '<div class="regwrap pulsewrap"><svg class="regchart pulsechart" viewBox="0 0 ' + W + " " + Hh + '" direction="ltr">' + g +
+      '</svg><div class="regtip" style="display:none"></div></div>' +
+      '<div class="legend reglegend"><span><i class="rrib pos"></i>هشدار برای شورت‌ها (بازار رو به بالا)</span><span><i class="rrib neg"></i>هشدار برای لانگ‌ها (بازار رو به پایین)</span>' +
+      '<span><i class="pli pth"></i>آستانه‌ی هر بازه</span></div>';
+  }
+  function pulseBind() {
+    var box = document.getElementById("pulsechart"); if (!box) return;
+    box.parentNode.querySelectorAll("[data-pdays]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        S.pdays = +b.dataset.pdays;
+        try { localStorage.setItem("pdays", S.pdays); } catch (e) {}
+        box.parentNode.querySelectorAll("[data-pdays]").forEach(function (x) { x.classList.toggle("on", x === b); });
+        box.innerHTML = pulseChart(D.pulse || {}); pulseHover();
+      });
+    });
+    pulseHover();
+  }
+  function pulseHover() {
+    var wrap = document.querySelector("#pulsechart .regwrap"), geo = pulseChart.geo; if (!wrap || !geo) return;
+    var svg = wrap.querySelector("svg"), tip = wrap.querySelector(".regtip"), ln = svg.querySelector(".rx"), c = (D.pulse || {}).params || {};
+    function hide() { tip.style.display = ln.style.display = "none"; geo.panels.forEach(function (p, k) { svg.querySelector(".pd" + k).style.display = "none"; }); }
+    function move(ev) {
+      var r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) / r.width * geo.W;
+      var t = geo.x0 + (sx - geo.L) / (geo.W - geo.L - geo.Rr) * (geo.x1 - geo.x0), best = null;
+      geo.s.forEach(function (x) { if (!best || Math.abs(x[0] - t) < Math.abs(best[0] - t)) best = x; });
+      if (!best) return hide();
+      var cx = geo.X(best[0]);
+      ln.setAttribute("x1", cx); ln.setAttribute("x2", cx); ln.style.display = "";
+      geo.panels.forEach(function (p, k) { var d = svg.querySelector(".pd" + k); d.setAttribute("cx", cx); d.setAttribute("cy", p.Y(best[p.i])); d.style.display = ""; });
+      var st = best[1] >= c.h1_pct && best[2] >= c.h4_pct ? 1 : best[1] <= -c.h1_pct && best[2] <= -c.h4_pct ? -1 : 0;
+      tip.innerHTML = "<b>" + esc(jfmt(best[0])) + "</b><br>۲۴ ساعت " + pct(best[3], 2) + "<br>۴ ساعت " + pct(best[2], 2) + "<br>۱ ساعت " + pct(best[1], 2) +
+        "<br>" + (st > 0 ? '<b class="neg">هشدار برای شورت‌ها</b>' : st < 0 ? '<b class="neg">هشدار برای لانگ‌ها</b>' : '<span class="muted">بدون هشدار</span>');
+      tip.style.display = "";
+      var px = cx / geo.W * r.width, w = tip.offsetWidth;
+      tip.style.left = Math.max(4, Math.min(r.width - w - 4, px + (px > r.width / 2 ? -w - 14 : 14))) + "px";
+      tip.style.top = "30px";
+    }
+    svg.addEventListener("mousemove", move);
+    svg.addEventListener("touchmove", function (e) { if (e.touches[0]) move(e.touches[0]); }, {passive: true});
+    svg.addEventListener("touchstart", function (e) { if (e.touches[0]) move(e.touches[0]); }, {passive: true});
+    svg.addEventListener("mouseleave", hide);
+  }
+  // what the three windows together say, and what it means for each side (2026-11-18, Ali: «what can
+  // we conclude and what should we do»). Advice only: the systems trade by their own rules.
+  function pulseVerdict(pl, rows) {
+    var n = pl.now, c = pl.params || {};
+    if (!n) return '<div class="pverdict v-warn"><b>داده‌ی تازه نیست</b><p>آخرین ثبت نبض بازار بیشتر از نیم ساعت پیش است؛ جمع‌بندی وقتی بات دوباره ثبت کند برمی‌گردد.</p></div>';
+    function sg(v, thr) { return v >= thr ? 1 : v <= -thr ? -1 : 0; }
+    var d1 = sg(n[1], c.h1_pct), d4 = sg(n[2], c.h4_pct), d24 = sg(n[3], c.h24_pct || 2);
+    var UP = {1: "بالا", "-1": "پایین"}, SIDE = {1: "لانگ‌ها", "-1": "شورت‌ها"};
+    var title, why, adv = {}, cls = "v-warn", dir = 0;
+    if (d4 && d1 === d4) {
+      dir = d4;
+      if (d24 === d4) {
+        title = "حرکت یکپارچه رو به " + UP[dir]; cls = "v-neg";
+        why = "هر سه بازه هم‌جهت‌اند: بازار در ۲۴ ساعت، ۴ ساعت و ۱ ساعت گذشته رو به " + UP[dir] + " رفته و هنوز ادامه دارد.";
+        adv[dir] = "هم‌جهت با بازارند. فرصت خوب است، ولی دنبال قیمت نرو: بعد از یک حرکت بزرگ، ورود دیر با استاپ نزدیک زود می‌خورد.";
+        adv[-dir] = "در بیشترین خطرند. همان حالتی است که استاپ‌ها با هم می‌خورند: ورود جدید نه، و پوزیشن‌های باز قبل از TP1 را زیر نظر داشته باش.";
+      } else if (d24 === -d4) {
+        title = (dir > 0 ? "برگشت رو به بالا در یک روز نزولی" : "اصلاح رو به پایین در یک روز صعودی");
+        why = "روند ۲۴ ساعته رو به " + UP[-dir] + " است، ولی ۴ ساعت و ۱ ساعت اخیر رو به " + UP[dir] + " برگشته‌اند. این برگشت‌ها معمولاً همان‌جایی است که استاپ‌های " + SIDE[-dir] + " می‌خورد.";
+        adv[-dir] = "هم‌جهت با روند بزرگ‌ترند ولی الان خلاف موج کوتاه‌اند. ورود جدید را صبر کن تا ۱ ساعته دوباره رو به " + UP[-dir] + " برگردد؛ هم نقطه‌ی ورود بهتر است هم استاپ امن‌تر. پوزیشن‌های باز در خطر استاپ‌اند.";
+        adv[dir] = "حرکت کوتاه با آن‌هاست ولی خلاف روند ۲۴ ساعته؛ اگر ورود است، کوتاه‌مدت و با احتیاط.";
+      } else {
+        title = "حرکت تازه رو به " + UP[dir]; cls = "v-neg";
+        why = "۴ ساعت و ۱ ساعت اخیر با هم رو به " + UP[dir] + " رفته‌اند ولی ۲۴ ساعته هنوز جهت روشنی ندارد؛ ممکن است شروع یک حرکت باشد.";
+        adv[dir] = "هم‌جهت با موج تازه‌اند؛ اگر سیستم سیگنال داد، با جهت بازار است.";
+        adv[-dir] = "هشدار فعال است: ورود جدید نه، و پوزیشن‌های باز قبل از TP1 در خطرند.";
+      }
+    } else if (d4 && d1 === -d4) {
+      dir = d4;
+      title = "حرکت ۴ ساعته رو به " + UP[dir] + " دارد برمی‌گردد";
+      why = "۴ ساعت اخیر رو به " + UP[dir] + " بوده ولی ۱ ساعت گذشته خلافش رفته؛ فشار کم شده یا برگشت شروع شده.";
+      adv[dir] = "سود باز را نگه دار ولی پوزیشن تازه هم‌جهت با این حرکت دیر است.";
+      adv[-dir] = "فشار از رویشان برداشته شده؛ اگر ۴ ساعته هم برگردد، حرکت با آن‌ها می‌شود.";
+    } else if (d4) {
+      dir = d4;
+      title = "حرکت ۴ ساعته رو به " + UP[dir] + "، ۱ ساعته آرام";
+      why = "بازار در ۴ ساعت گذشته رو به " + UP[dir] + " رفته ولی ساعت اخیر حرکت خاصی نداشته؛ حرکت ایستاده.";
+      adv[dir] = "عادی؛ دنبال قیمت نرو.";
+      adv[-dir] = "هنوز هشدار نیست، ولی اگر ۱ ساعته هم رو به " + UP[dir] + " برود هشدار فعال می‌شود.";
+    } else if (d1) {
+      dir = d1;
+      title = "جهش کوتاه ۱ ساعته رو به " + UP[dir];
+      why = "فقط ساعت اخیر حرکت داشته و ۴ ساعته هنوز تأییدش نکرده؛ بیشتر این جهش‌ها نویزند.";
+      adv[dir] = "عادی؛ یک ساعت حرکت، دلیل ورود نیست.";
+      adv[-dir] = "عادی؛ تا وقتی ۴ ساعته هم رد نشده، هشدار نیست.";
+    } else {
+      cls = "v-pos"; dir = d24;
+      title = d24 ? "روند ۲۴ ساعته رو به " + UP[d24] + "، ساعت‌های اخیر آرام" : "بازار آرام و بی‌جهت";
+      why = d24 ? "بازار در ۲۴ ساعت رو به " + UP[d24] + " رفته ولی ۴ و ۱ ساعت اخیر آرام بوده‌اند." : "هیچ‌کدام از سه بازه حرکت معناداری ندارند.";
+      adv[1] = adv[-1] = "نبض بازار حرفی ندارد؛ قوانین عادی سیستم‌ها کافی است.";
+    }
+    // open trades before TP1 against the short-term move: what is at stake
+    var against = dir ? openTrades().filter(function (t) { return t.side === -dir && !isPartial(t); }) : [];
+    var risk = sumOf(against, function (t) { return tRisk(t); });
+    var stake = against.length ? '<p><b>الان ' + fa(against.length) + " پوزیشن باز " + (dir > 0 ? "شورت" : "لانگ") + "</b> خلاف این حرکت است؛ اگر همه استاپ بخورند " + usd(-risk) + " ضرر می‌شود.</p>" : "";
+    // what the hypothetical rules have shown so far
+    var ex = rows.filter(function (r) { return r.rule === "exit"; }), hf = rows.filter(function (r) { return r.rule === "half"; });
+    function diff(xs) { return sumOf(xs, function (r) { return r.wusd - r.usd; }); }
+    var ev = "<p class=\"muted\">شاهد تا الان: «بستن با هشدار» روی " + fa(ex.length) + " معامله " + (ex.length ? usd(diff(ex)) : "—") +
+      " و «نصف ریسک در ورود» روی " + fa(hf.length) + " معامله " + (hf.length ? usd(diff(hf)) : "—") + " فرق داشت (مثبت یعنی کمک می‌کرد). این جمع‌بندی فقط راهنماست و روی معامله‌ها اثر ندارد.</p>";
+    return '<div class="pverdict ' + cls + '"><b>' + title + "</b><p>" + why + "</p>" +
+      '<div class="padv"><div><span class="badge short">شورت</span> ' + adv[-1] + '</div><div><span class="badge long">لانگ</span> ' + adv[1] + "</div></div>" + stake + ev + "</div>";
+  }
+  function pulseSection() {
+    var pl = D.pulse || {};
+    if (!pl.series || !pl.series.length)
+      return '<section id="mk-pulse"><h2>نبض بازار <small>حرکت سبد ۱۰ کوین بزرگ در ۱، ۴ و ۲۴ ساعت</small></h2><div class="empty">از اجرای بعدی بات روی سرور ثبت می‌شود.</div></section>';
+    var n = pl.now, pr = pl.params, st = pl.state;
+    var stTxt = st > 0 ? '<b class="neg">هشدار برای شورت‌ها</b>' : st < 0 ? '<b class="neg">هشدار برای لانگ‌ها</b>' : '<b class="pos">بدون هشدار</b>';
+    var cards = '<div class="grid g4 pulsecards">' +
+      statCard("۱ ساعت", n ? pct(n[1], 2) : "—", "آستانه " + fa(pr.h1_pct) + "٪") +
+      statCard("۴ ساعت", n ? pct(n[2], 2) : "—", "آستانه " + fa(pr.h4_pct) + "٪") +
+      statCard("۲۴ ساعت", n ? pct(n[3], 2) : "—", n ? "ثبت " + esc(ago(n[0])) : "داده‌ی تازه نیست") +
+      statCard("وضعیت الان", stTxt, "هشدار: ۱ و ۴ ساعته هر دو از آستانه رد شوند") + "</div>";
+    var rows = pulseRows();
+    function acc(r) { return r.t.approved ? "approved" : "watch"; }
+    var sum = [];
+    ["half", "exit"].forEach(function (rule) {
+      ["approved", "watch"].forEach(function (k) {
+        var xs = rows.filter(function (r) { return r.rule === rule && acc(r) === k; });
+        var a = sumOf(xs, function (r) { return r.usd; }), w = sumOf(xs, function (r) { return r.wusd; });
+        sum.push({rule: rule, k: k, n: xs.length, a: a, w: w});
+      });
+    });
+    var sumTab = '<div class="scroll"><table><thead><tr><th>قاعده‌ی فرضی</th><th>حساب</th><th>تعداد</th><th>نتیجه‌ی واقعی</th><th>اگر اجرا می‌شد</th><th>فرق</th></tr></thead><tbody>' +
+      sum.map(function (x) {
+        return "<tr><td>" + PULSE_RULE[x.rule] + "</td><td>" + (x.k === "approved" ? '<span class="badge ok">تأییدشده</span>' : '<span class="badge watch">Watch</span>') +
+          '</td><td data-v="' + x.n + '">' + fa(x.n) + '</td><td data-v="' + x.a.toFixed(4) + '">' + usd(x.a) + '</td><td data-v="' + x.w.toFixed(4) + '">' + usd(x.w) +
+          '</td><td data-v="' + (x.w - x.a).toFixed(4) + '">' + usd(x.w - x.a) + "</td></tr>";
+      }).join("") + "</tbody>" +
+      totRow(["جمع", "", fa(sumOf(sum, function (x) { return x.n; })), usd(sumOf(sum, function (x) { return x.a; })),
+        usd(sumOf(sum, function (x) { return x.w; })), usd(sumOf(sum, function (x) { return x.w - x.a; }))]) + "</table></div>";
+    var list = rows.length ? '<details class="pulselist"><summary>معامله‌هایی که هشدار خوردند (' + fa(rows.length) + ")</summary>" +
+      '<div class="scroll"><table><thead><tr><th>زمان</th><th>کوین</th><th>جهت</th><th>سیستم</th><th>نوع</th><th>قاعده</th><th>۱ ساعت</th><th>۴ ساعت</th><th>اهرم</th><th>سود٪</th><th>واقعی</th><th>فرضی</th><th>فرق</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var t = r.t;
+        return '<tr class="click" data-open="' + esc(t.id) + '">' + tsCell(r.at) + "<td><b>" + esc(t.base) + "</b>" + (t.open ? ' <small class="muted">باز</small>' : "") +
+          "</td><td>" + side(t.side) + "</td><td>" + esc(sysShort(t.system)) + "</td><td>" + kind(t) + "</td><td>" + PULSE_RULE[r.rule] +
+          '</td><td data-v="' + r.h1 + '">' + pct(r.h1, 2) + '</td><td data-v="' + r.h4 + '">' + pct(r.h4, 2) + "</td>" + levCell(t) + pctCell(t) +
+          '<td data-v="' + r.usd.toFixed(4) + '">' + RU(r.r, r.usd) + '</td><td data-v="' + r.wusd.toFixed(4) + '">' + RU(r.wr, r.wusd) +
+          '</td><td data-v="' + (r.wusd - r.usd).toFixed(4) + '">' + usd(r.wusd - r.usd) + "</td></tr>";
+      }).join("") + "</tbody>" +
+      totRow([{span: 10, v: "جمع"}, usd(sumOf(rows, function (r) { return r.usd; })), usd(sumOf(rows, function (r) { return r.wusd; })),
+        usd(sumOf(rows, function (r) { return r.wusd - r.usd; }))]) + "</table></div></details>" : '<div class="empty">هنوز معامله‌ای با هشدار نبوده.</div>';
+    var pd = S.pdays || 3;
+    var range = '<div class="seg pseg">' + [[1, "۱ روز"], [3, "۳ روز"], [7, "۷ روز"]].map(function (x) {
+      return '<button type="button" data-pdays="' + x[0] + '" class="' + (x[0] === pd ? "on" : "") + '">' + x[1] + "</button>"; }).join("") + "</div>";
+    return '<section id="mk-pulse"><h2>نبض بازار <small>حرکت سبد ۱۰ کوین بزرگ در ۱، ۴ و ۲۴ ساعت · از ' + esc(jfmt(pl.since, "date")) + "</small></h2>" + cards +
+      pulseVerdict(pl, rows) + range + '<div id="pulsechart">' + pulseChart(pl) + "</div>" +
+      '<h3>اثر فرضی <small>فقط برای سنجش؛ روی هیچ معامله‌ای اثر ندارد. سبز در ستون فرق یعنی قاعده کمک می‌کرد</small></h3>' + sumTab + list + "</section>";
+  }
+  function marketTab() {
+    var rp = regimeParts(), board = marketBoard(rp), mp = marketParts();
+    var parts = [["mk-now", "۱", "بازار الان کجاست", "رژیم قیمت (۴ ساعته)، نبض بازار (۱، ۴ و ۲۴ ساعت) و رژیم هر سیستم"],
+      ["mk-trend", "۲", "چند روز اخیر", "حرکت سبد کوین‌های بزرگ و دامیننس"],
+      ["mk-mood", "۳", "حال‌وهوا و رویدادها", "ترس و طمع، فاندینگ، اوپن‌اینترست و خبرهای اقتصادی"],
+      ["mk-cand", "۴", "فرصت‌ها", "کاندیدهای نزدیک به سیگنال، شورت‌لیست و واچ‌لیست"],
+      ["mk-rec", "۵", "کارنامه‌ی ما در هر رژیم", "پوزیشن‌های رژیم فعلی، هر رژیم و روز به روز"]];
+    function part(i) { var x = parts[i]; return '<div class="mkpart" id="' + x[0] + '"><b>' + x[1] + "</b><span>" + x[2] + "</span><small>" + x[3] + "</small></div>"; }
+    var jump = '<div class="mkjump">' + parts.map(function (x) { return '<button type="button" data-jump="' + x[0] + '">' + x[1] + ". " + x[2] + "</button>"; }).join("") + "</div>";
+    var noReg = '<section><h2>رژیم بازار</h2><div class="empty">هنوز کندل کافی برای تشخیص رژیم نیست.</div></section>';
+    app.innerHTML = board + jump +
+      part(0) + (rp ? rp.head : noReg) + pulseSection() + mp.cards +
+      part(1) + (rp ? rp.chart : "") + mp.dom +
+      part(2) + mp.mood + mp.cal +
+      part(3) + mp.cand + mp.short + mp.watch +
+      part(4) + (rp ? rp.posTab + rp.segTab + rp.days : "");
+    mp.bind();
+    if (rp) regimeHover();
+    pulseBind();
+    app.querySelectorAll("[data-jump]").forEach(function (b) {
+      b.addEventListener("click", function () { var el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({behavior: "smooth", block: "start"}); });
+    });
+    if (S.jump) {
+      var el = document.getElementById(S.jump); S.jump = null;
+      if (el) setTimeout(function () { el.scrollIntoView({block: "start"}); }, 0);
+    }
+  }
+  // every reading of the market side by side: what it says now, over which time frame, and which way it votes
+  var MKDIR = 0;                              // the market page's verdict: +1 up, -1 down, 0 mixed (marks the candidates)
+  function marketBoard(rp) {
+    var sys = D.systems || [], rg = regime(), m = rg.metrics || {}, dm = rg.dominance || {}, why = rp ? rp.why : null;
+    var rows = [], votes = [];
+    function arrow(v) { return v > 0 ? '<b class="pos">صعودی ▲</b>' : v < 0 ? '<b class="neg">نزولی ▼</b>' : '<b class="warn">بی‌جهت</b>'; }
+    function add(name, tf, now, v, note) {
+      if (v !== undefined) votes.push({name: name, v: v});
+      rows.push("<tr><td><b>" + name + "</b></td><td><small>" + tf + "</small></td><td>" + now + "</td><td>" + (v === undefined ? '<small class="muted">زمینه</small>' : arrow(v)) +
+        "</td><td><small>" + (note || "") + "</small></td></tr>");
+    }
+    if (why) {
+      var lab = why.cur.label;
+      add("رژیم قیمت (سبد ۱۰ کوین بزرگ)", "کندل ۴ ساعته", '<span class="badge ' + REGCLS[lab] + '">' + REGFA[lab] + "</span> از " + dur(why.h) + " پیش",
+        lab === "trend_up" ? 1 : lab === "trend_down" ? -1 : 0, "۲۴ ساعت " + pct(m.move_24h, 2) + (regEnd(rg) ? " تا " + esc(regEndTxt(rg)) : "") + " · جهت‌داری " + (m.efficiency == null ? "—" : fa(Math.round(m.efficiency * 100)) + "٪"));
+    }
+    var pn = (D.pulse || {}).now;
+    if (pn) add("نبض بازار (سبد ۱۰ کوین بزرگ)", "۱، ۴ و ۲۴ ساعت", "۱س " + pct(pn[1], 2) + " · ۴س " + pct(pn[2], 2) + " · ۲۴س " + pct(pn[3], 2), undefined,
+      D.pulse.state > 0 ? '<b class="neg">هشدار برای شورت‌ها</b> (فقط نمایشی)' : D.pulse.state < 0 ? '<b class="neg">هشدار برای لانگ‌ها</b> (فقط نمایشی)' : "بدون هشدار");
+    var seen = {};
+    sys.forEach(function (s) {
+      var r = s.regime || {}; if (!r.name) return;
+      var key = r.name + "|" + r.bias; if (seen[key]) { seen[key].push(sysShort(s.name)); return; }
+      seen[key] = [sysShort(s.name)];
+      var v = r.bias === "short" ? -1 : r.bias === "long" ? 1 : (r.trend || 0);
+      rows.push(null);                          // filled below once we know which systems share it
+      var i = rows.length - 1;
+      votes.push({name: "رژیم سیستم", v: v});
+      seen[key].row = function () {
+        rows[i] = "<tr><td><b>رژیم " + esc(seen[key].join(" و ")) + "</b></td><td><small>دامیننس و کندل روزانه</small></td><td>" + esc(REG[r.name] || r.name) +
+          " · " + esc(BIAS[r.bias] || r.bias || "") + "</td><td>" + arrow(v) + "</td><td><small>همین است که سیستم با آن سیگنال می‌دهد" +
+          (r.bias === "both" && r.counter_risk ? "؛ خلاف جهت با " + fa(Math.round(r.counter_risk * 100)) + "٪ ریسک" : "") + "</small></td></tr>";
+      };
+    });
+    Object.keys(seen).forEach(function (k) { seen[k].row(); });
+    var mj = (sys[0] || {}).majors || {};
+    if (mj.btc != null || mj.eth != null) {
+      var sum = (mj.btc || 0) + (mj.eth || 0);
+      add("BTC و ETH", "هفتگی، روزانه، ۴ ساعته", "BTC <span class=\"ltr\">" + (mj.btc == null ? "—" : mj.btc) + "</span> · ETH <span class=\"ltr\">" + (mj.eth == null ? "—" : mj.eth) + "</span> از ۱۰",
+        sum >= 4 ? 1 : sum <= -4 ? -1 : 0, mj.btc_weak ? "BTC ضعیف است" : "");
+    }
+    if (dm.t2_chg != null || dm.usdt_d_chg != null) {
+      var t2 = dm.t2_chg || 0, ud = dm.usdt_d_chg || 0;
+      var fv = (t2 >= 0.5 ? 1 : t2 <= -0.5 ? -1 : 0) + (ud >= 0.05 ? -1 : ud <= -0.05 ? 1 : 0);
+      add("جریان پول (TOTAL2 و USDT.D)", "۲۴ ساعت", "TOTAL2 " + pct(dm.t2_chg, 2) + " · USDT.D " + (dm.usdt_d_chg == null ? "—" : '<span class="ltr">' + (ud > 0 ? "+" : "") + ud.toFixed(2) + "</span>"),
+        fv > 0 ? 1 : fv < 0 ? -1 : 0, "بالا رفتن USDT.D یعنی پول از کوین‌ها به تتر می‌رود");
+    }
+    var fng = MK.fng || [], f = fng.length ? fng[fng.length - 1] : null;
+    if (f) add("ترس و طمع", "روزانه", fa(f[1]) + " از ۱۰۰", undefined,
+      f[1] < 25 ? "ترس شدید: معمولاً نزدیک کف‌های کوتاه‌مدت است؛ شورت دیرهنگام پرخطر است" : f[1] > 75 ? "طمع شدید: معمولاً نزدیک سقف‌های کوتاه‌مدت است؛ لانگ دیرهنگام پرخطر است" : "نه ترس شدید نه طمع شدید");
+    var bd = deriv("BTC");
+    if (bd && bd.funding != null) add("فاندینگ BTC", "هر ۸ ساعت", fpct(bd.funding * 100, 4), undefined,
+      bd.funding > 0.0003 ? "لانگ‌ها شلوغ‌اند: ریزش ناگهانی محتمل‌تر" : bd.funding < -0.0001 ? "شورت‌ها شلوغ‌اند: جهش ناگهانی (شورت‌اسکوییز) محتمل‌تر" : "عادی");
+    var now = Date.now(), next = (MK.calendar || []).filter(function (e) { return e.ts > now && e.w >= 3; })[0];
+    if (next) add("رویداد اقتصادی پراثر بعدی", "", esc((CCY[next.country] || [""])[0] + " " + next.title) + ' <small data-until="' + next.ts + '">' + esc(untilTxt(next.ts)) + "</small>", undefined,
+      next.ts - now < 3 * 3600000 ? '<span class="warn">کمتر از ۳ ساعت: استاپ‌ها ممکن است با نوسان بخورند</span>' : "");
+    if (!rows.length) return "";
+    // what they say together
+    var up = votes.filter(function (x) { return x.v > 0; }).length, dn = votes.filter(function (x) { return x.v < 0; }).length, n = votes.length;
+    var cls0 = "warn", head, lines = [];
+    MKDIR = dn && !up && dn >= n - 1 ? -1 : up && !dn && up >= n - 1 ? 1 : 0;
+    if (dn && !up && dn >= n - 1) { cls0 = "neg"; head = fa(dn) + " از " + fa(n) + " نشانه نزولی‌اند و هیچ‌کدام صعودی نیست"; lines.push("شورت در جهت بازار است؛ لانگ خلاف جهت است."); }
+    else if (up && !dn && up >= n - 1) { cls0 = "pos"; head = fa(up) + " از " + fa(n) + " نشانه صعودی‌اند و هیچ‌کدام نزولی نیست"; lines.push("لانگ در جهت بازار است؛ شورت خلاف جهت است."); }
+    else head = "نشانه‌ها هم‌جهت نیستند: " + fa(up) + " صعودی، " + fa(dn) + " نزولی، " + fa(n - up - dn) + " بی‌جهت";
+    if (why) {
+      var big = votes.filter(function (x) { return x.name === "رژیم سیستم"; }).map(function (x) { return x.v; });
+      var bigDir = big.length && big.every(function (v) { return v === big[0]; }) ? big[0] : 0;
+      if (why.cur.label === "range" && bigDir) lines.push("روند بزرگ‌تر (رژیم سیستم‌ها) " + (bigDir > 0 ? "صعودی" : "نزولی") + " است ولی قیمت در ۴ ساعته جهت ندارد. این دو با هم تناقض ندارند: سیستم‌ها روی دامیننس و کندل روزانه کندتر عوض می‌شوند و رژیم قیمت زودتر نشان می‌دهد که بازار از حرکت ایستاده. در رنج، ورودهای روندی جای حرکت ندارند.");
+      else if (why.cur.label !== "range" && bigDir && (why.cur.label === "trend_up" ? 1 : -1) !== bigDir) lines.push("قیمت در ۴ ساعته خلاف رژیم سیستم‌ها حرکت می‌کند: یا اصلاح کوتاهی درون روند بزرگ‌تر است یا شروع تغییر روند. تا هم‌جهت شوند احتیاط کنید.");
+      lines.push("از شروع رژیم فعلی: " + outcomeLine(why.c) + ".");
+      var by = {};
+      regSegs().forEach(function (sg) { var c = outcomeCount(trades().filter(function (t) { return inSeg(t, sg); })); if (!c.n) return; var o = by[sg.label] = by[sg.label] || {r: 0, u: 0, n: 0}; o.r += c.r; o.u += c.u; o.n += c.n; });
+      var ks = Object.keys(by).sort(function (a, b) { return by[b].r - by[a].r; });
+      if (ks.length > 1) lines.push("در ۷ روز اخیر بهترین نتیجه‌ی ما در «" + REGFA[ks[0]] + "» بوده (" + fa(by[ks[0]].n) + " پوزیشن، " + RU(by[ks[0]].r, by[ks[0]].u) + ") و ضعیف‌ترین در «" +
+        REGFA[ks[ks.length - 1]] + "» (" + fa(by[ks[ks.length - 1]].n) + " پوزیشن، " + RU(by[ks[ks.length - 1]].r, by[ks[ks.length - 1]].u) + ").");
+    }
+    if (next && next.ts - now < 3 * 3600000) lines.push('<span class="warn">تا انتشار ' + esc(next.title) + " کمتر از ۳ ساعت مانده.</span>");
+    return '<section><h2>جمع‌بندی بازار <small>همه‌ی نشانه‌های دو صفحه‌ی قبلی کنار هم</small></h2>' +
+      '<div class="mkverdict v-' + cls0 + '"><b>' + head + "</b>" + lines.map(function (x) { return "<p>" + x + "</p>"; }).join("") + "</div>" +
+      '<div class="scroll"><table class="mkboard"><thead><tr><th>نشانه</th><th>بازه‌ی زمانی</th><th>الان</th><th>جهت</th><th>یعنی</th></tr></thead><tbody>' + rows.join("") + "</tbody></table></div></section>";
+  }
+  function marketParts() {
     var sys = D.systems || [];
     var cards = sys.map(function (s) {
       var r = s.regime || {}, m = s.majors || {};
@@ -1311,9 +1731,10 @@
       var id = "cand-" + sysShort(s.name) + "-" + c.base;
       var clickable = p.entry != null;
       return "<tr" + (clickable ? ' class="click" data-cand="' + esc(id) + '"' : "") + "><td>" + esc(sysShort(s.name)) + "</td><td><b>" + esc(c.base) + "</b></td><td>" + side(c.side) +
+        (MKDIR ? (c.side === MKDIR ? ' <small class="pos" title="هم‌جهت با جمع‌بندی بازار">✓ هم‌جهت</small>' : ' <small class="warn" title="خلاف جهت جمع‌بندی بازار">خلاف</small>') : "") +
         '</td><td><span class="ltr">' + (c.score || 0).toFixed(0) + "</span> " + scoreBar(c.score) + "</td><td>" + esc(c.grade || "—") + '</td><td class="num">' + px(c.price) +
         '</td><td class="num">' + px(p.entry) + '</td><td class="num">' + px(p.sl) + '</td><td class="num">' + px(p.tp1) + "</td>" + derivCells(c) + "<td>" +
-        (c.news && c.news.points ? '<span class="chip ' + (c.news.points > 0 ? "pos" : "neg") + '" title="' + esc((c.news.top || []).map(function (x) { return x[0]; }).join(" | ")) + '">اخبار ' +
+        (c.news && c.news.points ? '<span class="chip ' + (c.news.points > 0 ? "pos" : "neg") + '" title="' + esc((c.news.top || []).map(function (x) { return faT(x[0]); }).join(" | ")) + '">اخبار ' +
           (c.news.points > 0 ? "+" : "") + c.news.points + "</span>" : "") +
         (c.why || []).map(function (w) { return '<span class="chip">' + esc(w) + "</span>"; }).join("") + "</td></tr>";
     }).join("");
@@ -1333,16 +1754,17 @@
       var v = s0.breakout_watch[b] || {};
       return '<span class="chip">' + esc(b) + " <small>" + esc((v.labels || []).join(", ")) + (v.level ? ' @ <span class="ltr">' + px(v.level) + "</span>" : "") + "</small></span>";
     }).join("");
-    app.innerHTML = '<div class="grid g2">' + cards + "</div>" + moodSection() + calendarSection() + domHtml +
-      '<section><h2>نزدیک‌ترین کاندیدها به سیگنال <small>کلیک = دیدن پلن روی نمودار</small></h2><div class="filters"><div class="seg" id="cf">' +
+    var P = {cards: '<div class="grid g2">' + cards + "</div>", mood: moodSection(), cal: calendarSection(), dom: domHtml};
+    P.cand = '<section><h2>نزدیک‌ترین کاندیدها به سیگنال <small>کلیک = دیدن پلن روی نمودار</small></h2><div class="filters"><div class="seg" id="cf">' +
       [["", "همه"]].concat(names.map(function (n) { return [n, n]; })).map(function (o) { return '<button data-v="' + esc(o[0]) + '" class="' + (cf === o[0] ? "on" : "") + '">' + esc(o[1]) + "</button>"; }).join("") +
       '</div><small>سیگنال = رده‌ی A یا B بدون مانع؛ Watch = ستاپ نزدیک که فقط دنبال می‌شود</small></div>' +
-      (rows ? '<div class="scroll"><table><thead><tr><th>سیستم</th><th>کوین</th><th>جهت</th><th>امتیاز</th><th>رده</th><th>قیمت</th><th>ورود</th><th>استاپ</th><th>TP1</th><th>فاندینگ</th><th>اوپن‌اینترست ۲۴س</th><th>لانگ/شورت</th><th>چرا سیگنال نشد</th></tr></thead><tbody>' + rows + "</tbody></table></div>" : '<div class="empty">در آخرین بررسی کاندیدی نبود.</div>') + "</section>" +
-      '<section><h2>شورت‌لیست <small>' + fa((s0.shortlist || []).length) + " کوین · قیف " + esc(ago(s0.funnel_ts ? Number(s0.funnel_ts) : null)) + '</small></h2><div class="grid g4">' + (sl || '<div class="muted">—</div>') + "</div></section>" +
-      '<section><h2>واچ‌لیست <small>' + fa(Object.keys(s0.watchlist || {}).length) + "</small></h2>" + (wl || "—") +
+      (rows ? '<div class="scroll"><table><thead><tr><th>سیستم</th><th>کوین</th><th>جهت</th><th>امتیاز</th><th>رده</th><th>قیمت</th><th>ورود</th><th>استاپ</th><th>TP1</th><th>فاندینگ</th><th>اوپن‌اینترست ۲۴س</th><th>لانگ/شورت</th><th>چرا سیگنال نشد</th></tr></thead><tbody>' + rows + "</tbody></table></div>" : '<div class="empty">در آخرین بررسی کاندیدی نبود.</div>') + "</section>";
+    P.short = '<section><h2>شورت‌لیست <small>' + fa((s0.shortlist || []).length) + " کوین · قیف " + esc(ago(s0.funnel_ts ? Number(s0.funnel_ts) : null)) + '</small></h2><div class="grid g4">' + (sl || '<div class="muted">—</div>') + "</div></section>";
+    P.watch = '<section><h2>واچ‌لیست <small>' + fa(Object.keys(s0.watchlist || {}).length) + "</small></h2>" + (wl || "—") +
       (bw ? '<h3>منتظر شکست</h3>' + bw : "") + ((s0.hot_categories || []).length ? '<h3>دسته‌های داغ</h3>' + s0.hot_categories.map(function (h) { return '<span class="chip">' + esc(h) + "</span>"; }).join("") : "") + "</section>";
+    P.bind = function () {
     var cfEl = document.getElementById("cf");
-    if (cfEl) cfEl.addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { S.cand.s = b.dataset.v; market(); } });
+    if (cfEl) cfEl.addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { S.cand.s = b.dataset.v; var y = window.scrollY; render(); window.scrollTo(0, y); } });
     [1, 2, 3].forEach(function (i) {
       var el = document.getElementById("dom-" + i); if (!el) return;
       var c = makeChart(el, {rightPriceScale: {visible: false}, leftPriceScale: {visible: false}, timeScale: {visible: false}, handleScroll: false, handleScale: false,
@@ -1353,6 +1775,8 @@
       s.setData(uniq(dom.map(function (r) { return {time: tsec(r[0]), value: r[i]}; })));
       c.timeScale().fitContent();
     });
+    };
+    return P;
   }
   function valueAt(rows, ms, i) {
     var v = null;
@@ -1376,7 +1800,7 @@
           D = j; MK = D.market || {}; candleCache = {};
           notifyChanges(prev, j);
           if (S.tab !== "chart") { render(); return; }
-          status(); fillList(); renderBottom();             // the chart keeps its zoom; only a changed trade is redrawn
+          status(); renderBottom();             // the chart keeps its zoom; only a changed trade is redrawn
           var t = findSel(S.sel);
           if (t && JSON.stringify([t.status, t.sl_now, (t.events || []).length]) !== was) tradeView(t);
         });
@@ -1386,6 +1810,7 @@
     var set = {};
     openTrades().forEach(function (t) { set[t.base] = 1; });
     var sel = findSel(S.sel); if (sel && S.tab === "chart") set[sel.base] = 1;
+    if (S.tab === "chart" && S.xtab === "cand") candidates().forEach(function (t) { set[t.base] = 1; });
     if (S.tab === "chart" && S.xtab === "pend") pendingTrades().forEach(function (t) { set[t.base] = 1; });
     return Object.keys(set);
   }
@@ -1406,9 +1831,9 @@
     });
   }
   var liveFails = 0, liveSkip = 0, liveN = 0;
-  function liveTick() {                      // every 5 s on the chart tab, every 15 s elsewhere
+  function liveTick() {                      // every 5 s on the chart and summary tabs, every 15 s elsewhere
     if (document.hidden) return;
-    if (S.tab !== "chart" && liveN++ % 3) return;
+    if (S.tab !== "chart" && S.tab !== "sum" && liveN++ % 3) return;
     if (liveSkip > 0) { liveSkip--; return; }     // the exchanges were unreachable: try again less often
     var bases = liveBases();
     if (!bases.length) return;
@@ -1456,20 +1881,22 @@
           var e2 = document.getElementById(k[0]); if (e2) e2.innerHTML = k[1];
         });
       }
-      document.querySelectorAll(".titem").forEach(function (it) {
-        var tr = byId(it.getAttribute("data-open"));
-        if (tr && tr.open && tr.filled_at) { var r = it.querySelector(".r"); if (r) r.innerHTML = RU(openR(tr), pnlUsd(tr)); }
-      });
       document.querySelectorAll("#xtable tr[data-open]").forEach(function (row) {
         var tr = byId(row.getAttribute("data-open")); if (!tr) return;
         var xp = row.querySelector(".xp"), xu = row.querySelector(".xu");
         if (xp) xp.textContent = px(livePrice(tr));
         if (xu && tr.open && tr.filled_at) xu.innerHTML = pnlCell(tr);
+        var xo = row.querySelector(".xo"), ov = outUsd(tr);
+        if (xo && tr.open && ov != null) { xo.innerHTML = usd(ov, false); xo.setAttribute("data-v", ov.toFixed(4)); }
         var xc = row.querySelector(".xpc"), pv = pnlPct(tr);
         if (xc && tr.open && pv != null) { xc.innerHTML = pctTxt(tr, true); xc.setAttribute("data-v", pv.toFixed(3)); }
       });
+      var xos = document.getElementById("xosum");
+      if (xos) xos.innerHTML = usd(sumOf(openTrades(), function (t) { return outUsd(t); }), false);
       var xs = document.getElementById("xsum");
       if (xs) xs.innerHTML = usd(sumOf(openTrades(), function (t) { return floatUsd(t); }));
+    } else if (S.tab === "sum") {
+      sumKpis();
     } else if (S.tab === "home") {          // only the live numbers: the charts and toggles stay as they are
       ACC.forEach(function (x) {
         var l = accLive(x[0]), v = document.getElementById("eqv-" + x[0]), r = document.getElementById("eqr-" + x[0]);
@@ -1641,9 +2068,12 @@
     svg.addEventListener("touchmove", function (e) { if (e.touches[0]) move(e.touches[0]); }, {passive: true});
     svg.addEventListener("mouseleave", hide);
   }
-  function regimeTab() {
+  // 2026-11-18 (Ali): the regime's 24 h move ends at the last closed 4H candle, not now (the pulse's does)
+  function regEnd(rg) { var b = (rg.bars || [])[(rg.bars || []).length - 1]; return b ? b[0] + 4 * 3600000 : null; }
+  function regEndTxt(rg) { var e = regEnd(rg); return jfmt(e, Date.now() - e > 12 * 3600000 ? "dt" : "time"); }
+  function regimeParts() {
     var rg = regime(), segs = regSegs();
-    if (!segs.length) { app.innerHTML = '<section><h2>رژیم بازار</h2><div class="empty">هنوز کندل کافی برای تشخیص رژیم نیست.</div></section>'; return; }
+    if (!segs.length) return null;
     var why = regimeReason(), cur = why.cur, m = rg.metrics || {}, dm = rg.dominance || {};
     var paused = (D.systems || []).filter(function (s) { return s.paused_until && s.paused_until > Date.now(); });
     var head = '<section><h2>رژیم بازار <small>سبد ' + fa((rg.basket || []).length) + " کوین بزرگ روی کندل ۴ ساعته</small></h2>" +
@@ -1654,7 +2084,8 @@
       (paused.length ? '<p class="warn">' + paused.map(function (s) { return esc(s.name) + " بعد از ضررهای پشت‌سرهم تا " + esc(jfmt(s.paused_until)) + " سیگنال نمی‌دهد"; }).join(" · ") + ".</p>" : "") +
       "</div></div>" +
       '<div class="grid g4">' +
-      statCard("حرکت ۲۴ ساعت بازار", pct(m.move_24h, 2), "جهت‌داری " + (m.efficiency == null ? "—" : fa(Math.round(m.efficiency * 100)) + "٪")) +
+      statCard("حرکت ۲۴ ساعت بازار", pct(m.move_24h, 2), "جهت‌داری " + (m.efficiency == null ? "—" : fa(Math.round(m.efficiency * 100)) + "٪") +
+        (regEnd(rg) ? " · تا کندل بسته‌شده‌ی " + esc(regEndTxt(rg)) : "")) +
       statCard("اندازه‌ی کندل ۴ ساعته", '<span class="ltr">' + (m.bar_size_24h == null ? "—" : m.bar_size_24h.toFixed(2) + "%") + "</span>",
         "روزهای قبل " + (m.bar_size_before == null ? "—" : m.bar_size_before.toFixed(2) + "%")) +
       statCard("آلت‌ها (TOTAL2)", dm.t2 ? '<span class="ltr">$' + (dm.t2 / 1000).toFixed(2) + "T</span>" : "—", "۲۴ ساعت " + pct(dm.t2_chg, 2)) +
@@ -1683,8 +2114,7 @@
           levCell(t) + tsCell(t.filled_at) + '<td><span class="badge ' + (o ? OUTFA[o][1] : "gray") + '">' + (o ? OUTFA[o][0] : "—") + (t.open ? " · باز" : "") + "</span></td>" +
           '<td data-v="' + (r == null ? "" : r) + '">' + RU(r, pnlUsd(t)) + splitNote(t) + "</td>" + pctCell(t) + "</tr>";
       }).join("") + "</tbody>" + totRow([{span: 7, v: "جمع " + fa(list.length) + " پوزیشن"}, RU(why.c.r, why.c.u), ""]) + "</table></div>" : '<div class="empty">در این رژیم هنوز پوزیشنی پر نشده.</div>') + "</section>";
-    app.innerHTML = head + chart + posTab + segTab + regimeDays();
-    regimeHover();
+    return {head: head, chart: chart, posTab: posTab, segTab: segTab, days: regimeDays(), why: why};
   }
   // the last days side by side: what the market did and what it did to the accounts
   function regimeDays() {
@@ -1714,7 +2144,9 @@
 
   // ------------------------------------------------------------------ help tooltips (Ali, 2026-11-15)
   var TIPS = {
-    "رژیم بازار": "حال بازار از روی سبد ۱۰ کوین بزرگ روی کندل ۴ ساعته: روند نزولی (افت دست‌کم ۴٪ در ۲۴ ساعت، بیشترش یک‌طرفه، یا ۶٪ در سه روز که هنوز ادامه دارد)، روند صعودی (برعکس) یا رنج (هیچ‌کدام). رژیمی که کمتر از ۸ ساعت طول بکشد حساب نمی‌شود.\nجمله‌ی بالا می‌گوید بازار کی عوض شد و پوزیشن‌هایی که بعدش باز شدند چه شدند. استاپ: با ضرر بسته شده. رنج: هنوز کمتر از ۰٫۵R حرکت کرده. سود: ۰٫۵R به بالا یا رد شده از TP1.",
+    "دوره‌ی سنجش": "چهار هفته قوانین هر دو سیستم ثابت می‌ماند و فقط نتیجه اندازه گرفته می‌شود. ربات هر دقیقه اثرانگشت قوانین هر سیستم را ثبت می‌کند؛ اگر چیزی در قوانین یک سیستم عوض شود، شمارش همان سیستم از لحظه‌ی تغییر از نو شروع می‌شود. تغییرهای نمایشی پنل شمارش را صفر نمی‌کنند.\nملاک، معامله‌های تأییدشده است و همه‌چیز بر حسب R خالص (بعد از کارمزد)، پس به ریسک هر معامله بستگی ندارد. افت حساب روی یک حساب ۱۰۰ دلاری از شروع دوره با ریسک‌های فعلی حساب می‌شود.\nمعیارها از قبل نوشته شده‌اند: بعد از ۱۰۰ معامله‌ی بسته، میانگین دست‌کم ‎+0.10R‎، ضریب سود بالای ۱٫۲ و افت کمتر از ۲۰٪. گذشتن از ۲۰٪ افت با هر تعداد معامله یعنی رد. قبولی یعنی شروع با پول واقعی کم و ریسک ۱٪.\nستون Watch مرجع است: اگر تأییدشده‌ها مدام بهتر از Watch باشند، یعنی امتیازدهی واقعاً کار می‌کند.",
+    "نبض بازار": "میانگین حرکت ۱۰ کوین بزرگ (BTC، ETH، SOL، …) در ۱ ساعت، ۴ ساعت و ۲۴ ساعت گذشته که بات هر ۵ دقیقه ثبت می‌کند. هشدار وقتی است که ۱ ساعته و ۴ ساعته هر دو از آستانه رد شوند: رو به بالا برای شورت‌ها و رو به پایین برای لانگ‌ها.\nاثر فرضی دو قاعده را حساب می‌کند بی‌آنکه کاری بکند: «نصف ریسک در ورود» (معامله‌ای که در حال هشدار باز شد با نصف ریسک) و «بستن با هشدار» (معامله‌ی قبل از TP1 در اولین هشدار بسته می‌شد، با قیمت همان لحظه).",
+    "رژیم بازار": "حال بازار از روی سبد ۱۰ کوین بزرگ روی کندل ۴ ساعته: روند نزولی (افت دست‌کم ۴٪ در ۲۴ ساعت، بیشترش یک‌طرفه، یا ۶٪ در سه روز که هنوز ادامه دارد)، روند صعودی (برعکس) یا رنج (هیچ‌کدام). رژیمی که کمتر از ۸ ساعت طول بکشد حساب نمی‌شود.\nجمله‌ی بالا می‌گوید بازار کی عوض شد و پوزیشن‌هایی که بعدش باز شدند چه شدند. استاپ: با ضرر بسته شده. رنج: هنوز کمتر از ۰٫۵R حرکت کرده. سود: ۰٫۵R به بالا یا رد شده از TP1.\n«حرکت ۲۴ ساعت بازار» در این بخش تا آخرین کندل ۴ ساعته‌ی بسته‌شده است (تا چهار ساعت عقب‌تر از الان)؛ ۲۴ ساعتِ تا همین الان در «نبض بازار» است.",
     "رژیم‌های ۷ روز اخیر": "خط سفید حرکت سبد بازار از ۷ روز پیش است. رنگ پس‌زمینه رژیم آن زمان است. نقطه‌ها حرکت‌های تند هستند: ریزش یا جهش ۴٪ در ۸ ساعت، یا کندلی دست‌کم ۱٫۸ برابر معمول که سر جایش برگشته (استاپ هر دو طرف را می‌زند).",
     "پوزیشن‌های رژیم فعلی": "پوزیشن‌هایی که بعد از شروع رژیم فعلی پر شدند، با وضعیت الان.",
     "معامله‌ها در هر رژیم": "هر رژیم، چقدر طول کشید، بازار چقدر حرکت کرد و پوزیشن‌هایی که در آن پر شدند چه نتیجه‌ای گرفتند. اینجا معلوم می‌شود سیستم در کدام حال بازار کار می‌کند.",
@@ -1801,6 +2233,8 @@
     "موجودی بعد": "موجودی حساب نوع خودش بعد از بسته شدن این معامله.",
     "ریسک (حساب همه)": "مبلغی که اگر استاپ اول بخورد از دست می‌رود.",
     "حجم پوزیشن": "ارزش کل پوزیشن (حجم × قیمت ورود).",
+    "دلار ورودی": "پولی که برای این پوزیشن گذاشته شد: مارجین = حجم ÷ اهرم، در حساب نوع خودش (تأییدشده یا Watch).",
+    "دلار خروجی": "پولی که با بسته شدن برمی‌گردد: مارجین + سود/زیان، بعد از کارمزد. برای پوزیشن باز یا بخشی بسته: اگر همین الان بسته شود.",
     "درصد ریسک / فاصله‌ی استاپ": "درصد موجودی که در خطر است، و فاصله‌ی استاپ از ورود به درصد.",
     "استاپ الان": "استاپ فعلی. بعد از TP1 به نقطه‌ی ورود می‌رود.",
     "ورود": "قیمت ورود معامله.",
@@ -1962,7 +2396,7 @@
       document.getElementById("mark-st").textContent = "در حال ثبت…";
       fetch("api/mark", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: t.id, taken: taken})})
         .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-        .then(function (m) { S.marks = m; S.apiOk = true; tradeView(t); })
+        .then(function (m) { S.marks = m; S.apiOk = true; if (S.xopen === t.id) { closeDetail(); S.xopen = t.id; openDetail(); } })
         .catch(function () { S.apiOk = false; document.getElementById("mark-st").textContent = "ثبت نشد: بخش ثبت روی سرور هنوز فعال نیست"; });
     });
   }
@@ -2268,7 +2702,7 @@
     if (e.k === "news") {
       var n = e.n;
       return '<li><span class="ft">' + esc(jfmt(e.ts, "time")) + '</span><span class="stars">' + "★★★★★".slice(0, n.stars) + "</span> " +
-        (n.coins || []).slice(0, 3).map(function (c) { return "<b>" + esc(c) + "</b>"; }).join(" ") + " " + esc(n.title) + isNew + "</li>";
+        (n.coins || []).slice(0, 3).map(function (c) { return "<b>" + esc(c) + "</b>"; }).join(" ") + " " + trT(n.title) + isNew + "</li>";
     }
     var t = e.t, r = e.k === "tp1" || e.k === "tp2" || e.k === "tp3" || e.k === "sl" || e.k === "breakeven" ? (e.k === "tp1" || e.k === "tp2" ? "" : " " + RU(t.net_r, tPnl(t))) : "";
     return '<li class="click" data-open="' + esc(t.id) + '"><span class="ft">' + esc(jfmt(e.ts, "time")) + '</span><b class="' + (EVCLS[e.k] || "") + '">' + EVFA[e.k] + "</b> · <b>" + esc(t.base) + "</b> " +
@@ -2310,7 +2744,7 @@
     ((D.news_view || {}).items || []).forEach(function (n) {
       if ((n.pub || n.ts) < now - 6 * 3600000) return;
       var mine = (n.coins || []).filter(function (c) { return held[c]; });
-      if (mine.length || n.stars >= 4) out.push([n.level < 0 ? "neg" : "acc", (mine.length ? "خبر درباره‌ی پوزیشن شما: " : "خبر مهم: ") + "<b>" + esc((n.coins || []).slice(0, 3).join(" ")) + "</b> " + esc(n.title), "news"]);
+      if (mine.length || n.stars >= 4) out.push([n.level < 0 ? "neg" : "acc", (mine.length ? "خبر درباره‌ی پوزیشن شما: " : "خبر مهم: ") + "<b>" + esc((n.coins || []).slice(0, 3).join(" ")) + "</b> " + trT(n.title), "news"]);
     });
     return out;
   }
@@ -2337,10 +2771,9 @@
     var fng = (MK.fng || []).slice(-1)[0], btc = deriv("BTC");
     var kpis = '<div class="grid g4">' +
       ACC.map(function (x) {
-        var l = accLive(x[0]), ch = dayChange(x[0]);
-        return statCard(esc(x[1]), '<span class="ltr">$' + l.equity.toFixed(2) + "</span>", "۲۴ ساعت " + usd(ch) + " · از شروع " + pct((l.equity - D.accounts[x[0]].start) / D.accounts[x[0]].start * 100, 1));
+        return '<div class="stat"><span class="l">' + esc(x[1]) + '</span><span class="v ltr" id="sumv-' + x[0] + '"></span><small id="sums-' + x[0] + '"></small></div>';
       }).join("") +
-      statCard("پوزیشن‌های باز", fa(open.length) + ' <small class="muted">· ' + fa(pend.length) + " سفارش در انتظار</small>", "سود/زیان باز " + usd(openUsd) + " · " + fa(atRisk) + " تا هنوز در ریسک") +
+      statCard("پوزیشن‌های باز", fa(open.length) + ' <small class="muted">· ' + fa(pend.length) + " سفارش در انتظار</small>", 'سود/زیان باز <span id="sumopen">' + usd(openUsd) + "</span> · " + fa(atRisk) + " تا هنوز در ریسک") +
       "</div>";
     var rw = regimeReason();
     var mood = '<div class="grid g4 sumrow">' + (D.systems || []).map(sumDirection).join("") +
@@ -2362,7 +2795,7 @@
     var cal = (MK.calendar || []).filter(function (e) { return e.ts > now && e.ts < now + 48 * 3600000 && e.w >= 4; }).slice(0, 4);
     app.innerHTML = eventBanner() +
       '<section><h2>خلاصه ' + qi("مهم‌ترین چیزهای همه‌ی تب‌ها در یک صفحه.\nردیف اول: موجودی سه حساب ۱۰۰ دلاری و تغییرشان در ۲۴ ساعت گذشته، و تعداد پوزیشن‌های باز.\nردیف دوم: جهتی که هر سیستم الان در بازار می‌بیند و حال کلی بازار.\nبرچسب «جدید» یعنی بعد از آخرین باری که این صفحه را باز کردید اتفاق افتاده است.") + ' <small>' + (seenAt ? "آخرین بازدید شما " + esc(ago(seenAt)) + (newN ? " · " + fa(newN) + " اتفاق تازه" : " · اتفاق تازه‌ای نیست") : "مهم‌ترین‌های همه‌ی صفحه‌ها") + "</small></h2>" +
-      kpis + mood + "</section>" +
+      kpis + mood + "</section>" + scoreSection() +
       '<div class="grid g2"><section><h2>نیاز به توجه ' + qi("چیزهایی که شاید الان تصمیمی بخواهند: ربات عقب افتاده، رویداد اقتصادی پراثر نزدیک است، پوزیشنی نزدیک استاپ یا TP1 است، داوران هوش مصنوعی به سیگنالی نمره‌ی پایین داده‌اند، یا خبر مهمی درباره‌ی کوینی آمده که در آن پوزیشن دارید.\nروی هر مورد بزنید تا به تب مربوط بروید.") + ' <small>' + fa(alerts.length) + "</small></h2>" + alertHtml + "</section>" +
       "<section><h2>۲۴ ساعت گذشته " + qi("هر اتفاق ۲۴ ساعت گذشته به ترتیب زمان: سیگنال تازه، ورود، TP، استاپ و لغو، به‌علاوه‌ی خبرهای ۳ ستاره و بیشتر. روی هر معامله بزنید تا جزئیاتش باز شود.") + " <small>سیگنال‌ها، ورود و خروج‌ها، خبرهای ۳ ستاره به بالا</small></h2>" +
       (feed.length ? '<ul class="feed">' + feed.slice(0, 18).map(feedLine).join("") + "</ul>" : '<div class="empty">در ۲۴ ساعت گذشته اتفاقی نیفتاده است.</div>') + "</section></div>" +
@@ -2373,6 +2806,74 @@
       }).join("") + "</ul>" : "<p class=\"muted\">رویداد اقتصادی پراثری در ۴۸ ساعت آینده نیست.</p>") +
       "<h3>هوش مصنوعی</h3><p>" + aiLine + "</p></section></div>";
     try { localStorage.setItem(SEEN_KEY, String(now)); } catch (e) {}
+    sumKpis();
+  }
+  // ------------------------------------------------------------------ measurement period (2026-11-19, Ali chose «۱ و ۲»:
+  // the rules stay still for four weeks, and the success test is written down before the results; scorecard.py)
+  var SC_ST = {measuring: ["در حال سنجش: هنوز زود است", ""], extend: ["چهار هفته تمام شد، ولی معامله هنوز کم است", ""],
+    pass: ["قبول شد", "v-pos"], fail: ["رد شد", "v-neg"]};
+  function scoreSection() {
+    var sc = D.scorecard || {};
+    if (!sc.groups) return "";
+    var T = sc.targets, g = sc.groups, a = g.approved, now = Date.now(), DAYMS = 86400000;
+    var names = Object.keys(sc.systems || {});
+    var day = Math.min(sc.days, Math.max(1, Math.ceil((now - sc.first) / DAYMS)));
+    var cols = [["approved", "تأییدشده <small>(ملاک)</small>", ""]].concat(names.map(function (n) { return ["approved:" + n, "تأییدشده‌ی " + esc(sysShort(n)), "muted"]; }))
+      .concat([["watch", "Watch <small>(مرجع)</small>", "muted"]]);
+    function ok(v) { return v == null ? "" : v ? "pos" : "neg"; }
+    function test(k, x) {
+      if (k === "avg_r") return x.avg_r == null ? null : x.avg_r >= T.avg_r;
+      if (k === "pf") return x.pf == null ? (x.closed ? x.net_r > 0 : null) : x.pf > T.pf;
+      if (k === "dd") return x.max_dd == null || !x.closed ? null : x.max_dd < T.max_dd_pct;
+      return null;
+    }
+    function num(x, d) { return '<span class="ltr">' + Number(x).toFixed(d) + "</span>"; }
+    var rows = [
+      ["معامله‌ی بسته", fa(T.min_trades), function (x) { return fa(x.closed) + (x.open ? ' <small class="muted">+ ' + fa(x.open) + " باز</small>" : ""); }, null],
+      ["میانگین R خالص", num(T.avg_r, 2).replace('">', '">≥ +').replace("</span>", "R</span>"), function (x) { return R(x.avg_r); }, "avg_r"],
+      ["ضریب سود", num(T.pf, 2).replace('">', '">&gt; '), function (x) { return x.pf == null ? (x.closed && x.net_r > 0 ? "بدون ضرر" : "—") : num(x.pf, 2); }, "pf"],
+      ["بیشترین افت حساب ۱۰۰ دلاری", num(T.max_dd_pct, 0).replace('">', '">&lt; ').replace("</span>", "%</span>"), function (x) { return x.max_dd == null ? "—" : '<span class="ltr">' + x.max_dd.toFixed(1) + "%</span>"; }, "dd"],
+      ["جمع R خالص", "", function (x) { return x.closed ? R(x.net_r) : "—"; }, null],
+      ["نرخ برد", "", function (x) { return x.closed ? fa(Math.round(x.wins / x.closed * 100)) + "٪" : "—"; }, null]
+    ];
+    var table = '<div class="scroll"><table class="cmp sctab"><thead><tr><th>معیار</th><th>هدف</th>' + cols.map(function (c) { return "<th>" + c[1] + "</th>"; }).join("") + "</tr></thead><tbody>" +
+      rows.map(function (r) {
+        return "<tr><td>" + r[0] + "</td><td>" + (r[1] || '<span class="muted">—</span>') + "</td>" + cols.map(function (c, i) {
+          var x = g[c[0]] || {}, k = r[3] ? ok(test(r[3], x)) : "";
+          return '<td class="' + (i === 0 ? "scmain " : "") + (k ? "sc-" + k : "") + '">' + r[2](x) + "</td>";
+        }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div>";
+    var st = SC_ST[sc.status] || SC_ST.measuring, txt;
+    var miss = [["avg_r", "میانگین R"], ["pf", "ضریب سود"], ["max_dd", "افت حساب"]].filter(function (k) { return sc.checks[k[0]] === false; }).map(function (k) { return k[1]; });
+    var days = (now - sc.first) / DAYMS, pace = days >= 3 && a.closed ? a.closed / days : null;
+    var eta = pace ? sc.first + T.min_trades / pace * DAYMS : null;
+    var paceTxt = pace ? " با سرعت فعلی (حدود " + fa(Math.round(pace * 7)) + " معامله‌ی بسته در هفته) به " + fa(T.min_trades) + " معامله حدود <b>" + esc(jfmt(eta, "ymd")) + "</b> می‌رسیم." : "";
+    if (sc.status === "pass") txt = "بعد از " + fa(a.closed) + " معامله‌ی تأییدشده هر سه معیار برقرار است. قدم بعد: پول واقعی کم با ریسک " + fa(T.real_risk_pct) + "٪، نه ریسک‌های فعلی.";
+    else if (sc.status === "fail") txt = (sc.checks.max_dd === false ? "افت حساب تأییدشده از " + fa(T.max_dd_pct) + "٪ گذشت؛ این معیار با هر تعداد معامله رد می‌کند." : "بعد از " + fa(a.closed) + " معامله، " + miss.join(" و ") + " به هدف نرسید.") +
+      " پول واقعی نه؛ قدم بعد این است که ببینیم ضررها از کجا می‌آیند.";
+    else if (sc.status === "extend") txt = "هنوز " + fa(a.closed) + " از " + fa(T.min_trades) + " معامله‌ی تأییدشده بسته شده و با این تعداد نمی‌شود حکم داد. قوانین ثابت می‌ماند تا به " + fa(T.min_trades) + " برسد." + paceTxt;
+    else txt = fa(a.closed) + " از " + fa(T.min_trades) + " معامله‌ی تأییدشده بسته شده. تا آن موقع رنگ عددها بیشتر شانس است تا نتیجه، پس از رویشان قانون عوض نکنید." + paceTxt;
+    var notes = names.map(function (n) {
+      var y = sc.systems[n];
+      if (y.pending) return "تنظیمات " + esc(sysShort(n)) + " تازه عوض شده و ربات هنوز ثبتش نکرده؛ شمارش آن از اولین اجرای بعدی از نو شروع می‌شود.";
+      return y.changed_at ? "قوانین " + esc(sysShort(n)) + " " + esc(jfmt(y.changed_at, "dt")) + " عوض شد؛ معامله‌های آن از همان زمان شمرده می‌شوند." : "";
+    }).filter(Boolean);
+    return '<section class="scsec"><h2>دوره‌ی سنجش ' + qi(TIPS["دوره‌ی سنجش"]) + ' <small>روز ' + fa(day) + " از " + fa(sc.days) + " · قوانین ثابت از " + esc(jfmt(sc.first, "ymd")) + "</small></h2>" +
+      '<div class="pverdict ' + st[1] + '"><b>' + st[0] + "</b><p>" + txt + "</p></div>" + table +
+      (notes.length ? '<p class="muted">' + notes.join("<br>") + "</p>" : "") + "</section>";
+  }
+  // 2026-11-17 (Ali): each account card is the final number, booked + open together, and moves with live prices
+  function sumKpis() {
+    ACC.forEach(function (x) {
+      var v = document.getElementById("sumv-" + x[0]), sb = document.getElementById("sums-" + x[0]);
+      if (!v) return;
+      var a = D.accounts[x[0]], l = accLive(x[0]);
+      v.textContent = "$" + l.equity.toFixed(2);
+      if (sb) sb.innerHTML = "قطعی " + usd(a.balance, false) + " + باز " + usd(l.unreal) + "<br>۲۴ ساعت " + usd(dayChange(x[0])) +
+        " · از شروع " + pct((l.equity - a.start) / a.start * 100, 1);
+    });
+    var so = document.getElementById("sumopen");
+    if (so) so.innerHTML = usd(sumOf(openTrades(), function (t) { return floatUsd(t); }));
   }
 
   // ------------------------------------------------------------------ AI reviewers (2026-11-15, Ali: several AIs that score
@@ -2747,13 +3248,13 @@
   var h = (location.hash || "").replace(/^#/, "").split("/");
   var saved = null; try { saved = localStorage.getItem("tab3"); } catch (e) {}
   if (h[1]) S.sel = decodeURIComponent(h[1]);
-  show(TABS[h[0]] ? h[0] : (saved && TABS[saved] ? saved : "sum"), false);
+  show(TABS[h[0]] || ALIAS[h[0]] ? h[0] : (saved && (TABS[saved] || ALIAS[saved]) ? saved : "sum"), false);
   window.addEventListener("hashchange", function () {   // in-page links such as #chart/BTC or #cal
     var p = (location.hash || "").replace(/^#/, "").split("/");
-    if (!TABS[p[0]]) return;
+    if (!TABS[p[0]] && !ALIAS[p[0]]) return;
     if (p[1]) S.sel = decodeURIComponent(p[1]);
     show(p[0], false);
-    window.scrollTo(0, 0);
+    if (!S.jump) window.scrollTo(0, 0);
   });
   loadMarks();
   bellUi();

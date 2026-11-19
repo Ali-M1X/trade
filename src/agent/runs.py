@@ -316,7 +316,8 @@ def publish(cfg: dict, repo, market, notifier, evs: list[Evaluation], now_ms: in
     watch_sent = repo.get_state("watch_sent", {})
     for ev in sorted(evs, key=lambda e: -e.score):
         if ev.is_signal:
-            adm = book.admit(ev.base, ev.side, ev.score, now_ms, corr)
+            adm = book.admit(ev.base, ev.side, ev.score, now_ms, corr,
+                             risk_pct=ev.plan.risk_pct if ev.plan is not None else None)
             if not adm.ok:
                 log.info("%s %s not sent: %s", ev.base, ev.grade, adm.reason)
                 note_skip(repo, ev, adm.reason, now_ms)

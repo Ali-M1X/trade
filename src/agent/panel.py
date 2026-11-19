@@ -27,6 +27,7 @@ from pathlib import Path
 from .backtest.costs import exit_fills, trade_costs
 from .notify.formatter import fmt_price
 from .panel_regime import regime_view
+from .pulse import view as pulse_view
 from .store.repository import Repository
 
 try:
@@ -158,6 +159,7 @@ def _db_trades(repo: Repository, system: str, approved: bool, since: int) -> lis
             "filled_at": lc.get("filled_at"), "closed_at": lc.get("closed_at"), "status": s["status"],
             "entry": lc["entry"], "sl": lc["sl"], "sl_now": lc.get("sl_now", lc["sl"]),
             "tp1": lc["tp1"], "tp2": lc["tp2"], "risk_pct": (p.get("plan") or {}).get("risk_pct") or 0.0,
+            "base_risk": p.get("base_risk_pct"), "regime_name": (p.get("regime") or {}).get("name"),
             "gross_r": lc["realized_r"], "open_frac": lc.get("open_frac", 1.0), "events": events,
             "leverage": (p.get("plan") or {}).get("leverage"),
             "why": [FLAG_FA.get(f, f) for f in (p.get("evaluation") or {}).get("flags") or []],
@@ -180,6 +182,48 @@ def _detail(p: dict) -> dict:
             "plan": {k: plan.get(k) for k in PLAN_KEYS if plan.get(k) is not None},
             "regime": reg.get("name"), "bias": reg.get("bias"), "sub_system": p.get("system"),
             "majors": {k: maj.get(k) for k in ("btc", "eth", "ethbtc", "btc_weak") if k in maj}}
+
+
+def _base_risk_now(cfg: dict, system: str, regime_name: str | None) -> float | None:
+    """The base risk % the system uses today (system 1: the config of that price regime)."""
+    try:
+        if system == "سیستم ۲":
+            from .system2 import system2_config
+            return system2_config(cfg)["trade"]["base_risk_pct"]
+        from .regime_systems import system_cfg
+        c = system_cfg(cfg, regime_name) or cfg
+        return c["trade"]["base_risk_pct"]
+    except (KeyError, SystemExit, TypeError):
+        return None
+
+
+def restate_risk(trades: list[dict], cfg: dict) -> None:
+    """2026-11-18 (Ali): the accounts show every trade at the risk the systems use today. A trade's
+    risk % (grade share, regime and counter-trend multipliers included) is scaled by today's base
+    risk / the base it was sized with: stored on the plan since then, from panel.restate_risk before.
+    Capped where the stop is so tight the leverage cap would not allow the bigger position."""
+    table = (cfg.get("panel") or {}).get("restate_risk")
+    if not table:
+        return
+    now_cache: dict = {}
+    lev_cap = cfg["trade"].get("leverage_cap") or 10
+    for t in trades:
+        old = t.get("base_risk")
+        if old is None:
+            row = table.get(t["system"]) or {}
+            old = row.get(t.get("regime_name") or "", row.get("default"))
+        key = (t["system"], t.get("regime_name"))
+        if key not in now_cache:
+            now_cache[key] = _base_risk_now(cfg, *key)
+        new = now_cache[key]
+        if not old or not new or abs(new - old) < 1e-9 or not t.get("risk_pct"):
+            continue
+        risk = t["risk_pct"] * new / old
+        sl_pct = abs(t["entry"] - t["sl"]) / t["entry"] * 100 if t.get("entry") else None
+        if sl_pct:
+            risk = min(risk, (t.get("leverage") or lev_cap) * sl_pct)
+        t["risk_pct_opened"] = t["risk_pct"]
+        t["risk_pct"] = risk
 
 
 def _backfill(cfg: dict, since: int, watch_until: dict[str, int | None]) -> tuple[list[dict], dict]:
@@ -208,7 +252,8 @@ def _backfill(cfg: dict, since: int, watch_until: dict[str, int | None]) -> tupl
             "grade": t["grade"], "score": t["score"], "created": t["created"],
             "filled_at": t["filled_at"], "closed_at": t["closed_at"], "status": t["status"],
             "entry": t["entry"], "sl": t["sl"], "sl_now": t["sl"], "tp1": t.get("tp1"), "tp2": t.get("tp2"),
-            "risk_pct": t.get("risk_pct") or 0.0, "gross_r": t["gross_r"], "open_frac": max(0.0, left),
+            "risk_pct": t.get("risk_pct") or 0.0, "base_risk": None, "regime_name": t.get("regime"),
+            "gross_r": t["gross_r"], "open_frac": max(0.0, left),
             "events": events, "leverage": None, "why": [], "detail": {},
             "costs": {k: t.get(k) for k in ("fee_r", "slippage_r", "funding_r", "net_r")},
         })
@@ -329,8 +374,8 @@ def simulate(trades: list[dict], balance: float, start: int, now: int, prices=No
         t["fee_usd"] = t["risk_usd"] * t["cost_r"]
     # what is not booked yet: the open part, priced now
     unreal = sum(t["risk_usd"] * t["open_r"] - t["booked_usd"] for t in open_ if t.get("open_r") is not None)
-    for t in open_:
-        if t["sl_pct"]:
+    for t in rows:                                # every filled trade (2026-11-18: the panel shows the $ in and out)
+        if t["filled_at"] and t.get("risk_usd") is not None and t["sl_pct"]:
             t["size_usd"] = t["risk_usd"] / (t["sl_pct"] / 100)
     done = closed + partial                       # every trade with a booked result
     res = [t["booked_usd"] for t in done]
@@ -434,9 +479,24 @@ def collect(cfg: dict, now_ms: int) -> dict:
                     srepo.close()
         backfill, out["replay"] = _backfill(cfg, start, out["shadow_since"])
         out["trades"] += backfill
+        restate_risk(out["trades"], cfg)
         for t in out["trades"]:
             _value(t, cfg, price_repo)
         prices = _price_paths(price_repo, {t["base"] for t in out["trades"] if t["filled_at"]})
+        out["pulse"] = {}
+        if price_repo is not None:
+            try:                                  # display and hypothetical only (pulse.py)
+                out["pulse"] = pulse_view(price_repo.get_state("pulse", []) or [], out["trades"], prices,
+                                          now_ms, cfg)
+            except (sqlite3.Error, ValueError, TypeError, KeyError, IndexError):
+                out["pulse"] = {}
+        out["scorecard"] = {}
+        try:                                      # measurement period (scorecard.py)
+            from .scorecard import view as scorecard_view
+            hist = (price_repo.get_state("rules_fp", {}) if price_repo is not None else {}) or {}
+            out["scorecard"] = scorecard_view(cfg, out["trades"], hist, now_ms)
+        except (sqlite3.Error, ValueError, TypeError, KeyError, SystemExit) as e:
+            print(f"scorecard skipped: {e}")
         if price_repo is not None:
             try:
                 out["regime"] = regime_view(price_repo, now_ms, cfg)
@@ -534,6 +594,7 @@ def _trade_rows(data: dict) -> list[dict]:
             "pnl_usd": _num(t.get("pnl_usd"), 6),
             "own_risk_usd": _num(mine.get("risk_usd"), 6), "own_pnl_usd": _num(mine.get("pnl_usd"), 6),
             "own_balance_after": _num(mine.get("balance_after"), 8),
+            "pulse": t.get("pulse"),
         })
     return rows
 
@@ -667,6 +728,8 @@ def payload(cfg: dict, data: dict) -> dict:
         "accounts": {k: _account_summary(data["accounts"][k]) for k in ("approved", "watch", "all")},
         "trades": trades, "systems": systems, "compare": _compare(data),
         "regime": data.get("regime") or {},
+        "pulse": data.get("pulse") or {},
+        "scorecard": data.get("scorecard") or {},
         "dominance": _dominance(cfg), "shadow_since": data["shadow_since"],
         "news": [{"ts": n["seen_at"], "coins": n["coins"], "level": n["level"], "title": n["title"],
                   "url": n["url"] if (n.get("url") or "").startswith(("http://", "https://")) else None,
@@ -842,6 +905,18 @@ def insights(cfg: dict, pl: dict) -> None:
     pl["marks"] = pi.read_marks(cfg)
     pl["market"] = pi.market_data(cfg, _market_bases(pl), now)
     pl["panel_api"] = bool((cfg.get("panel") or {}).get("api"))
+    pl["tr"] = news_fa(cfg, pl)
+
+
+def news_fa(cfg: dict, pl: dict) -> dict:
+    """Persian news titles (2026-11-17, Ali): {english: persian}; switched off, only the ones already translated."""
+    try:
+        from .news import translate
+        on = bool((cfg.get("panel") or {}).get("translate_news"))
+        return translate.translate_titles(translate.cache_path(cfg), translate.titles_in(pl), max_new=40 if on else 0)
+    except Exception as e:                          # noqa: BLE001  (display only: never blocks the build)
+        print(f"news translation skipped: {e}")
+        return {}
 
 
 def _app_version() -> str:

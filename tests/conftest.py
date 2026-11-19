@@ -7,7 +7,7 @@ from agent.config import load_config
 def cfg():
     c = load_config()
     # tests never reach the network or the live panel: no chart links in messages, no market data
-    c.setdefault("panel", {}).update(url="", market_data=False)
+    c.setdefault("panel", {}).update(url="", market_data=False, translate_news=False)
     return c
 
 
