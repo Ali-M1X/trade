@@ -431,3 +431,4 @@ table.xt tr.xdet>td{padding:0;background:var(--card2);white-space:normal;text-al
 .sctab td.sc-pos{color:var(--pos)}.sctab td.sc-neg{color:var(--neg)}
 .sctab td.sc-pos b,.sctab td.sc-neg b{color:inherit}
 .scsec .pverdict{margin-top:4px}
+.lv.lvexit{border-color:var(--warn)}.lv.lvexit .l{color:var(--warn)}

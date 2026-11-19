@@ -172,6 +172,14 @@
   function openTrades() { return trades().filter(function (t) { return t.open && t.filled_at; }); }
   function pendingTrades() { return trades().filter(function (t) { return t.status === "pending"; }); }
   function closedTrades() { return trades().filter(function (t) { return !t.open; }); }
+  // 2026-11-19 (Ali): a closed trade's exit (price, time, why) in the tables, the details and on its chart
+  var EXIT_FA = {sl: "استاپ", tp3: "خروج با سود", tp2: "TP2", tp1: "TP1", breakeven: "سر به سر"};
+  function exitOf(t) {
+    if (!t || t.cand || t.open || !t.filled_at) return null;
+    var ev = (t.events || []).filter(function (e) { return e[2] != null && e[0] !== "filled"; });
+    var e = ev.filter(function (x) { return x[1] === t.closed_at; }).pop() || ev.pop();
+    return e ? {price: e[2], ts: e[1] || t.closed_at, kind: e[0], why: EXIT_FA[e[0]] || t.status_fa} : null;
+  }
   function isPartial(t) { return !!(t.open && t.filled_at && t.open_frac != null && t.open_frac < 0.999); }
   function partlyClosed() { return trades().filter(isPartial); }
   // one rule for every result in the panel (2026-11-16, Ali: "the same numbers everywhere"):
@@ -611,10 +619,10 @@
     } else {
       head = ["نماد", "جهت", "نوع", "اهرم", "ورود", "خروج", "نتیجه", "دلار ورودی", "دلار خروجی", "سود/زیان", "سود٪", "مدت", "زمان بسته شدن"];
       rows = closed.map(function (t) {
-        var ex = (t.events || []).filter(function (e) { return e[2] != null && e[0] !== "filled"; }).pop();
+        var ex = exitOf(t);
         var h = t.closed_at && t.filled_at ? (t.closed_at - t.filled_at) / 3600000 : null;
         return rowOpen(t) + "<td>" + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(t.entry) +
-          '</td><td class="num">' + px(ex ? ex[2] : null) + "</td><td>" + esc(t.status_fa) + "</td>" + usdCell(marginUsd(t)) + usdCell(outUsd(t)) + "<td>" + usd(pnlUsd(t)) + " " + R(t.net_r) + "</td>" + pctCell(t) +
+          '</td><td class="num">' + px(ex ? ex.price : null) + "</td><td>" + esc(t.status_fa) + "</td>" + usdCell(marginUsd(t)) + usdCell(outUsd(t)) + "<td>" + usd(pnlUsd(t)) + " " + R(t.net_r) + "</td>" + pctCell(t) +
           '<td data-v="' + (h == null ? "" : h) + '">' + (h == null ? "—" : dur(h)) + "</td>" + tsCell(t.closed_at) + "</tr>";
       });
       foot = totRow([{span: 7, v: "جمع " + fa(closed.length) + " معامله"}, usd(sumOf(closed, function (t) { return marginUsd(t); }), false),
@@ -660,7 +668,7 @@
       '<button data-i="vol" class="' + (IND.vol ? "on" : "") + '">حجم</button></div><span class="ohlc ltr" id="ohlc"></span></div>' +
       '<div class="chartbox tall" id="tv-chart"><div class="empty">در حال بارگذاری نمودار…</div></div>' +
       '<div class="legend"><span><i style="background:' + cssv("--acc") + '"></i>ورود</span><span><i style="background:' + cssv("--neg") + '"></i>استاپ</span>' +
-      '<span><i style="background:' + cssv("--pos") + '"></i>تارگت‌ها</span><small>فلش‌ها: زمان سیگنال، ورود و خروج‌ها · کندل آخر با قیمت زنده جلو می‌رود</small></div>';
+      '<span><i style="background:' + cssv("--pos") + '"></i>تارگت‌ها</span>' + (exitOf(t) ? '<span><i style="background:' + cssv("--warn") + '"></i>خروج</span>' : "") + '<small>فلش‌ها: زمان سیگنال، ورود و خروج‌ها · کندل آخر با قیمت زنده جلو می‌رود</small></div>';
     decorateTips(box);
     document.getElementById("ind").onclick = function (e) {
       var b = e.target.closest("button"); if (!b) return;
@@ -761,8 +769,10 @@
     if (t.sl_now != null && Math.abs(t.sl_now - t.sl) > 1e-12) line(t.sl_now, dn, "استاپ الان", 0);
     line(t.tp1, up, "TP1", 2);
     line(t.tp2, up, "TP2", 2);
+    var xo = exitOf(t);
+    if (xo) line(xo.price, cssv("--warn"), "خروج", 0);
     // keep the entry, the current stop and TP1 on screen, even when price has moved far away
-    var keep = [t.entry, t.sl_now != null ? t.sl_now : t.sl, t.tp1].filter(function (v) { return v != null && isFinite(v) && v > 0; });
+    var keep = [t.entry, t.sl_now != null ? t.sl_now : t.sl, t.tp1, xo ? xo.price : null].filter(function (v) { return v != null && isFinite(v) && v > 0; });
     if (keep.length) cs.applyOptions({autoscaleInfoProvider: function (orig) {
       var r = orig(); if (!r || !r.priceRange) return r;
       return {priceRange: {minValue: Math.min.apply(null, keep.concat([r.priceRange.minValue])),
@@ -785,8 +795,10 @@
         expired: ["منقضی", cssv("--muted")], cancelled: ["لغو", cssv("--muted")]};
       (t.events || []).forEach(function (e) {
         var m = EV[e[0]]; if (!m) return;
+        if (xo && e[1] === xo.ts && e[0] === xo.kind) return;            // the exit gets its own mark below
         mark(e[1], m[0], m[1], long ? "aboveBar" : "belowBar", long ? "arrowDown" : "arrowUp");
       });
+      if (xo) mark(xo.ts, "خروج · " + xo.why + " " + px(xo.price), cssv("--warn"), long ? "aboveBar" : "belowBar", long ? "arrowDown" : "arrowUp");
     }
     marks.sort(function (a, b) { return a.time - b.time; });
     cs.setMarkers(marks);
@@ -850,7 +862,11 @@
         usd(t.open ? (risk != null && r != null ? risk * r : null) : tPnl(t)) + "</span></div>" +
         '<div class="lv"><span class="l">درصد ریسک / فاصله‌ی استاپ</span><span class="v">' + (t.risk_pct || 0).toFixed(2) + "% / " + (t.sl_pct || 0).toFixed(2) + "%</span></div>";
     }
-    return '<div class="levels">' + lv("قیمت الان", p) + lv("ورود", t.entry, 1) + lv(t.open ? "استاپ الان" : "استاپ", t.open ? t.sl_now : t.sl, 1, t.open) +
+    var xo = exitOf(t), xd = xo && t.entry ? (xo.price - t.entry) / t.entry * 100 : null;
+    var exit = xo ? '<div class="lv lvexit"><span class="l">خروج · ' + esc(xo.why) + '</span><span class="v">' + px(xo.price) + "</span>" +
+      (xd != null ? '<span class="d ' + cls(xd * (t.side || 1)) + '">' + (xd > 0 ? "+" : "") + xd.toFixed(2) + "% از ورود</span>" : "") +
+      '<span class="d">' + esc(jfmt(xo.ts, "dt")) + "</span></div>" : "";
+    return '<div class="levels">' + (xo ? exit : lv("قیمت الان", p)) + lv("ورود", t.entry, 1) + lv(t.open ? "استاپ الان" : "استاپ", t.open ? t.sl_now : t.sl, 1, t.open) +
       lv("TP1", t.tp1, 1, t.open) + lv("TP2", t.tp2, 1, t.open) + money + "</div>";
   }
   var SEC = {phase: "فاز", dow: "ساختار داو", levels: "سطوح", volume: "حجم", candles: "کندل", cycles: "سیکل", patterns: "الگو و روند", confirmation: "تأیید ورود"};
