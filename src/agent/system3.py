@@ -53,6 +53,7 @@ DEFAULTS = {
     "max_bars": 48, "max_open": 3, "day_losses": 3, "cooldown_h": 6,
     "fee_taker_pct": 0.05, "slippage_pct": 0.2, "fee_maker_pct": 0.02,
     "leverage_cap": 10, "liquidation_sl_multiple": 2.5, "scan_delay_s": 60,
+    "live_json": None,
 }
 
 
@@ -222,12 +223,12 @@ def new_message(tr: dict, cfg: dict) -> str:
         + ("حالا در کندل ۱ ساعته‌ی جاری (هنوز باز) سقف پایین‌تر و قیمت زیر کف کندل قبل" if fast
            else "حالا سقف پایین‌تر و بسته شدن زیر کف کندل قبل"),
         f"سفارش تا {_t(tr['expires_at'])} معتبر است؛ خروج زمانی بعد از ۴۸ ساعت.",
-    ]) + _link(cfg)
+    ]) + _link(cfg, tr.get("mode") or "hourly")
 
 
-def _link(cfg: dict) -> str:
+def _link(cfg: dict, mode: str = "hourly") -> str:
     url = ((cfg.get("panel") or {}).get("url") or "").rstrip("/")
-    return f"\nپنل: {url}/#s3" if url.startswith("https://") else ""
+    return f"\nپنل: {url}/#s3/{mode}" if url.startswith("https://") else ""
 
 
 def event_message(tr: dict, kind: str) -> str:
@@ -464,6 +465,23 @@ def run(cfg: dict, repo3, client, cg, notifier, now: int) -> None:
         found = scan_fast(cfg, repo3, fast, client, out, now)
         if found:
             print(f"system3 fast: {len(found)} setups")
+    publish(cfg, now)
+
+
+def publish(cfg: dict, now: int) -> str | None:
+    """The panel's System 3 data, written by the run itself (2026-11-19, Ali: Telegram was minutes ahead of
+    the panel, which is rebuilt only after the whole run). The page reads it every few seconds."""
+    import json
+    import os
+    from pathlib import Path
+    path = settings(cfg).get("live_json")
+    if not path or not Path(path).parent.is_dir():
+        return None
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(panel_view(cfg, now), f, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp, path)
+    return path
 
 
 # ------------------------------------------------------------------ panel
@@ -475,7 +493,7 @@ def panel_view(cfg: dict, now: int) -> dict:
     from .store.repository import Repository
     c = settings(cfg)
     path = c["db_path"]
-    out = {"enabled": enabled(cfg), "since": _ms(c["since"]), "review_days": c["review_days"],
+    out = {"enabled": enabled(cfg), "now": now, "since": _ms(c["since"]), "review_days": c["review_days"],
            "risk_pct": c["risk_pct"], "balance_usd": c["balance_usd"], "trades": [], "scan": {},
            "rules": {k: c[k] for k in ("run_pct", "tp_retrace", "min_stop", "max_stop", "fill_bars", "max_bars",
                                         "max_open", "day_losses", "min_rank", "min_volume_usd")}}

@@ -1789,64 +1789,37 @@
   // ------------------------------------------------------------------ system 3 (paper only, 2026-11-19)
   // Ali: «سیستم ۱ و ۲ رو دست نزنیم. سیستم ۳ رو راه اندازی کنیم». Its own page, its own $100 account: none of it
   // reaches systems 1 and 2's tables, accounts or the measurement period.
+  // 2026-11-19 (Ali: «تو تلگرام زود میاد اما در پنل دیر»): the run writes s3.json the moment it acts, the page
+  // reads it every 5 s and prices the open trades live; only the tables are redrawn, the chart keeps its zoom.
   var S3DONE = ["tp", "sl", "time"];
   function s3() { return D.system3 || {}; }
   var S3MODE = {hourly: ["ساعتی (تست‌شده)", "بعد از بسته شدن هر کندل ۱ ساعته؛ همان قانون بک‌تست"],
     fast: ["سریع (هر دقیقه)", "هر دقیقه روی کندل ۱ ساعته‌ای که هنوز باز است؛ زودتر وارد می‌شود ولی بک‌تست ندارد"]};
   function s3Mode() { return S.s3mode === "fast" && s3().fast ? "fast" : "hourly"; }
-  function s3Rows() {
+  function s3Live(t) {                        // an open trade at the exchange's price now (the build's 5m close otherwise)
+    var L = S.live[t.base];
+    if (t.status !== "active" || !L || !L.price || !(t.sl > t.entry)) return;
+    t.price = L.price;
+    t.open_r = (t.entry - L.price) / (t.sl - t.entry);
+    if (t.risk_usd != null) t.pnl_usd = t.risk_usd * t.open_r;
+    t.pnl_pct = t.open_r * t.sl_pct * (t.leverage || 1);
+  }
+  function s3Rows(all) {
     var m = s3Mode();
-    return (s3().trades || []).filter(function (t) { return (t.mode || "hourly") === m; }).map(function (t) {
+    return (s3().trades || []).filter(function (t) { return all || (t.mode || "hourly") === m; }).map(function (t) {
       t.open = t.status === "active" || t.status === "pending";
       t.system = "سیستم ۳";
       t.tp1_label = "تارگت";
+      s3Live(t);
       return t;
     });
   }
   function s3Px(v, extra) { return '<td data-v="' + (v == null ? "" : v) + '"><span class="ltr">' + px(v) + "</span>" + (extra || "") + "</td>"; }
   function s3Pct(t) { return '<td class="xpc" data-v="' + (t.pnl_pct == null ? "" : t.pnl_pct.toFixed(3)) + '">' + pct(t.pnl_pct) + "</td>"; }
   function s3Tab() {
-    var d = s3(), mode = s3Mode(), a = (d.accounts || {})[mode] || d.account || {}, rows = s3Rows(), sc = d.scan || {};
-    if (!d.enabled && !rows.length) { app.innerHTML = '<section><h2>سیستم ۳</h2><div class="empty">سیستم ۳ خاموش است.</div></section>'; return; }
-    var DAYMS = 86400000, end = d.since + (d.review_days || 30) * DAYMS, left = Math.ceil((end - Date.now()) / DAYMS);
-    var live = rows.filter(function (t) { return t.open; }).sort(byCreated);
-    var done = rows.filter(function (t) { return S3DONE.indexOf(t.status) >= 0; }).sort(function (x, y) { return y.closed_at - x.closed_at; });
-    var gone = rows.filter(function (t) { return !t.open && S3DONE.indexOf(t.status) < 0; }).sort(byCreated);
-    var pnl = a.balance != null ? a.balance - a.start : null;
-    var modes = d.fast ? '<div class="xtabs s3modes">' + ["hourly", "fast"].map(function (m) {
-      var acc = (d.accounts || {})[m] || {};
-      return '<button data-s3m="' + m + '" class="' + (m === mode ? "on" : "") + '">' + S3MODE[m][0] + ' <small class="muted">' + fa(acc.closed || 0) + " بسته · " + fa((acc.open || 0) + (acc.pending || 0)) + " باز</small></button>";
-    }).join("") + '<small class="muted s3mnote">' + S3MODE[mode][1] + "</small></div>" : "";
-    var verdict = left > 0
-      ? "دوره‌ی آزمایشی کاغذی: از " + esc(jfmt(d.since, "date")) + " تا " + esc(jfmt(end, "date")) + " (" + fa(left) + " روز مانده). بعد از آن نتیجه را با بک‌تست مقایسه می‌کنیم و تصمیم با توست."
-      : "یک ماه آزمایش کاغذی تمام شد. وقت مقایسه با بک‌تست و تصمیم است.";
-    var kpis = '<div class="grid g4">' +
-      statCard("حساب ۱۰۰ دلاری", usd(a.balance, false) + " " + usd(pnl), "ریسک " + fa(d.risk_pct) + "٪ هر معامله · بیشترین افت " + pct(a.max_dd_pct ? -a.max_dd_pct : 0)) +
-      statCard("معامله‌های بسته", fa(a.closed || 0), a.closed ? "برد " + fa(a.wins) + " از " + fa(a.closed) + " (" + fa(Math.round(a.wins / a.closed * 100)) + "٪)" : "هنوز معامله‌ای بسته نشده") +
-      statCard("جمع R خالص", R(a.net_r || 0), "میانگین " + (a.avg_r == null ? "—" : R(a.avg_r)) + " · ضریب سود " + (a.pf == null ? "—" : '<span class="ltr">' + a.pf.toFixed(2) + "</span>")) +
-      statCard("الان", fa(a.open || 0) + ' <small class="muted">باز · ' + fa(a.pending || 0) + " سفارش</small>",
-        "اسکن " + (mode === "fast" && sc.fast_ts ? "سریع " + ago(sc.fast_ts) : "ساعتی " + ago(sc.ts)) + (sc.coins ? " · " + fa(sc.movers || 0) + " کوین پرنوسان از " + fa(sc.coins) : "")) + "</div>";
-    var sel = rows.filter(function (t) { return t.id === S.s3sel; })[0] || live.filter(function (t) { return t.status === "active"; })[0] || live[0] || done[0] || null;
-    var chart = sel ? '<section class="xview"><h2 class="s3head"><b>' + esc(sel.base) + "</b> " + side(sel.side) + ' <span class="muted">' + esc(sel.status_fa) + " · ۱ ساعته</span></h2>" +
-      '<div class="chartbox tall" id="s3chart"><div class="empty">در حال گرفتن کندل‌ها از صرافی…</div></div></section>' : "";
-    function rowCls(t) { return 'class="click' + (sel && t.id === sel.id ? " xopen" : "") + '" data-s3="' + esc(t.id) + '"'; }
-    var liveHtml = live.length ? '<div class="scroll"><table data-defsort="9:desc"><thead><tr><th>کوین</th><th>وضعیت</th><th>سیگنال</th><th>اهرم</th><th>ورود</th><th>استاپ</th><th>تارگت</th><th>قیمت</th><th>سود/زیان</th><th>سود٪</th></tr></thead><tbody>' +
-      live.map(function (t) {
-        return "<tr " + rowCls(t) + "><td><b>" + esc(t.base) + "</b> " + side(t.side) + "</td><td>" + esc(t.status_fa) + (t.status === "pending" ? ' <small class="muted">تا ' + esc(jfmt(t.expires_at)) + "</small>" : "") + "</td>" +
-          tsCell(t.created) + levCell(t) + s3Px(t.entry) + s3Px(t.sl, ' <small class="muted">' + fa(t.sl_pct) + "٪</small>") + s3Px(t.target) +
-          s3Px(t.price) + "<td>" + (t.status === "active" ? RU(t.open_r, t.pnl_usd) : "—") + "</td>" + s3Pct(t) + "</tr>";
-      }).join("") + "</tbody>" + totRow([{span: 8, v: "جمع " + fa(live.length)}, RU(sumOf(live, function (t) { return t.open_r; }), sumOf(live, function (t) { return t.pnl_usd; })), ""]) + "</table></div>"
-      : '<div class="empty">الان پوزیشن یا سفارشی باز نیست. ' + (mode === "fast" ? "کوین‌های پرنوسان هر دقیقه بررسی می‌شوند." : "هر ساعت، یک دقیقه بعد از بسته شدن کندل، کوین‌های پرنوسان اسکن می‌شوند.") + "</div>";
-    var doneHtml = done.length ? '<div class="scroll"><table data-defsort="3:desc"><thead><tr><th>کوین</th><th>نتیجه</th><th>ورود</th><th>خروج</th><th>قیمت ورود</th><th>قیمت خروج</th><th>اهرم</th><th>R خالص</th><th>سود٪</th></tr></thead><tbody>' +
-      done.map(function (t) {
-        return "<tr " + rowCls(t) + "><td><b>" + esc(t.base) + "</b> " + side(t.side) + '</td><td class="' + (t.net_r > 0 ? "pos" : "neg") + '">' + esc(t.status_fa) + "</td>" + tsCell(t.filled_at) + tsCell(t.closed_at) +
-          s3Px(t.entry) + s3Px(t.exit) + levCell(t) + "<td>" + RU(t.net_r, t.pnl_usd) + "</td>" + s3Pct(t) + "</tr>";
-      }).join("") + "</tbody>" + totRow([{span: 7, v: "جمع " + fa(done.length) + " معامله"}, RU(sumOf(done, function (t) { return t.net_r; }), sumOf(done, function (t) { return t.pnl_usd; })), ""]) + "</table></div>"
-      : '<div class="empty">هنوز معامله‌ای بسته نشده.</div>';
-    var goneHtml = gone.length ? '<details class="calpast s3gone"><summary>سفارش‌های پرنشده (' + fa(gone.length) + ")</summary><div class=\"scroll\"><table><thead><tr><th>کوین</th><th>وضعیت</th><th>سیگنال</th><th>قیمت لیمیت</th><th>چرا</th></tr></thead><tbody>" +
-      gone.map(function (t) {
-        return "<tr " + rowCls(t) + "><td><b>" + esc(t.base) + "</b></td><td>" + esc(t.status_fa) + "</td>" + tsCell(t.created) + s3Px(t.limit) + "<td>" + esc(t.why_fa || (t.status === "expired" ? "قیمت در ۶ ساعت به لیمیت نرسید" : "")) + "</td></tr>";
-      }).join("") + "</tbody></table></div></details>" : "";
+    if (S.sel === "fast" || S.sel === "hourly") { S.s3mode = S.sel; S.sel = null; }   // #s3/fast from a Telegram message
+    var d = s3();
+    if (!d.enabled && !(d.trades || []).length) { app.innerHTML = '<section><h2>سیستم ۳</h2><div class="empty">سیستم ۳ خاموش است.</div></section>'; return; }
     var r = d.rules || {};
     var rules = '<section><h2>قانون‌های سیستم ۳</h2><ul class="s3rules">' +
       "<li>کوین‌ها: رتبه‌ی " + fa((r.min_rank || 20) + 1) + " به پایین در CoinGecko، حجم ۲۴ ساعته دست‌کم " + "$" + fa((r.min_volume_usd || 3e6) / 1e6) + " میلیون" + "، با قرارداد دائمی در Gate.</li>" +
@@ -1857,25 +1830,107 @@
       "<li>نسخه‌ی سریع: همین قانون‌ها، ولی هر دقیقه روی کندل ۱ ساعته‌ی باز بررسی می‌شود (قیمت لحظه‌ای به‌جای بسته شدن کندل)، سفارش از لحظه‌ی سیگنال ۶ ساعت معتبر است، و حساب و سقف معامله‌هایش جداست. بک‌تست ندارد؛ بعد از یک ماه با نسخه‌ی ساعتی مقایسه می‌شود.</li>" +
       "<li>بک‌تست نسخه‌ی ساعتی (کارمزد و لغزش حساب شده): آموزش تا ۲۶ تیر ۱۱۵ معامله و ‎+20.1R، آزمون بعد از آن ۹۶ معامله و ‎+11.9R، ضریب سود ۱٫۲۲، هر ۵ ماه آزمون مثبت.</li>" +
       "</ul></section>";
-    app.innerHTML = '<section><h2>سیستم ۳ · شورت ته پامپ <small class="muted">آزمایشی، کاغذی</small></h2>' + modes + '<div class="pverdict">' + verdict + "</div>" + kpis + "</section>" +
-      '<div class="xfull">' + chart + "</div>" +
-      "<section><h2>پوزیشن‌ها و سفارش‌های باز</h2>" + liveHtml + "</section>" +
-      "<section><h2>معامله‌های بسته</h2>" + doneHtml + goneHtml + "</section>" + rules;
-    app.querySelectorAll("button[data-s3m]").forEach(function (b) {
-      b.addEventListener("click", function () { S.s3mode = b.getAttribute("data-s3m"); S.s3sel = null; try { localStorage.setItem("s3mode", S.s3mode); } catch (e) {} render(); });
-    });
-    app.querySelectorAll("tr[data-s3]").forEach(function (tr) {
-      tr.addEventListener("click", function () { S.s3sel = tr.getAttribute("data-s3"); render(); var v = app.querySelector(".xview"); if (v) v.scrollIntoView({behavior: "smooth", block: "start"}); });
-    });
-    if (sel) {
-      freshCandles(sel.base, "1h").then(function (c) {
-        var el = document.getElementById("s3chart");
-        if (!el || S.tab !== "s3") return;
-        if (!c || !c.length) { el.innerHTML = '<div class="empty">کندل‌ها از صرافی نرسید.</div>'; return; }
-        el.innerHTML = "";
-        drawTrade(el, sel, c, "1h");
-      });
+    app.innerHTML = '<section id="s3top"></section><div class="xfull" id="s3chartwrap"></div><div id="s3body"></div>' + rules;
+    S.s3drawn = null;
+    app.addEventListener("click", s3Click);
+    s3Fill();
+  }
+  function s3Click(e) {
+    if (S.tab !== "s3") { app.removeEventListener("click", s3Click); return; }
+    var b = e.target.closest("button[data-s3m]");
+    if (b) { S.s3mode = b.getAttribute("data-s3m"); S.s3sel = null; try { localStorage.setItem("s3mode", S.s3mode); } catch (err) {} s3Fill(); return; }
+    var tr = e.target.closest("tr[data-s3]");
+    if (tr && !e.target.closest("th")) {
+      S.s3sel = tr.getAttribute("data-s3"); s3Fill();
+      var v = document.getElementById("s3chartwrap"); if (v) v.scrollIntoView({behavior: "smooth", block: "start"});
     }
+  }
+  function s3Fill() {
+    var top = document.getElementById("s3top"), body = document.getElementById("s3body"), wrap = document.getElementById("s3chartwrap");
+    if (!top || !body || S.tab !== "s3") return;
+    var d = s3(), mode = s3Mode(), a = (d.accounts || {})[mode] || d.account || {}, rows = s3Rows(), sc = d.scan || {};
+    var DAYMS = 86400000, end = d.since + (d.review_days || 30) * DAYMS, left = Math.ceil((end - Date.now()) / DAYMS);
+    var live = rows.filter(function (t) { return t.open; }).sort(byCreated);
+    var done = rows.filter(function (t) { return S3DONE.indexOf(t.status) >= 0; }).sort(function (x, y) { return y.closed_at - x.closed_at; });
+    var gone = rows.filter(function (t) { return !t.open && S3DONE.indexOf(t.status) < 0; }).sort(byCreated);
+    var floatUsd3 = sumOf(live, function (t) { return t.status === "active" ? t.pnl_usd : null; });
+    var pnl = a.balance != null ? a.balance - a.start : null;
+    var modes = d.fast ? '<div class="xtabs s3modes">' + ["hourly", "fast"].map(function (m) {
+      var acc = (d.accounts || {})[m] || {};
+      var n = (d.trades || []).filter(function (t) { return (t.mode || "hourly") === m && (t.status === "active" || t.status === "pending"); }).length;
+      return '<button data-s3m="' + m + '" class="' + (m === mode ? "on" : "") + '">' + S3MODE[m][0] + ' <small class="muted">' + fa(acc.closed || 0) + " بسته · " + fa(n) + " باز</small></button>";
+    }).join("") + '<small class="muted s3mnote">' + S3MODE[mode][1] + "</small></div>" : "";
+    var verdict = left > 0
+      ? "دوره‌ی آزمایشی کاغذی: از " + esc(jfmt(d.since, "date")) + " تا " + esc(jfmt(end, "date")) + " (" + fa(left) + " روز مانده). بعد از آن نتیجه را با بک‌تست مقایسه می‌کنیم و تصمیم با توست."
+      : "یک ماه آزمایش کاغذی تمام شد. وقت مقایسه با بک‌تست و تصمیم است.";
+    var fresh = d.now ? '<small class="muted s3fresh">داده‌ی سیستم ۳: ' + ago(d.now) + "</small>" : "";
+    top.innerHTML = '<h2>سیستم ۳ · شورت ته پامپ <small class="muted">آزمایشی، کاغذی</small></h2>' + modes + '<div class="pverdict">' + verdict + "</div>" +
+      '<div class="grid g4">' +
+      statCard("حساب ۱۰۰ دلاری", usd(a.balance, false) + " " + usd(pnl), "ریسک " + fa(d.risk_pct) + "٪ هر معامله · بیشترین افت " + pct(a.max_dd_pct ? -a.max_dd_pct : 0)) +
+      statCard("معامله‌های بسته", fa(a.closed || 0), a.closed ? "برد " + fa(a.wins) + " از " + fa(a.closed) + " (" + fa(Math.round(a.wins / a.closed * 100)) + "٪)" : "هنوز معامله‌ای بسته نشده") +
+      statCard("جمع R خالص", R(a.net_r || 0), "میانگین " + (a.avg_r == null ? "—" : R(a.avg_r)) + " · ضریب سود " + (a.pf == null ? "—" : '<span class="ltr">' + a.pf.toFixed(2) + "</span>")) +
+      statCard("الان", fa(live.filter(function (t) { return t.status === "active"; }).length) + ' <small class="muted">باز · ' + fa(live.filter(function (t) { return t.status === "pending"; }).length) + " سفارش · " + usd(floatUsd3) + "</small>",
+        "اسکن " + (mode === "fast" && sc.fast_ts ? "سریع " + ago(sc.fast_ts) : "ساعتی " + ago(sc.ts)) + (sc.coins ? " · " + fa(sc.movers || 0) + " کوین پرنوسان از " + fa(sc.coins) : "")) + "</div>" + fresh;
+    var sel = rows.filter(function (t) { return t.id === S.s3sel; })[0] || live.filter(function (t) { return t.status === "active"; })[0] || live[0] || done[0] || null;
+    function rowCls(t) { return 'class="click' + (sel && t.id === sel.id ? " xopen" : "") + '" data-s3="' + esc(t.id) + '"'; }
+    var liveHtml = live.length ? '<div class="scroll"><table id="s3live" data-defsort="9:desc"><thead><tr><th>کوین</th><th>وضعیت</th><th>سیگنال</th><th>اهرم</th><th>ورود</th><th>استاپ</th><th>تارگت</th><th>قیمت</th><th>سود/زیان</th><th>سود٪</th></tr></thead><tbody>' +
+      live.map(function (t) {
+        return "<tr " + rowCls(t) + "><td><b>" + esc(t.base) + "</b> " + side(t.side) + "</td><td>" + esc(t.status_fa) + (t.status === "pending" ? ' <small class="muted">تا ' + esc(jfmt(t.expires_at)) + "</small>" : "") + "</td>" +
+          tsCell(t.created) + levCell(t) + s3Px(t.entry) + s3Px(t.sl, ' <small class="muted">' + fa(t.sl_pct) + "٪</small>") + s3Px(t.target) +
+          s3Px(S.live[t.base] ? S.live[t.base].price : t.price) + "<td>" + (t.status === "active" ? RU(t.open_r, t.pnl_usd) : "—") + "</td>" + s3Pct(t) + "</tr>";
+      }).join("") + "</tbody>" + totRow([{span: 8, v: "جمع " + fa(live.length)}, RU(sumOf(live, function (t) { return t.status === "active" ? t.open_r : null; }), floatUsd3), ""]) + "</table></div>"
+      : '<div class="empty">الان پوزیشن یا سفارشی باز نیست. ' + (mode === "fast" ? "کوین‌های پرنوسان هر دقیقه بررسی می‌شوند." : "هر ساعت، یک دقیقه بعد از بسته شدن کندل، کوین‌های پرنوسان اسکن می‌شوند.") + "</div>";
+    var doneHtml = done.length ? '<div class="scroll"><table id="s3done" data-defsort="3:desc"><thead><tr><th>کوین</th><th>نتیجه</th><th>ورود</th><th>خروج</th><th>قیمت ورود</th><th>قیمت خروج</th><th>اهرم</th><th>R خالص</th><th>سود٪</th></tr></thead><tbody>' +
+      done.map(function (t) {
+        return "<tr " + rowCls(t) + "><td><b>" + esc(t.base) + "</b> " + side(t.side) + '</td><td class="' + (t.net_r > 0 ? "pos" : "neg") + '">' + esc(t.status_fa) + "</td>" + tsCell(t.filled_at) + tsCell(t.closed_at) +
+          s3Px(t.entry) + s3Px(t.exit) + levCell(t) + "<td>" + RU(t.net_r, t.pnl_usd) + "</td>" + s3Pct(t) + "</tr>";
+      }).join("") + "</tbody>" + totRow([{span: 7, v: "جمع " + fa(done.length) + " معامله"}, RU(sumOf(done, function (t) { return t.net_r; }), sumOf(done, function (t) { return t.pnl_usd; })), ""]) + "</table></div>"
+      : '<div class="empty">هنوز معامله‌ای بسته نشده.</div>';
+    var wasOpen = !!body.querySelector("details.s3gone[open]");
+    var goneHtml = gone.length ? '<details class="calpast s3gone"' + (wasOpen ? " open" : "") + '><summary>سفارش‌های پرنشده (' + fa(gone.length) + ")</summary><div class=\"scroll\"><table id=\"s3gone\"><thead><tr><th>کوین</th><th>وضعیت</th><th>سیگنال</th><th>قیمت لیمیت</th><th>چرا</th></tr></thead><tbody>" +
+      gone.map(function (t) {
+        return "<tr " + rowCls(t) + "><td><b>" + esc(t.base) + "</b></td><td>" + esc(t.status_fa) + "</td>" + tsCell(t.created) + s3Px(t.limit) + "<td>" + esc(t.why_fa || (t.status === "expired" ? "قیمت در ۶ ساعت به لیمیت نرسید" : "")) + "</td></tr>";
+      }).join("") + "</tbody></table></div></details>" : "";
+    body.innerHTML = "<section><h2>پوزیشن‌ها و سفارش‌های باز</h2>" + liveHtml + "</section>" +
+      "<section><h2>معامله‌های بسته</h2>" + doneHtml + goneHtml + "</section>";
+    decorateTips(top); decorateTips(body);
+    // the chart: drawn again only when another trade is picked or its state changed; otherwise the live price moves its last candle
+    var key = sel ? sel.id + "|" + sel.status + "|" + (sel.events || []).length : "";
+    if (!sel) { wrap.innerHTML = ""; S.s3drawn = null; return; }
+    if (S.s3drawn === key) {
+      var L = S.live[sel.base];
+      if (L && current && current.base === sel.base && current.last) {
+        var b = current.last, p = L.price, start = Math.floor(tsec(Date.now()) / current.step) * current.step;
+        var bar = start > b.time ? {time: start, open: b.close, high: Math.max(b.close, p), low: Math.min(b.close, p), close: p}
+          : {time: b.time, open: b.open, high: Math.max(b.high, p), low: Math.min(b.low, p), close: p};
+        try { current.series.update(bar); current.last = bar; } catch (err) {}
+      }
+      return;
+    }
+    S.s3drawn = key;
+    clearCharts();
+    wrap.innerHTML = '<section class="xview"><h2 class="s3head"><b>' + esc(sel.base) + "</b> " + side(sel.side) + ' <span class="muted">' + esc(sel.status_fa) + " · ۱ ساعته</span></h2>" +
+      '<div class="chartbox tall" id="s3chart"><div class="empty">در حال گرفتن کندل‌ها از صرافی…</div></div></section>';
+    freshCandles(sel.base, "1h").then(function (c) {
+      var el = document.getElementById("s3chart");
+      if (!el || S.tab !== "s3" || S.s3drawn !== key) return;
+      if (!c || !c.length) { el.innerHTML = '<div class="empty">کندل‌ها از صرافی نرسید.</div>'; return; }
+      el.innerHTML = "";
+      drawTrade(el, sel, c, "1h");
+    });
+  }
+  var s3Busy = false;
+  function s3Poll() {                        // the run's own s3.json: newer than the last full build of the panel
+    if (S.tab !== "s3" || document.hidden || s3Busy) return;
+    s3Busy = true;
+    fetch("s3.json?t=" + Date.now(), {cache: "no-store"}).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
+      .then(function (j) {
+        s3Busy = false;
+        if (j && j.now && j.now > (s3().now || 0)) { D.system3 = j; s3Fill(); }
+      });
+  }
+  function s3OpenBases() {
+    return (s3().trades || []).filter(function (t) { return t.status === "active" || t.status === "pending"; }).map(function (t) { return t.base; });
   }
   function strategy() { app.innerHTML = D.strategy_html || ""; }
   function method() { app.innerHTML = "<section><h2>روش محاسبه</h2>" + (D.method_html || "") + "</section>"; }
@@ -1889,8 +1944,11 @@
         return fetch("data.json?t=" + Date.now(), {cache: "no-store"}).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
           if (!j || j.now === D.now) { status(); return; }
           var prev = snapshot(D), sel = findSel(S.sel), was = sel ? JSON.stringify([sel.status, sel.sl_now, (sel.events || []).length]) : "";
+          var s3prev = D.system3;
           D = j; MK = D.market || {}; candleCache = {};
+          if (s3prev && s3prev.now && (!j.system3 || (j.system3.now || 0) < s3prev.now)) D.system3 = s3prev;   // s3.json was newer
           notifyChanges(prev, j);
+          if (S.tab === "s3") { status(); s3Fill(); return; }   // the chart keeps its zoom
           if (S.tab !== "chart") { render(); return; }
           status(); renderBottom();             // the chart keeps its zoom; only a changed trade is redrawn
           var t = findSel(S.sel);
@@ -1904,6 +1962,7 @@
     var sel = findSel(S.sel); if (sel && S.tab === "chart") set[sel.base] = 1;
     if (S.tab === "chart" && S.xtab === "cand") candidates().forEach(function (t) { set[t.base] = 1; });
     if (S.tab === "chart" && S.xtab === "pend") pendingTrades().forEach(function (t) { set[t.base] = 1; });
+    if (S.tab === "s3") s3OpenBases().forEach(function (b) { set[b] = 1; });
     return Object.keys(set);
   }
   function fetchTicker(base) {               // -> {price, x: 24h numbers}
@@ -1925,7 +1984,7 @@
   var liveFails = 0, liveSkip = 0, liveN = 0;
   function liveTick() {                      // every 5 s on the chart and summary tabs, every 15 s elsewhere
     if (document.hidden) return;
-    if (S.tab !== "chart" && S.tab !== "sum" && liveN++ % 3) return;
+    if (S.tab !== "chart" && S.tab !== "sum" && S.tab !== "s3" && liveN++ % 3) return;
     if (liveSkip > 0) { liveSkip--; return; }     // the exchanges were unreachable: try again less often
     var bases = liveBases();
     if (!bases.length) return;
@@ -1951,6 +2010,7 @@
     });
   }
   function updateLive() {
+    if (S.tab === "s3") { s3Fill(); return; }
     if (S.tab === "chart") {
       var t = findSel(S.sel);
       if (t && current && current.base === t.base && S.live[t.base]) {
@@ -3353,6 +3413,7 @@
   setInterval(refresh, 20000);
   setInterval(status, 30000);
   setInterval(liveTick, 5000);
+  setInterval(s3Poll, 5000);
   setInterval(freshTick, 60000);
   liveTick();
 })();
