@@ -744,8 +744,41 @@
     var mas = MAS.map(function (m) {
       return c.addLineSeries({color: cssv(m[2]), lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false});
     });
+    // the marks follow the candles on screen: the exchange's fresh candles can reach past the stored ones (2026-11-19)
+    function barOf(rs, ms) {
+      if (!rs.length || ms == null) return null;
+      var st = TFSEC[tf] || 3600, s = Math.floor(tsec(ms) / st) * st;
+      return s >= rs[0][0] && s <= rs[rs.length - 1][0] + st ? Math.min(s, rs[rs.length - 1][0]) : null;
+    }
+    function setMarks(rs) {
+      var long = t.side > 0, marks = [];
+      function mark(ms, text, color, pos, shape) { var s = barOf(rs, ms); if (s != null) marks.push({time: s, position: pos, color: color, shape: shape, text: text}); }
+      if (t.cand) mark(t.created || D.now, "کاندید", cssv("--warn"), long ? "belowBar" : "aboveBar", long ? "arrowUp" : "arrowDown");
+      else {
+        mark(t.created, "سیگنال", cssv("--muted"), long ? "belowBar" : "aboveBar", "circle");
+        if (t.filled_at) mark(t.filled_at, "ورود " + px(t.entry), cssv("--acc"), long ? "belowBar" : "aboveBar", long ? "arrowUp" : "arrowDown");
+        var EV = {tp1: ["TP1", up], tp2: ["TP2", up], tp3: ["خروج با سود", up], sl: ["استاپ", dn], breakeven: ["سر به سر", cssv("--muted")],
+          expired: ["منقضی", cssv("--muted")], cancelled: ["لغو", cssv("--muted")]};
+        (t.events || []).forEach(function (e) {
+          var m = EV[e[0]]; if (!m) return;
+          if (xo && e[1] === xo.ts && e[0] === xo.kind) return;          // the exit gets its own mark below
+          mark(e[1], m[0], m[1], long ? "aboveBar" : "belowBar", long ? "arrowDown" : "arrowUp");
+        });
+        if (xo) mark(xo.ts, (xo.why.indexOf("خروج") === 0 ? xo.why : "خروج · " + xo.why) + " " + px(xo.price), cssv("--warn"), long ? "aboveBar" : "belowBar", long ? "arrowDown" : "arrowUp");
+      }
+      marks.sort(function (a, b) { return a.time - b.time; });
+      cs.setMarkers(marks);
+      if (current && current.series === cs && current.refit) current.refit(rs);
+    }
     function apply(rs) {
-      cs.setData(rs.map(function (r) { return {time: r[0], open: r[1], high: r[2], low: r[3], close: r[4]}; }));
+      var xb = xo ? barOf(rs, xo.ts) : null, eb = t.filled_at ? barOf(rs, t.filled_at) : null;
+      cs.setData(rs.map(function (r) {
+        var b = {time: r[0], open: r[1], high: r[2], low: r[3], close: r[4]};
+        var hc = r[0] === xb ? cssv("--warn") : r[0] === eb ? cssv("--acc") : null;   // the entry and exit candles stand out
+        if (hc) { b.color = hc; b.borderColor = hc; b.wickColor = hc; }
+        return b;
+      }));
+      setMarks(rs);
       vol.setData(rs.map(function (r) { return {time: r[0], value: r[5] || 0, color: r[4] >= r[1] ? hexA(up, 0.35) : hexA(dn, 0.35)}; }));
       mas.forEach(function (s, i) { s.setData(sma(rs, MAS[i][1])); });
       var lb = rs[rs.length - 1];
@@ -783,32 +816,17 @@
       last: {time: lb0[0], open: lb0[1], high: lb0[2], low: lb0[3], close: lb0[4]}};
     apply(rows);
     showInd();
-    var step = TFSEC[tf] || 3600, first = rows[0][0], last = lb0[0];
-    function snap(ms) { var s = Math.floor(tsec(ms) / step) * step; return s >= first && s <= last + step ? Math.min(s, last) : null; }
-    var long = t.side > 0, marks = [];
-    function mark(ms, text, color, pos, shape) { var s = snap(ms); if (s != null) marks.push({time: s, position: pos, color: color, shape: shape, text: text}); }
-    if (t.cand) mark(t.created || D.now, "کاندید", cssv("--warn"), long ? "belowBar" : "aboveBar", long ? "arrowUp" : "arrowDown");
-    else {
-      mark(t.created, "سیگنال", cssv("--muted"), long ? "belowBar" : "aboveBar", "circle");
-      if (t.filled_at) mark(t.filled_at, "ورود", cssv("--acc"), long ? "belowBar" : "aboveBar", long ? "arrowUp" : "arrowDown");
-      var EV = {tp1: ["TP1", up], tp2: ["TP2", up], tp3: ["خروج با سود", up], sl: ["استاپ", dn], breakeven: ["سر به سر", cssv("--muted")],
-        expired: ["منقضی", cssv("--muted")], cancelled: ["لغو", cssv("--muted")]};
-      (t.events || []).forEach(function (e) {
-        var m = EV[e[0]]; if (!m) return;
-        if (xo && e[1] === xo.ts && e[0] === xo.kind) return;            // the exit gets its own mark below
-        mark(e[1], m[0], m[1], long ? "aboveBar" : "belowBar", long ? "arrowDown" : "arrowUp");
-      });
-      if (xo) mark(xo.ts, "خروج · " + xo.why + " " + px(xo.price), cssv("--warn"), long ? "aboveBar" : "belowBar", long ? "arrowDown" : "arrowUp");
+    var fitted = false;
+    function fit(rs) {                       // show the trade: from a little before the signal to its end (or now)
+      var st = TFSEC[tf] || 3600, first = rs[0][0], last = rs[rs.length - 1][0];
+      var from = t.created ? barOf(rs, t.created) : null, to = t.closed_at ? barOf(rs, t.closed_at) : last;
+      if (from != null) c.timeScale().setVisibleRange({from: Math.max(first, from - st * 40), to: Math.min(last, (to || last) + st * 25)});
+      else c.timeScale().fitContent();
+      fitted = !t.closed_at || to != null;
     }
-    marks.sort(function (a, b) { return a.time - b.time; });
-    cs.setMarkers(marks);
+    current.refit = function (rs) { if (!fitted) fit(rs); };
     c.subscribeCrosshairMove(function (p) { ohlc(p && p.time && p.seriesData ? p.seriesData.get(cs) : null); });
-    // show the trade: from a little before the signal to its end (or now)
-    var from = t.created ? snap(t.created) : null, to = t.closed_at ? snap(t.closed_at) : last;
-    if (from != null) {
-      var pad = step * 40;
-      c.timeScale().setVisibleRange({from: Math.max(first, from - pad), to: Math.min(last, (to || last) + step * 25)});
-    } else c.timeScale().fitContent();
+    fit(rows);
   }
   function candidates() {
     var out = [];
