@@ -34,8 +34,12 @@ def test_storage_keeps_the_shadow_databases_on_the_data_branch(cfg):
     c = copy.deepcopy(cfg)
     c["system2"] = {**c.get("system2", {}), "enabled": True, "db_path": "data/s2.db"}
     c["shadow"] = {"enabled": True, "db_path": "data/sh.db", "s2_db_path": "data/sh2.db"}
+    c["system3"] = {"enabled": False}
     st = make_storage({**c, "storage": {**c["storage"], "backend": "git_branch"}})
     assert [p.name for p in st.extra_dbs] == ["s2.db", "sh.db", "sh2.db"]
     c["shadow"]["enabled"] = False
     st = make_storage({**c, "storage": {**c["storage"], "backend": "git_branch"}})
     assert [p.name for p in st.extra_dbs] == ["s2.db"]
+    c["system3"] = {"enabled": True, "db_path": "data/s3.db"}
+    st = make_storage({**c, "storage": {**c["storage"], "backend": "git_branch"}})
+    assert [p.name for p in st.extra_dbs] == ["s2.db", "s3.db"]

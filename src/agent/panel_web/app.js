@@ -144,7 +144,7 @@
   }
 
   // ------------------------------------------------------------------ tabs
-  var TABS = {sum: summaryTab, home: home, chart: chartTab, hist: histTab, perf: perf, cmp: compare, mkt: marketTab, sys: health, news: news, cal: calendarTab, ai: aiTab, strat: strategy, how: method};
+  var TABS = {sum: summaryTab, home: home, chart: chartTab, hist: histTab, perf: perf, cmp: compare, mkt: marketTab, sys: health, news: news, cal: calendarTab, ai: aiTab, s3: s3Tab, strat: strategy, how: method};
   var ALIAS = {reg: ["mkt", "mk-now"]};          // 2026-11-17: the regime page is now part of the market page
   function show(tab, push) {
     if (ALIAS[tab]) { S.jump = ALIAS[tab][1]; tab = ALIAS[tab][0]; }
@@ -173,7 +173,7 @@
   function pendingTrades() { return trades().filter(function (t) { return t.status === "pending"; }); }
   function closedTrades() { return trades().filter(function (t) { return !t.open; }); }
   // 2026-11-19 (Ali): a closed trade's exit (price, time, why) in the tables, the details and on its chart
-  var EXIT_FA = {sl: "استاپ", tp3: "خروج با سود", tp2: "TP2", tp1: "TP1", breakeven: "سر به سر"};
+  var EXIT_FA = {sl: "استاپ", tp3: "خروج با سود", tp: "تارگت", time: "خروج زمانی", tp2: "TP2", tp1: "TP1", breakeven: "سر به سر"};
   function exitOf(t) {
     if (!t || t.cand || t.open || !t.filled_at) return null;
     var ev = (t.events || []).filter(function (e) { return e[2] != null && e[0] !== "filled"; });
@@ -800,7 +800,7 @@
     line(t.entry, cssv("--acc"), "ورود");
     line(t.sl, dn, "استاپ", 2);
     if (t.sl_now != null && Math.abs(t.sl_now - t.sl) > 1e-12) line(t.sl_now, dn, "استاپ الان", 0);
-    line(t.tp1, up, "TP1", 2);
+    line(t.tp1, up, t.tp1_label || "TP1", 2);
     line(t.tp2, up, "TP2", 2);
     var xo = exitOf(t);
     if (xo) line(xo.price, cssv("--warn"), "خروج", 0);
@@ -1785,6 +1785,85 @@
   }
 
   // ------------------------------------------------------------------ news / strategy / method
+  // ------------------------------------------------------------------ system 3 (paper only, 2026-11-19)
+  // Ali: «سیستم ۱ و ۲ رو دست نزنیم. سیستم ۳ رو راه اندازی کنیم». Its own page, its own $100 account: none of it
+  // reaches systems 1 and 2's tables, accounts or the measurement period.
+  var S3DONE = ["tp", "sl", "time"];
+  function s3() { return D.system3 || {}; }
+  function s3Rows() {
+    return (s3().trades || []).map(function (t) {
+      t.open = t.status === "active" || t.status === "pending";
+      t.system = "سیستم ۳";
+      t.tp1_label = "تارگت";
+      return t;
+    });
+  }
+  function s3Px(v, extra) { return '<td data-v="' + (v == null ? "" : v) + '"><span class="ltr">' + px(v) + "</span>" + (extra || "") + "</td>"; }
+  function s3Pct(t) { return '<td class="xpc" data-v="' + (t.pnl_pct == null ? "" : t.pnl_pct.toFixed(3)) + '">' + pct(t.pnl_pct) + "</td>"; }
+  function s3Tab() {
+    var d = s3(), a = d.account || {}, rows = s3Rows(), sc = d.scan || {};
+    if (!d.enabled && !rows.length) { app.innerHTML = '<section><h2>سیستم ۳</h2><div class="empty">سیستم ۳ خاموش است.</div></section>'; return; }
+    var DAYMS = 86400000, end = d.since + (d.review_days || 30) * DAYMS, left = Math.ceil((end - Date.now()) / DAYMS);
+    var live = rows.filter(function (t) { return t.open; }).sort(byCreated);
+    var done = rows.filter(function (t) { return S3DONE.indexOf(t.status) >= 0; }).sort(function (x, y) { return y.closed_at - x.closed_at; });
+    var gone = rows.filter(function (t) { return !t.open && S3DONE.indexOf(t.status) < 0; }).sort(byCreated);
+    var pnl = a.balance != null ? a.balance - a.start : null;
+    var verdict = left > 0
+      ? "دوره‌ی آزمایشی کاغذی: از " + esc(jfmt(d.since, "date")) + " تا " + esc(jfmt(end, "date")) + " (" + fa(left) + " روز مانده). بعد از آن نتیجه را با بک‌تست مقایسه می‌کنیم و تصمیم با توست."
+      : "یک ماه آزمایش کاغذی تمام شد. وقت مقایسه با بک‌تست و تصمیم است.";
+    var kpis = '<div class="grid g4">' +
+      statCard("حساب ۱۰۰ دلاری", usd(a.balance, false) + " " + usd(pnl), "ریسک " + fa(d.risk_pct) + "٪ هر معامله · بیشترین افت " + pct(a.max_dd_pct ? -a.max_dd_pct : 0)) +
+      statCard("معامله‌های بسته", fa(a.closed || 0), a.closed ? "برد " + fa(a.wins) + " از " + fa(a.closed) + " (" + fa(Math.round(a.wins / a.closed * 100)) + "٪)" : "هنوز معامله‌ای بسته نشده") +
+      statCard("جمع R خالص", R(a.net_r || 0), "میانگین " + (a.avg_r == null ? "—" : R(a.avg_r)) + " · ضریب سود " + (a.pf == null ? "—" : '<span class="ltr">' + a.pf.toFixed(2) + "</span>")) +
+      statCard("الان", fa(a.open || 0) + ' <small class="muted">باز · ' + fa(a.pending || 0) + " سفارش</small>",
+        "اسکن آخر " + ago(sc.ts) + (sc.coins ? " · " + fa(sc.movers || 0) + " کوین پرنوسان از " + fa(sc.coins) : "")) + "</div>";
+    var sel = rows.filter(function (t) { return t.id === S.s3sel; })[0] || live.filter(function (t) { return t.status === "active"; })[0] || live[0] || done[0] || null;
+    var chart = sel ? '<section class="xview"><h2 class="s3head"><b>' + esc(sel.base) + "</b> " + side(sel.side) + ' <span class="muted">' + esc(sel.status_fa) + " · ۱ ساعته</span></h2>" +
+      '<div class="chartbox tall" id="s3chart"><div class="empty">در حال گرفتن کندل‌ها از صرافی…</div></div></section>' : "";
+    function rowCls(t) { return 'class="click' + (sel && t.id === sel.id ? " xopen" : "") + '" data-s3="' + esc(t.id) + '"'; }
+    var liveHtml = live.length ? '<div class="scroll"><table data-defsort="9:desc"><thead><tr><th>کوین</th><th>وضعیت</th><th>سیگنال</th><th>اهرم</th><th>ورود</th><th>استاپ</th><th>تارگت</th><th>قیمت</th><th>سود/زیان</th><th>سود٪</th></tr></thead><tbody>' +
+      live.map(function (t) {
+        return "<tr " + rowCls(t) + "><td><b>" + esc(t.base) + "</b> " + side(t.side) + "</td><td>" + esc(t.status_fa) + (t.status === "pending" ? ' <small class="muted">تا ' + esc(jfmt(t.expires_at)) + "</small>" : "") + "</td>" +
+          tsCell(t.created) + levCell(t) + s3Px(t.entry) + s3Px(t.sl, ' <small class="muted">' + fa(t.sl_pct) + "٪</small>") + s3Px(t.target) +
+          s3Px(t.price) + "<td>" + (t.status === "active" ? RU(t.open_r, t.pnl_usd) : "—") + "</td>" + s3Pct(t) + "</tr>";
+      }).join("") + "</tbody>" + totRow([{span: 8, v: "جمع " + fa(live.length)}, RU(sumOf(live, function (t) { return t.open_r; }), sumOf(live, function (t) { return t.pnl_usd; })), ""]) + "</table></div>"
+      : '<div class="empty">الان پوزیشن یا سفارشی باز نیست. هر ساعت، یک دقیقه بعد از بسته شدن کندل، کوین‌های پرنوسان اسکن می‌شوند.</div>';
+    var doneHtml = done.length ? '<div class="scroll"><table data-defsort="3:desc"><thead><tr><th>کوین</th><th>نتیجه</th><th>ورود</th><th>خروج</th><th>قیمت ورود</th><th>قیمت خروج</th><th>اهرم</th><th>R خالص</th><th>سود٪</th></tr></thead><tbody>' +
+      done.map(function (t) {
+        return "<tr " + rowCls(t) + "><td><b>" + esc(t.base) + "</b> " + side(t.side) + '</td><td class="' + (t.net_r > 0 ? "pos" : "neg") + '">' + esc(t.status_fa) + "</td>" + tsCell(t.filled_at) + tsCell(t.closed_at) +
+          s3Px(t.entry) + s3Px(t.exit) + levCell(t) + "<td>" + RU(t.net_r, t.pnl_usd) + "</td>" + s3Pct(t) + "</tr>";
+      }).join("") + "</tbody>" + totRow([{span: 7, v: "جمع " + fa(done.length) + " معامله"}, RU(sumOf(done, function (t) { return t.net_r; }), sumOf(done, function (t) { return t.pnl_usd; })), ""]) + "</table></div>"
+      : '<div class="empty">هنوز معامله‌ای بسته نشده.</div>';
+    var goneHtml = gone.length ? '<details class="calpast s3gone"><summary>سفارش‌های پرنشده (' + fa(gone.length) + ")</summary><div class=\"scroll\"><table><thead><tr><th>کوین</th><th>وضعیت</th><th>سیگنال</th><th>قیمت لیمیت</th><th>چرا</th></tr></thead><tbody>" +
+      gone.map(function (t) {
+        return "<tr " + rowCls(t) + "><td><b>" + esc(t.base) + "</b></td><td>" + esc(t.status_fa) + "</td>" + tsCell(t.created) + s3Px(t.limit) + "<td>" + esc(t.why_fa || (t.status === "expired" ? "قیمت در ۶ ساعت به لیمیت نرسید" : "")) + "</td></tr>";
+      }).join("") + "</tbody></table></div></details>" : "";
+    var r = d.rules || {};
+    var rules = '<section><h2>قانون‌های سیستم ۳</h2><ul class="s3rules">' +
+      "<li>کوین‌ها: رتبه‌ی " + fa((r.min_rank || 20) + 1) + " به پایین در CoinGecko، حجم ۲۴ ساعته دست‌کم " + "$" + fa((r.min_volume_usd || 3e6) / 1e6) + " میلیون" + "، با قرارداد دائمی در Gate.</li>" +
+      "<li>ستاپ روی کندل ۱ ساعته‌ی بسته: پامپ دست‌کم " + fa(r.run_pct || 25) + "٪ در حدود ۱٫۵ روز، یک کندل اوج با فتیله‌ی بالایی بلند و حجم دست‌کم ۳ برابر میانگین هفته، و بعد کندلی با سقف پایین‌تر که زیر کف کندل قبل بسته شود و حجمش از کندل اوج کمتر باشد.</li>" +
+      "<li>ورود: لیمیت فروش وسط بسته شدن و سقف همان کندل، " + fa(r.fill_bars || 6) + " ساعت معتبر؛ اگر قیمت زودتر به تارگت برسد لغو می‌شود.</li>" +
+      "<li>استاپ: ۰٫۵٪ بالای سقف پامپ و دست‌کم " + fa(Math.round((r.min_stop || 0.03) * 100)) + "٪ از ورود. تارگت: برگشت " + fa(Math.round((r.tp_retrace || 0.62) * 100)) + "٪ کل پامپ (دست‌کم ۱R). خروج زمانی بعد از " + fa(r.max_bars || 48) + " ساعت.</li>" +
+      "<li>حداکثر " + fa(r.max_open || 3) + " معامله‌ی باز، یک معامله برای هر کوین، و بعد از " + fa(r.day_losses || 3) + " باخت در یک روز تا فردا معامله‌ی تازه نمی‌گیرد. ریسک " + fa(d.risk_pct) + "٪.</li>" +
+      "<li>بک‌تست (کارمزد و لغزش حساب شده): آموزش تا ۲۶ تیر ۱۱۵ معامله و ‎+20.1R، آزمون بعد از آن ۹۶ معامله و ‎+11.9R، ضریب سود ۱٫۲۲، هر ۵ ماه آزمون مثبت.</li>" +
+      "</ul></section>";
+    app.innerHTML = '<section><h2>سیستم ۳ · شورت ته پامپ <small class="muted">آزمایشی، کاغذی</small></h2><div class="pverdict">' + verdict + "</div>" + kpis + "</section>" +
+      '<div class="xfull">' + chart + "</div>" +
+      "<section><h2>پوزیشن‌ها و سفارش‌های باز</h2>" + liveHtml + "</section>" +
+      "<section><h2>معامله‌های بسته</h2>" + doneHtml + goneHtml + "</section>" + rules;
+    app.querySelectorAll("tr[data-s3]").forEach(function (tr) {
+      tr.addEventListener("click", function () { S.s3sel = tr.getAttribute("data-s3"); render(); var v = app.querySelector(".xview"); if (v) v.scrollIntoView({behavior: "smooth", block: "start"}); });
+    });
+    if (sel) {
+      freshCandles(sel.base, "1h").then(function (c) {
+        var el = document.getElementById("s3chart");
+        if (!el || S.tab !== "s3") return;
+        if (!c || !c.length) { el.innerHTML = '<div class="empty">کندل‌ها از صرافی نرسید.</div>'; return; }
+        el.innerHTML = "";
+        drawTrade(el, sel, c, "1h");
+      });
+    }
+  }
   function strategy() { app.innerHTML = D.strategy_html || ""; }
   function method() { app.innerHTML = "<section><h2>روش محاسبه</h2>" + (D.method_html || "") + "</section>"; }
 

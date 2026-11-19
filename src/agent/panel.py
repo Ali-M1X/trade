@@ -505,6 +505,12 @@ def collect(cfg: dict, now_ms: int) -> dict:
     finally:
         if price_repo is not None:
             price_repo.close()
+    out["system3"] = {}
+    try:                                          # paper experiment on its own page (system3.py)
+        from .system3 import panel_view as s3_view
+        out["system3"] = s3_view(cfg, now_ms)
+    except (sqlite3.Error, ValueError, TypeError, KeyError, ZeroDivisionError) as e:
+        print(f"system3 skipped: {e}")
     if len(out["systems"]) > 1:                   # system 2's regime is computed into system 1's db
         first = out["systems"][0]
         for s in out["systems"][1:]:
@@ -730,6 +736,7 @@ def payload(cfg: dict, data: dict) -> dict:
         "regime": data.get("regime") or {},
         "pulse": data.get("pulse") or {},
         "scorecard": data.get("scorecard") or {},
+        "system3": data.get("system3") or {},
         "dominance": _dominance(cfg), "shadow_since": data["shadow_since"],
         "news": [{"ts": n["seen_at"], "coins": n["coins"], "level": n["level"], "title": n["title"],
                   "url": n["url"] if (n.get("url") or "").startswith(("http://", "https://")) else None,
