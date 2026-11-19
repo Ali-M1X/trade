@@ -426,3 +426,8 @@ table.xt tr.xdet>td{padding:0;background:var(--card2);white-space:normal;text-al
 .xdethead .xup{margin-inline-start:auto}
 @keyframes xdrop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 @media (max-width:900px){.xfull .chartbox.tall{height:62vh;min-height:340px}.xtabs .xq{width:100%;margin:6px 0}}
+/* measurement period (2026-11-19) */
+.sctab td.scmain{background:var(--card2);font-weight:600}
+.sctab td.sc-pos{color:var(--pos)}.sctab td.sc-neg{color:var(--neg)}
+.sctab td.sc-pos b,.sctab td.sc-neg b{color:inherit}
+.scsec .pverdict{margin-top:4px}
