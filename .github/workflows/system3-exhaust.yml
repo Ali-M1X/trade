@@ -1,0 +1,59 @@
+name: system3-exhaust
+
+# System 3, round 6 (2026-11-19, Ali): short the exhaustion of pumps on small and mid coins
+# (scripts/s3_exhaust.py). Reuses round 5's database (run 44143600354, 1H candles + funding of
+# the top 1000 coins). Tuning period until TEST_FROM, test period after it. Commits the report to
+# docs/system3-exhaust.md on this branch. Changes nothing live.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/system3-exhaust]
+    paths: [".github/workflows/system3-exhaust.yml", "scripts/s3_*.py"]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: system3-exhaust
+  cancel-in-progress: true
+
+env:
+  START: "2026-01-10"
+  TEST_FROM: "2026-07-17"
+
+jobs:
+  exhaust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: backtest-db-s3
+          path: data
+          run-id: 44143600354
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: gunzip data/backtest.db.gz
+      - name: Backtest
+        run: |
+          set -o pipefail
+          python scripts/s3_exhaust.py data/backtest.db "$START" 2026-12-01 "$TEST_FROM" exhaust.json report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s3-exhaust
+          path: exhaust.json
+          retention-days: 30
+      - name: Commit the report
+        run: |
+          cp report.md docs/system3-exhaust.md
+          git config user.name trade-signal-agent
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/system3-exhaust.md
+          git commit -m "System 3 round 6: report" || exit 0
+          for i in 1 2 3; do git pull --rebase origin "$GITHUB_REF_NAME" && git push origin "HEAD:$GITHUB_REF_NAME" && break; sleep 5; done
