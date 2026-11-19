@@ -155,6 +155,11 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
         record(cfg, repo, market, now)
     except Exception:
         logging.getLogger(__name__).exception("pulse failed")
+    try:                                        # measurement period: notes when the rules change
+        from .scorecard import record as rules_record
+        rules_record(cfg, repo, now)
+    except Exception:
+        logging.getLogger(__name__).exception("rules fingerprint failed")
     extra = {}
     if cfg.get("news", {}).get("enabled"):
         try:

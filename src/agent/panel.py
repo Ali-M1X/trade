@@ -490,6 +490,13 @@ def collect(cfg: dict, now_ms: int) -> dict:
                                           now_ms, cfg)
             except (sqlite3.Error, ValueError, TypeError, KeyError, IndexError):
                 out["pulse"] = {}
+        out["scorecard"] = {}
+        try:                                      # measurement period (scorecard.py)
+            from .scorecard import view as scorecard_view
+            hist = (price_repo.get_state("rules_fp", {}) if price_repo is not None else {}) or {}
+            out["scorecard"] = scorecard_view(cfg, out["trades"], hist, now_ms)
+        except (sqlite3.Error, ValueError, TypeError, KeyError, SystemExit) as e:
+            print(f"scorecard skipped: {e}")
         if price_repo is not None:
             try:
                 out["regime"] = regime_view(price_repo, now_ms, cfg)
@@ -722,6 +729,7 @@ def payload(cfg: dict, data: dict) -> dict:
         "trades": trades, "systems": systems, "compare": _compare(data),
         "regime": data.get("regime") or {},
         "pulse": data.get("pulse") or {},
+        "scorecard": data.get("scorecard") or {},
         "dominance": _dominance(cfg), "shadow_since": data["shadow_since"],
         "news": [{"ts": n["seen_at"], "coins": n["coins"], "level": n["level"], "title": n["title"],
                   "url": n["url"] if (n.get("url") or "").startswith(("http://", "https://")) else None,

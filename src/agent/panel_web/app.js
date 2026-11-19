@@ -2083,6 +2083,7 @@
 
   // ------------------------------------------------------------------ help tooltips (Ali, 2026-11-15)
   var TIPS = {
+    "دوره‌ی سنجش": "چهار هفته قوانین هر دو سیستم ثابت می‌ماند و فقط نتیجه اندازه گرفته می‌شود. ربات هر دقیقه اثرانگشت قوانین هر سیستم را ثبت می‌کند؛ اگر چیزی در قوانین یک سیستم عوض شود، شمارش همان سیستم از لحظه‌ی تغییر از نو شروع می‌شود. تغییرهای نمایشی پنل شمارش را صفر نمی‌کنند.\nملاک، معامله‌های تأییدشده است و همه‌چیز بر حسب R خالص (بعد از کارمزد)، پس به ریسک هر معامله بستگی ندارد. افت حساب روی یک حساب ۱۰۰ دلاری از شروع دوره با ریسک‌های فعلی حساب می‌شود.\nمعیارها از قبل نوشته شده‌اند: بعد از ۱۰۰ معامله‌ی بسته، میانگین دست‌کم ‎+0.10R‎، ضریب سود بالای ۱٫۲ و افت کمتر از ۲۰٪. گذشتن از ۲۰٪ افت با هر تعداد معامله یعنی رد. قبولی یعنی شروع با پول واقعی کم و ریسک ۱٪.\nستون Watch مرجع است: اگر تأییدشده‌ها مدام بهتر از Watch باشند، یعنی امتیازدهی واقعاً کار می‌کند.",
     "نبض بازار": "میانگین حرکت ۱۰ کوین بزرگ (BTC، ETH، SOL، …) در ۱ ساعت، ۴ ساعت و ۲۴ ساعت گذشته که بات هر ۵ دقیقه ثبت می‌کند. هشدار وقتی است که ۱ ساعته و ۴ ساعته هر دو از آستانه رد شوند: رو به بالا برای شورت‌ها و رو به پایین برای لانگ‌ها.\nاثر فرضی دو قاعده را حساب می‌کند بی‌آنکه کاری بکند: «نصف ریسک در ورود» (معامله‌ای که در حال هشدار باز شد با نصف ریسک) و «بستن با هشدار» (معامله‌ی قبل از TP1 در اولین هشدار بسته می‌شد، با قیمت همان لحظه).",
     "رژیم بازار": "حال بازار از روی سبد ۱۰ کوین بزرگ روی کندل ۴ ساعته: روند نزولی (افت دست‌کم ۴٪ در ۲۴ ساعت، بیشترش یک‌طرفه، یا ۶٪ در سه روز که هنوز ادامه دارد)، روند صعودی (برعکس) یا رنج (هیچ‌کدام). رژیمی که کمتر از ۸ ساعت طول بکشد حساب نمی‌شود.\nجمله‌ی بالا می‌گوید بازار کی عوض شد و پوزیشن‌هایی که بعدش باز شدند چه شدند. استاپ: با ضرر بسته شده. رنج: هنوز کمتر از ۰٫۵R حرکت کرده. سود: ۰٫۵R به بالا یا رد شده از TP1.\n«حرکت ۲۴ ساعت بازار» در این بخش تا آخرین کندل ۴ ساعته‌ی بسته‌شده است (تا چهار ساعت عقب‌تر از الان)؛ ۲۴ ساعتِ تا همین الان در «نبض بازار» است.",
     "رژیم‌های ۷ روز اخیر": "خط سفید حرکت سبد بازار از ۷ روز پیش است. رنگ پس‌زمینه رژیم آن زمان است. نقطه‌ها حرکت‌های تند هستند: ریزش یا جهش ۴٪ در ۸ ساعت، یا کندلی دست‌کم ۱٫۸ برابر معمول که سر جایش برگشته (استاپ هر دو طرف را می‌زند).",
@@ -2733,7 +2734,7 @@
     var cal = (MK.calendar || []).filter(function (e) { return e.ts > now && e.ts < now + 48 * 3600000 && e.w >= 4; }).slice(0, 4);
     app.innerHTML = eventBanner() +
       '<section><h2>خلاصه ' + qi("مهم‌ترین چیزهای همه‌ی تب‌ها در یک صفحه.\nردیف اول: موجودی سه حساب ۱۰۰ دلاری و تغییرشان در ۲۴ ساعت گذشته، و تعداد پوزیشن‌های باز.\nردیف دوم: جهتی که هر سیستم الان در بازار می‌بیند و حال کلی بازار.\nبرچسب «جدید» یعنی بعد از آخرین باری که این صفحه را باز کردید اتفاق افتاده است.") + ' <small>' + (seenAt ? "آخرین بازدید شما " + esc(ago(seenAt)) + (newN ? " · " + fa(newN) + " اتفاق تازه" : " · اتفاق تازه‌ای نیست") : "مهم‌ترین‌های همه‌ی صفحه‌ها") + "</small></h2>" +
-      kpis + mood + "</section>" +
+      kpis + mood + "</section>" + scoreSection() +
       '<div class="grid g2"><section><h2>نیاز به توجه ' + qi("چیزهایی که شاید الان تصمیمی بخواهند: ربات عقب افتاده، رویداد اقتصادی پراثر نزدیک است، پوزیشنی نزدیک استاپ یا TP1 است، داوران هوش مصنوعی به سیگنالی نمره‌ی پایین داده‌اند، یا خبر مهمی درباره‌ی کوینی آمده که در آن پوزیشن دارید.\nروی هر مورد بزنید تا به تب مربوط بروید.") + ' <small>' + fa(alerts.length) + "</small></h2>" + alertHtml + "</section>" +
       "<section><h2>۲۴ ساعت گذشته " + qi("هر اتفاق ۲۴ ساعت گذشته به ترتیب زمان: سیگنال تازه، ورود، TP، استاپ و لغو، به‌علاوه‌ی خبرهای ۳ ستاره و بیشتر. روی هر معامله بزنید تا جزئیاتش باز شود.") + " <small>سیگنال‌ها، ورود و خروج‌ها، خبرهای ۳ ستاره به بالا</small></h2>" +
       (feed.length ? '<ul class="feed">' + feed.slice(0, 18).map(feedLine).join("") + "</ul>" : '<div class="empty">در ۲۴ ساعت گذشته اتفاقی نیفتاده است.</div>') + "</section></div>" +
@@ -2745,6 +2746,60 @@
       "<h3>هوش مصنوعی</h3><p>" + aiLine + "</p></section></div>";
     try { localStorage.setItem(SEEN_KEY, String(now)); } catch (e) {}
     sumKpis();
+  }
+  // ------------------------------------------------------------------ measurement period (2026-11-19, Ali chose «۱ و ۲»:
+  // the rules stay still for four weeks, and the success test is written down before the results; scorecard.py)
+  var SC_ST = {measuring: ["در حال سنجش: هنوز زود است", ""], extend: ["چهار هفته تمام شد، ولی معامله هنوز کم است", ""],
+    pass: ["قبول شد", "v-pos"], fail: ["رد شد", "v-neg"]};
+  function scoreSection() {
+    var sc = D.scorecard || {};
+    if (!sc.groups) return "";
+    var T = sc.targets, g = sc.groups, a = g.approved, now = Date.now(), DAYMS = 86400000;
+    var names = Object.keys(sc.systems || {});
+    var day = Math.min(sc.days, Math.max(1, Math.ceil((now - sc.first) / DAYMS)));
+    var cols = [["approved", "تأییدشده <small>(ملاک)</small>", ""]].concat(names.map(function (n) { return ["approved:" + n, "تأییدشده‌ی " + esc(sysShort(n)), "muted"]; }))
+      .concat([["watch", "Watch <small>(مرجع)</small>", "muted"]]);
+    function ok(v) { return v == null ? "" : v ? "pos" : "neg"; }
+    function test(k, x) {
+      if (k === "avg_r") return x.avg_r == null ? null : x.avg_r >= T.avg_r;
+      if (k === "pf") return x.pf == null ? (x.closed ? x.net_r > 0 : null) : x.pf > T.pf;
+      if (k === "dd") return x.max_dd == null || !x.closed ? null : x.max_dd < T.max_dd_pct;
+      return null;
+    }
+    function num(x, d) { return '<span class="ltr">' + Number(x).toFixed(d) + "</span>"; }
+    var rows = [
+      ["معامله‌ی بسته", fa(T.min_trades), function (x) { return fa(x.closed) + (x.open ? ' <small class="muted">+ ' + fa(x.open) + " باز</small>" : ""); }, null],
+      ["میانگین R خالص", num(T.avg_r, 2).replace('">', '">≥ +').replace("</span>", "R</span>"), function (x) { return R(x.avg_r); }, "avg_r"],
+      ["ضریب سود", num(T.pf, 2).replace('">', '">&gt; '), function (x) { return x.pf == null ? (x.closed && x.net_r > 0 ? "بدون ضرر" : "—") : num(x.pf, 2); }, "pf"],
+      ["بیشترین افت حساب ۱۰۰ دلاری", num(T.max_dd_pct, 0).replace('">', '">&lt; ').replace("</span>", "%</span>"), function (x) { return x.max_dd == null ? "—" : '<span class="ltr">' + x.max_dd.toFixed(1) + "%</span>"; }, "dd"],
+      ["جمع R خالص", "", function (x) { return x.closed ? R(x.net_r) : "—"; }, null],
+      ["نرخ برد", "", function (x) { return x.closed ? fa(Math.round(x.wins / x.closed * 100)) + "٪" : "—"; }, null]
+    ];
+    var table = '<div class="scroll"><table class="cmp sctab"><thead><tr><th>معیار</th><th>هدف</th>' + cols.map(function (c) { return "<th>" + c[1] + "</th>"; }).join("") + "</tr></thead><tbody>" +
+      rows.map(function (r) {
+        return "<tr><td>" + r[0] + "</td><td>" + (r[1] || '<span class="muted">—</span>') + "</td>" + cols.map(function (c, i) {
+          var x = g[c[0]] || {}, k = r[3] ? ok(test(r[3], x)) : "";
+          return '<td class="' + (i === 0 ? "scmain " : "") + (k ? "sc-" + k : "") + '">' + r[2](x) + "</td>";
+        }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div>";
+    var st = SC_ST[sc.status] || SC_ST.measuring, txt;
+    var miss = [["avg_r", "میانگین R"], ["pf", "ضریب سود"], ["max_dd", "افت حساب"]].filter(function (k) { return sc.checks[k[0]] === false; }).map(function (k) { return k[1]; });
+    var days = (now - sc.first) / DAYMS, pace = days >= 3 && a.closed ? a.closed / days : null;
+    var eta = pace ? sc.first + T.min_trades / pace * DAYMS : null;
+    var paceTxt = pace ? " با سرعت فعلی (حدود " + fa(Math.round(pace * 7)) + " معامله‌ی بسته در هفته) به " + fa(T.min_trades) + " معامله حدود <b>" + esc(jfmt(eta, "ymd")) + "</b> می‌رسیم." : "";
+    if (sc.status === "pass") txt = "بعد از " + fa(a.closed) + " معامله‌ی تأییدشده هر سه معیار برقرار است. قدم بعد: پول واقعی کم با ریسک " + fa(T.real_risk_pct) + "٪، نه ریسک‌های فعلی.";
+    else if (sc.status === "fail") txt = (sc.checks.max_dd === false ? "افت حساب تأییدشده از " + fa(T.max_dd_pct) + "٪ گذشت؛ این معیار با هر تعداد معامله رد می‌کند." : "بعد از " + fa(a.closed) + " معامله، " + miss.join(" و ") + " به هدف نرسید.") +
+      " پول واقعی نه؛ قدم بعد این است که ببینیم ضررها از کجا می‌آیند.";
+    else if (sc.status === "extend") txt = "هنوز " + fa(a.closed) + " از " + fa(T.min_trades) + " معامله‌ی تأییدشده بسته شده و با این تعداد نمی‌شود حکم داد. قوانین ثابت می‌ماند تا به " + fa(T.min_trades) + " برسد." + paceTxt;
+    else txt = fa(a.closed) + " از " + fa(T.min_trades) + " معامله‌ی تأییدشده بسته شده. تا آن موقع رنگ عددها بیشتر شانس است تا نتیجه، پس از رویشان قانون عوض نکنید." + paceTxt;
+    var notes = names.map(function (n) {
+      var y = sc.systems[n];
+      if (y.pending) return "تنظیمات " + esc(sysShort(n)) + " تازه عوض شده و ربات هنوز ثبتش نکرده؛ شمارش آن از اولین اجرای بعدی از نو شروع می‌شود.";
+      return y.changed_at ? "قوانین " + esc(sysShort(n)) + " " + esc(jfmt(y.changed_at, "dt")) + " عوض شد؛ معامله‌های آن از همان زمان شمرده می‌شوند." : "";
+    }).filter(Boolean);
+    return '<section class="scsec"><h2>دوره‌ی سنجش ' + qi(TIPS["دوره‌ی سنجش"]) + ' <small>روز ' + fa(day) + " از " + fa(sc.days) + " · قوانین ثابت از " + esc(jfmt(sc.first, "ymd")) + "</small></h2>" +
+      '<div class="pverdict ' + st[1] + '"><b>' + st[0] + "</b><p>" + txt + "</p></div>" + table +
+      (notes.length ? '<p class="muted">' + notes.join("<br>") + "</p>" : "") + "</section>";
   }
   // 2026-11-17 (Ali): each account card is the final number, booked + open together, and moves with live prices
   function sumKpis() {
