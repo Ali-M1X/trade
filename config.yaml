@@ -514,6 +514,22 @@ pulse:
   h24_pct: 2.0                 # the panel's verdict only: a 24 h move past this counts as a direction
   chart_days: 7
 
+# Measurement period (2026-11-19, Ali): the rules stay as they are for `weeks`, and the success test
+# is written down before the results. Each run stores a fingerprint of each system's trading rules;
+# a change restarts that system's count (src/agent/scorecard.py). A code change to how trades are
+# picked or managed moves `since` to the day it lands. Judged on the approved trades in R:
+# after `min_trades` closed trades, average net R >= avg_r, profit factor > pf and the $100 account's
+# deepest drawdown < max_dd_pct (crossing it fails the test at any count). Passing means real money
+# starts small at real_risk_pct risk.
+scorecard:
+  since: "2026-11-19"
+  weeks: 4
+  min_trades: 100
+  avg_r: 0.1
+  pf: 1.2
+  max_dd_pct: 20
+  real_risk_pct: 1
+
 # AI reviewers (2026-11-15, Ali): several reviewers score every signal (chance of profit), learn
 # from every closed trade and are graded themselves (panel tab "داوران هوش مصنوعی"). Advisory
 # only: nothing here changes what the systems trade. src/agent/ai_review.py

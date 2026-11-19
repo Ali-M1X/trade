@@ -410,3 +410,8 @@ svg.pulsechart .rx{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}svg.p
 .pverdict>b{font-size:15.5px}.pverdict p{margin:4px 0}
 .pverdict .padv{display:grid;gap:6px;margin:8px 0}.pverdict .padv>div{background:var(--card);border-radius:8px;padding:6px 10px}
 svg.pulsechart .pedge{opacity:.6;font-size:10.5px}
+/* measurement period (2026-11-19) */
+.sctab td.scmain{background:var(--card2);font-weight:600}
+.sctab td.sc-pos{color:var(--pos)}.sctab td.sc-neg{color:var(--neg)}
+.sctab td.sc-pos b,.sctab td.sc-neg b{color:inherit}
+.scsec .pverdict{margin-top:4px}
