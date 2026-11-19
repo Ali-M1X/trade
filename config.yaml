@@ -478,6 +478,20 @@ system2:
   variant: s2_avoid            # 2026-11-01: s2_trend + loss-review fixes (was s2_trend)
   db_path: data/state_s2.db
 
+# System 3 (paper only, Ali 2026-11-19): short the exhaustion of pumps on coins ranked 20 and below,
+# 1H candles. The one variant of the round 6 backtest positive after costs in both periods
+# (docs/system3-exhaust.md on branch claude/system3-exhaust: r25 · wick · maker · tp62). Its own
+# database and messages headed «🧪 سیستم ۳ (آزمایشی · کاغذی)»; kept out of systems 1 and 2, their
+# accounts and the measurement period (scorecard.NOT_RULES). Every other setting: system3.DEFAULTS.
+# Set enabled: false to stop it.
+system3:
+  enabled: true
+  db_path: data/state_s3.db
+  telegram: true
+  since: "2026-11-19"
+  review_days: 30
+  risk_pct: 0.5
+
 # Status panel (2026-11-14, Ali): Watch setups (scored with a plan, not sent) are followed
 # like signals in their own databases, never announced. Sized as grade B. signals/shadow.py
 shadow:

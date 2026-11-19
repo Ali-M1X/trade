@@ -432,3 +432,8 @@ table.xt tr.xdet>td{padding:0;background:var(--card2);white-space:normal;text-al
 .sctab td.sc-pos b,.sctab td.sc-neg b{color:inherit}
 .scsec .pverdict{margin-top:4px}
 .lv.lvexit{border-color:var(--warn)}.lv.lvexit .l{color:var(--warn)}
+/* system 3 page (2026-11-19) */
+.s3rules{margin:0;padding-inline-start:20px}
+.s3rules li{margin:6px 0;line-height:1.9}
+details.s3gone{margin-top:14px}
+.xview h2.s3head{font-size:16px;padding:0 14px}

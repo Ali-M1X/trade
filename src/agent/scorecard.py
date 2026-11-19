@@ -22,7 +22,7 @@ DEFAULTS = {"since": "2026-11-19", "weeks": 4, "min_trades": 100, "avg_r": 0.1, 
             "real_risk_pct": 1}
 # sections that do not change which trades are taken or how they are run
 NOT_RULES = {"exchange", "coingecko", "tvdatafeed", "schedule", "telegram", "shadow", "panel", "pulse", "ai",
-             "storage", "backtest", "live", "system2", "scorecard", "hold", "watch_alerts"}
+             "storage", "backtest", "live", "system2", "system3", "scorecard", "hold", "watch_alerts"}
 S1, S2 = "سیستم ۱", "سیستم ۲"
 
 

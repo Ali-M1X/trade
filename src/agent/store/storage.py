@@ -142,6 +142,9 @@ def make_storage(cfg: dict, repo_dir: str | Path = "."):
     extra_dbs = [s2["db_path"]] if s2.get("enabled") else []
     if sh.get("enabled"):                       # Watch setups followed for the status panel
         extra_dbs += [sh["db_path"]] + ([sh["s2_db_path"]] if s2.get("enabled") else [])
+    s3 = cfg.get("system3") or {}
+    if s3.get("enabled"):                       # system 3 (paper, its own database)
+        extra_dbs.append(s3.get("db_path") or "data/state_s3.db")
     if backend == "local":
         return LocalStorage(s["db_path"], extra_dbs)
     if backend == "git_branch":

@@ -150,6 +150,14 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
         repo2.close()
         if sh2 is not None:
             sh2.close()
+    from . import system3
+    if system3.enabled(cfg):
+        repo3 = Repository(system3.settings(cfg)["db_path"])
+        try:                                    # paper experiment, its own database: never blocks systems 1 and 2
+            system3.run(cfg, repo3, market.client, cg, notifier, now)
+        except Exception:
+            logging.getLogger(__name__).exception("system3 failed")
+        repo3.close()
     try:                                        # display and hypothetical only (pulse.py)
         from .pulse import record
         record(cfg, repo, market, now)
