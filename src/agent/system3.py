@@ -32,6 +32,10 @@ log = logging.getLogger(__name__)
 H = 3_600_000
 DAY = 86_400_000
 HEADER = "🧪 سیستم ۳ (آزمایشی · کاغذی)"
+# 2026-11-19 (Ali: «هر ساعت دیره»): a fast copy next to the tested one, with its own account. It checks every
+# minute on the 1H candle that is still forming (not backtested); the hourly one stays the reference.
+HEADERS = {"hourly": HEADER, "fast": "⚡️ سیستم ۳ سریع (آزمایشی · کاغذی)"}
+MODES = ("hourly", "fast")
 OPEN = ("pending", "active")
 CLOSED = ("tp", "sl", "time")
 UNFILLED = ("expired", "cancelled")
@@ -40,7 +44,7 @@ STATUS_FA = {"pending": "سفارش در انتظار", "active": "باز", "tp"
 WHY_FA = {"target_first": "قیمت قبل از ورود به تارگت رسید", "max_open": "سه معامله‌ی باز داشت",
           "bad_fill": "با قیمت پر شدن، استاپ یا تارگت دیگر جور نبود"}
 DEFAULTS = {
-    "enabled": False, "db_path": "data/state_s3.db", "telegram": True,
+    "enabled": False, "db_path": "data/state_s3.db", "telegram": True, "fast": False,
     "since": "2026-11-19", "review_days": 30, "risk_pct": 0.5, "balance_usd": 100,
     "min_rank": 20, "min_volume_usd": 3_000_000, "prefilter_range_pct": 12, "mover_hold_h": 48,
     "run_pct": 25, "peak_bars": 12, "base_from": 36, "base_to": 6,
@@ -115,13 +119,14 @@ def levels(entry: float, peak: float, target: float, c: dict) -> dict | None:
 
 
 # ------------------------------------------------------------------ the trade (pure)
-def new_trade(base: str, s: dict, now: int, c: dict) -> dict:
-    return {"base": base, "side": -1, "status": "pending", "created": now, "signal_ts": s["ts"],
+def new_trade(base: str, s: dict, now: int, c: dict, mode: str = "hourly") -> dict:
+    expires = (now if mode == "fast" else s["close_ts"]) + c["fill_bars"] * H
+    return {"base": base, "side": -1, "mode": mode, "status": "pending", "created": now, "signal_ts": s["ts"],
             "limit": s["limit"], "entry": s["entry"], "sl": s["sl"], "target": s["target"],
             "sl_pct": s["sl_pct"], "rr": s["rr"], "leverage": s["leverage"], "risk_pct": c["risk_pct"],
             "peak": s["peak"], "base_low": s["base_low"], "run_pct": s["run_pct"],
             "wick_ts": s["wick_ts"], "wick_vol_x": s["wick_vol_x"],
-            "expires_at": s["close_ts"] + c["fill_bars"] * H, "filled_at": None, "closed_at": None,
+            "expires_at": expires, "filled_at": None, "closed_at": None,
             "exit": None, "why": None, "last_ts": now - 1, "events": [["created", now, None]]}
 
 
@@ -200,16 +205,22 @@ def _t(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%H:%M UTC")
 
 
+def _head(tr: dict) -> str:
+    return HEADERS.get(tr.get("mode") or "hourly", HEADER)
+
+
 def new_message(tr: dict, cfg: dict) -> str:
+    fast = tr.get("mode") == "fast"
     return "\n".join([
-        f"{HEADER}",
+        _head(tr),
         f"🔻 {fmt.pair(tr['base'])} SHORT · سفارش لیمیت",
         f"ورود: {_p(tr['limit'])}",
         f"استاپ: {_p(tr['sl'])} ({fmt.fmt_num(tr['sl_pct'])}%)",
         f"تارگت: {_p(tr['target'])} ({fmt.fmt_num(tr['rr'])}R)",
         f"ریسک {fmt.fmt_num(tr['risk_pct'])}٪ · اهرم {tr['leverage']}x",
         f"چرا: پامپ {fmt.fmt_num(tr['run_pct'])}٪، کندل اوج با فتیله و حجم {fmt.fmt_num(tr['wick_vol_x'] or 0)} برابر، "
-        "حالا سقف پایین‌تر و بسته شدن زیر کف کندل قبل",
+        + ("حالا در کندل ۱ ساعته‌ی جاری (هنوز باز) سقف پایین‌تر و قیمت زیر کف کندل قبل" if fast
+           else "حالا سقف پایین‌تر و بسته شدن زیر کف کندل قبل"),
         f"سفارش تا {_t(tr['expires_at'])} معتبر است؛ خروج زمانی بعد از ۴۸ ساعت.",
     ]) + _link(cfg)
 
@@ -222,13 +233,13 @@ def _link(cfg: dict) -> str:
 def event_message(tr: dict, kind: str) -> str:
     b = fmt.pair(tr["base"])
     if kind == "filled":
-        return f"{HEADER}\n✅ {b} SHORT پر شد در {_p(tr['entry'])} · استاپ {_p(tr['sl'])} · تارگت {_p(tr['target'])}"
+        return f"{_head(tr)}\n✅ {b} SHORT پر شد در {_p(tr['entry'])} · استاپ {_p(tr['sl'])} · تارگت {_p(tr['target'])}"
     if kind in CLOSED:
         icon = "🎯" if kind == "tp" else "🛑" if kind == "sl" else "⏱"
-        return (f"{HEADER}\n{icon} {b} {STATUS_FA[kind]} در {_p(tr['exit'])} · "
+        return (f"{_head(tr)}\n{icon} {b} {STATUS_FA[kind]} در {_p(tr['exit'])} · "
                 f"{tr['net_r']:+.2f}R خالص (بعد از کارمزد)")
     why = WHY_FA.get(tr.get("why") or "", "")
-    return f"{HEADER}\n⚪️ {b} سفارش {STATUS_FA[kind]} شد" + (f" ({why})" if why else "")
+    return f"{_head(tr)}\n⚪️ {b} سفارش {STATUS_FA[kind]} شد" + (f" ({why})" if why else "")
 
 
 # ------------------------------------------------------------------ live run
@@ -258,7 +269,9 @@ def manage(cfg: dict, repo, market, notifier, now: int) -> int:
             log.exception("system3 candles %s", tr["base"])
             continue
         evs = []
-        others = sum(1 for t in _trades(repo) if t["status"] == "active" and t["id"] != tr["id"])
+        mode = tr.get("mode") or "hourly"
+        others = sum(1 for t in _trades(repo) if t["status"] == "active" and t["id"] != tr["id"]
+                     and (t.get("mode") or "hourly") == mode)
         for r in rows:
             evs += step(tr, r, c, others)
             if tr["status"] not in OPEN:
@@ -287,6 +300,29 @@ def universe(cfg: dict, cg) -> list[dict]:
     return out
 
 
+def _blocked(trs: list[dict], base: str, now: int, c: dict, mode: str) -> str | None:
+    """Why a new trade of this mode on `base` is not allowed now (each mode has its own limits)."""
+    mine = [t for t in trs if (t.get("mode") or "hourly") == mode]
+    if any(t["base"] == base and (t["status"] in OPEN or (t["filled_at"] and (t["closed_at"] or 0) + c["cooldown_h"] * H > now))
+           for t in mine):
+        return "busy"
+    if sum(1 for t in mine if t["status"] == "active") >= c["max_open"]:
+        return "max_open"
+    day = now // DAY
+    if sum(1 for t in mine if t["status"] in CLOSED and (t.get("net_r") or 0) < 0 and t["closed_at"] // DAY == day) >= c["day_losses"]:
+        return "day_losses"
+    return None
+
+
+def _open_trade(cfg: dict, repo, base: str, s: dict, now: int, c: dict, mode: str, notifier) -> None:
+    tr = new_trade(base, s, now, c, mode)
+    sid = repo.add_signal(now, base, "short", "S3" if mode == "hourly" else "S3F", s["run_pct"], "pending", {"s3": tr})
+    tr["id"] = sid
+    repo.add_event(now, "created", {"run_pct": s["run_pct"], "mode": mode}, sid)
+    if notifier is not None:
+        notifier.send(new_message(tr, cfg))
+
+
 def scan_due(repo, now: int, c: dict) -> bool:
     last = repo.get_state("s3_last_scan") or 0
     return now // H > last // H and now % H >= c["scan_delay_s"] * 1000
@@ -305,9 +341,7 @@ def scan(cfg: dict, repo, market, cg, notifier, now: int) -> list[dict]:
     live = {r["base"] for r in rows}
     movers = {b: u for b, u in movers.items() if u > now and b in live}
     repo.set_state("s3_movers", movers)
-    trs = _trades(repo)
-    day = now // DAY
-    losses = sum(1 for t in trs if t["status"] in CLOSED and (t.get("net_r") or 0) < 0 and t["closed_at"] // DAY == day)
+    repo.set_state("s3_universe", sorted(live))
     found = []
     for base in sorted(movers):
         try:
@@ -320,22 +354,84 @@ def scan(cfg: dict, repo, market, cg, notifier, now: int) -> list[dict]:
             continue
         found.append({"base": base, **{k: s[k] for k in ("ts", "run_pct", "entry", "sl", "target")}})
         trs = _trades(repo)
-        if any(t["signal_ts"] == s["ts"] and t["base"] == base for t in trs):
+        if any(t["signal_ts"] == s["ts"] and t["base"] == base and (t.get("mode") or "hourly") == "hourly" for t in trs):
             continue
-        busy = any(t["base"] == base and (t["status"] in OPEN or (t["filled_at"] and (t["closed_at"] or 0) + c["cooldown_h"] * H > now))
-                   for t in trs)
-        active = sum(1 for t in trs if t["status"] == "active")
-        if busy or active >= c["max_open"] or losses >= c["day_losses"]:
-            found[-1]["skip"] = "busy" if busy else "max_open" if active >= c["max_open"] else "day_losses"
+        why = _blocked(trs, base, now, c, "hourly")
+        if why:
+            found[-1]["skip"] = why
             continue
-        tr = new_trade(base, s, now, c)
-        sid = repo.add_signal(now, base, "short", "S3", s["run_pct"], "pending", {"s3": tr})
-        tr["id"] = sid
-        repo.add_event(now, "created", {"run_pct": s["run_pct"]}, sid)
-        if notifier is not None:
-            notifier.send(new_message(tr, cfg))
+        _open_trade(cfg, repo, base, s, now, c, "hourly", notifier)
     repo.set_state("s3_scan", {"ts": now, "coins": len(rows), "movers": len(movers), "setups": found[-20:]})
     prune(repo, set(movers) | {t["base"] for t in _trades(repo) if t["status"] in OPEN}, now)
+    return found
+
+
+def _perp_tickers(client) -> dict[str, dict]:
+    """base -> ticker (last, 24h high and low) of every USDT perpetual, one call."""
+    name, tickers = client.call("fetch_tickers")
+    ex = client.exchange(name)
+    out = {}
+    for sym, t in tickers.items():
+        m = ex.markets.get(sym) if ex.markets else None
+        if m and m.get("swap") and m.get("linear") and m.get("quote") == "USDT":
+            out[m["base"]] = t
+    return out
+
+
+def _prev_low(repo, base: str, hour: int) -> float | None:
+    row = repo.conn.execute("SELECT low FROM candles WHERE symbol = ? AND timeframe = '1h' AND ts = ? LIMIT 1",
+                            (f"{base}/USDT:USDT", hour - H)).fetchone()
+    return row[0] if row else None
+
+
+def scan_fast(cfg: dict, repo, market_open, client, notifier, now: int) -> list[dict]:
+    """Every minute: one ticker call. A coin of the universe that moved >= prefilter in 24h becomes a mover
+    (at once, not only on the hour). A mover whose price is under the low of the last closed 1H candle gets
+    its 1H candles with the forming one, and the setup is checked on that forming candle."""
+    c = settings(cfg)
+    uni = set(repo.get_state("s3_universe") or [])
+    if not uni:
+        return []
+    try:
+        tick = _perp_tickers(client)
+    except Exception:                                       # noqa: BLE001
+        log.exception("system3 tickers")
+        return []
+    movers = repo.get_state("s3_movers", {}) or {}
+    for b, t in tick.items():
+        hi, lo = t.get("high"), t.get("low")
+        if b in uni and hi and lo and lo > 0 and (hi / lo - 1) * 100 >= c["prefilter_range_pct"]:
+            movers[b] = now + c["mover_hold_h"] * H
+    movers = {b: u for b, u in movers.items() if u > now}
+    repo.set_state("s3_movers", movers)
+    hour, found = now // H * H, []
+    for base in sorted(movers):
+        last = (tick.get(base) or {}).get("last")
+        low = _prev_low(repo, base, hour)
+        if last is None or (low is not None and last >= low):
+            continue
+        try:
+            bars = _bars(market_open.candles(base, "1h"))
+        except Exception:                                   # noqa: BLE001
+            log.exception("system3 fast candles %s", base)
+            continue
+        if not bars or bars[-1][0] != hour:
+            continue
+        bars[-1][4] = last                                  # the forming candle closes at the price now
+        s = find_setup(bars, c)
+        if s is None:
+            continue
+        found.append({"base": base, "ts": s["ts"], "run_pct": s["run_pct"]})
+        trs = _trades(repo)
+        if any(t["signal_ts"] == s["ts"] and t["base"] == base and t.get("mode") == "fast" for t in trs):
+            continue
+        why = _blocked(trs, base, now, c, "fast")
+        if why:
+            found[-1]["skip"] = why
+            continue
+        _open_trade(cfg, repo, base, s, now, c, "fast", notifier)
+    st = repo.get_state("s3_scan", {}) or {}
+    repo.set_state("s3_scan", {**st, "fast_ts": now, "movers": len(movers)})
     return found
 
 
@@ -362,6 +458,12 @@ def run(cfg: dict, repo3, client, cg, notifier, now: int) -> None:
     if scan_due(repo3, now, c):
         found = scan(cfg, repo3, market, cg, out, now)
         print(f"system3 scan: {len(found)} setups")
+    if c["fast"]:
+        fast = LiveMarket(cfg, repo3, client, now)
+        fast.open_tfs.add("1h")
+        found = scan_fast(cfg, repo3, fast, client, out, now)
+        if found:
+            print(f"system3 fast: {len(found)} setups")
 
 
 # ------------------------------------------------------------------ panel
@@ -391,19 +493,28 @@ def panel_view(cfg: dict, now: int) -> dict:
                 last[t["id"]] = row[0] if row else None
     finally:
         repo.close()
-    bal = float(c["balance_usd"])
     rows = []
     for t in sorted(trs, key=lambda x: x["created"]):
         r = {k: t.get(k) for k in ("base", "side", "status", "created", "filled_at", "closed_at", "entry", "sl",
                                    "target", "limit", "exit", "why", "sl_pct", "rr", "leverage", "risk_pct",
                                    "peak", "base_low", "run_pct", "wick_vol_x", "expires_at", "events",
                                    "gross_r", "cost_r", "net_r")}
-        r.update(id=f"s3-{t['id']}", status_fa=STATUS_FA.get(t["status"], t["status"]),
+        r.update(id=f"s3-{t['id']}", mode=t.get("mode") or "hourly", status_fa=STATUS_FA.get(t["status"], t["status"]),
                  why_fa=WHY_FA.get(t.get("why") or ""), price=last.get(t["id"]),
                  open_r=open_r(t, last.get(t["id"])), sl_now=t["sl"], tp1=t["target"], tp2=None)
         rows.append(r)
-    # the account: each closed trade risks risk_pct of the balance before it, in the order they closed
-    eq, peak, dd = [[out["since"], bal]], bal, 0.0
+    out["trades"] = rows
+    out["accounts"] = {m: _account([r for r in rows if r["mode"] == m], c, out["since"]) for m in MODES}
+    out["account"] = out["accounts"]["hourly"]
+    out["fast"] = bool(c["fast"])
+    return out
+
+
+def _account(rows: list[dict], c: dict, since: int) -> dict:
+    """A $100 paper account: each closed trade risks risk_pct of the balance before it, in the order they closed.
+    Sets risk_usd, pnl_usd and pnl_pct on the rows."""
+    bal = float(c["balance_usd"])
+    eq, peak, dd = [[since, bal]], bal, 0.0
     for r in sorted([r for r in rows if r["status"] in CLOSED], key=lambda r: r["closed_at"]):
         r["risk_usd"] = bal * c["risk_pct"] / 100
         r["pnl_usd"] = r["risk_usd"] * r["net_r"]
@@ -421,8 +532,7 @@ def panel_view(cfg: dict, now: int) -> dict:
     closed = [r for r in rows if r["status"] in CLOSED]
     wins = [r for r in closed if r["net_r"] > 0]
     gain, loss = sum(r["net_r"] for r in wins), -sum(r["net_r"] for r in closed if r["net_r"] < 0)
-    out["trades"] = rows
-    out["account"] = {
+    return {
         "balance": round(bal, 4), "start": float(c["balance_usd"]), "eq": eq, "max_dd_pct": round(dd, 2),
         "closed": len(closed), "wins": len(wins), "net_r": round(sum(r["net_r"] for r in closed), 3),
         "avg_r": round(sum(r["net_r"] for r in closed) / len(closed), 3) if closed else None,
@@ -431,4 +541,3 @@ def panel_view(cfg: dict, now: int) -> dict:
         "pending": sum(1 for r in rows if r["status"] == "pending"),
         "unfilled": sum(1 for r in rows if r["status"] in UNFILLED),
     }
-    return out

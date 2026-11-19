@@ -488,6 +488,9 @@ system3:
   enabled: true
   db_path: data/state_s3.db
   telegram: true
+  # 2026-11-19 (Ali: «هر ساعت دیره»): a fast copy with its own account, checked every minute on the
+  # forming 1H candle (not backtested); the hourly one above stays the tested reference
+  fast: true
   since: "2026-11-19"
   review_days: 30
   risk_pct: 0.5

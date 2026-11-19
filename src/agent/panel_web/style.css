@@ -437,3 +437,5 @@ table.xt tr.xdet>td{padding:0;background:var(--card2);white-space:normal;text-al
 .s3rules li{margin:6px 0;line-height:1.9}
 details.s3gone{margin-top:14px}
 .xview h2.s3head{font-size:16px;padding:0 14px}
+.s3modes{margin:0 0 12px;padding:0}
+.s3modes .s3mnote{flex:1 1 100%;padding:6px 12px}
