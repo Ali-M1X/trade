@@ -160,3 +160,16 @@ def test_the_fast_copy_signals_on_the_forming_candle_with_its_own_account(cfg, t
     v = S3.panel_view(c, now)
     assert v["trades"][0]["mode"] == "fast" and v["accounts"]["fast"]["pending"] == 1
     assert v["accounts"]["hourly"]["pending"] == 0
+
+
+def test_the_run_publishes_the_panel_data_at_once(cfg, tmp_path):
+    import json
+    c = {**cfg, "system3": {"enabled": True, "db_path": str(tmp_path / "s3.db"), "live_json": str(tmp_path / "www" / "s3.json")}}
+    assert S3.publish(c, 123) is None                                   # no panel folder here: nothing written
+    (tmp_path / "www").mkdir()
+    repo = Repository(c["system3"]["db_path"])
+    S3.scan(c, repo, FakeMarket(pump_bars()), FakeCG(), None, pump_bars()[-1][0] + H + 120_000)
+    repo.close()
+    path = S3.publish(c, 456)
+    v = json.loads(open(path, encoding="utf-8").read())
+    assert v["now"] == 456 and v["trades"][0]["base"] == "AAA"

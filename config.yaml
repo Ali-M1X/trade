@@ -491,6 +491,8 @@ system3:
   # 2026-11-19 (Ali: «هر ساعت دیره»): a fast copy with its own account, checked every minute on the
   # forming 1H candle (not backtested); the hourly one above stays the tested reference
   fast: true
+  # the run writes the panel's System 3 data here as soon as it acts (skipped where the folder is missing)
+  live_json: /var/www/trade-panel/s3.json
   since: "2026-11-19"
   review_days: 30
   risk_pct: 0.5
