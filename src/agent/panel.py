@@ -144,10 +144,10 @@ def _open(path) -> Repository | None:
     return Repository.open_readonly(path) if path and Path(path).exists() else None
 
 
-def _db_trades(repo: Repository, system: str, approved: bool, since: int) -> list[dict]:
+def _db_trades(repo: Repository, system: str, approved: bool, since: int, keep=None) -> list[dict]:
     out = []
     for s in repo.get_signals():
-        if s["created_at"] < since:
+        if s["created_at"] < since or (keep is not None and not keep(s)):
             continue
         p = s["payload"]
         lc = p["lifecycle"]
@@ -933,6 +933,48 @@ def _app_version() -> str:
     for name in ("index.html", "app.js", "style.css"):
         h.update((WEB / name).read_bytes())
     return h.hexdigest()[:12]
+
+
+def live_positions(cfg: dict, now_ms: int, recent_ms: int = 6 * 3_600_000) -> dict:
+    """The fast lane's copy for the page (positions.write_live): every open or pending trade of systems 1
+    and 2 and their Watch books, and those closed in the last `recent_ms`, with the fields a booked event
+    changes. The page patches its trades with it until the next full build (2026-11-20)."""
+    s2, sh = cfg.get("system2") or {}, cfg.get("shadow") or {}
+    books = [("سیستم ۱", True, cfg["storage"]["db_path"])]
+    if sh.get("enabled"):
+        books.append(("سیستم ۱", False, sh.get("db_path")))
+    if s2.get("enabled"):
+        books.append(("سیستم ۲", True, s2.get("db_path")))
+        if sh.get("enabled"):
+            books.append(("سیستم ۲", False, sh.get("s2_db_path")))
+
+    def keep(s):
+        return s["status"] not in CLOSED + UNFILLED or (s["updated_at"] or 0) >= now_ms - recent_ms
+
+    rows = []
+    price_repo = _open(cfg["storage"]["db_path"])
+    try:
+        for name, approved, path in books:
+            repo = _open(path)
+            if repo is None:
+                continue
+            try:
+                trades = _db_trades(repo, name, approved, _start_ms(cfg), keep)
+            finally:
+                repo.close()
+            for t in trades:
+                _value(t, cfg, price_repo)
+                rows.append({
+                    "id": _tid(t), "status": t["status"], "status_fa": STATUS_FA.get(t["status"], t["status"]),
+                    "open": t["open"], "filled_at": t["filled_at"], "closed_at": t["closed_at"],
+                    "sl_now": _num(t["sl_now"]), "gross_r": _num(t["gross_r"], 4), "open_frac": _num(t["open_frac"], 4),
+                    "net_r": _num(t["net_r"], 4), "cost_r": _num(t["cost_r"], 4), "price": _num(t["price"]),
+                    "open_r": _num(t["open_r"], 4), "events": [[k, ts, _num(px)] for k, ts, px in t["events"]],
+                })
+    finally:
+        if price_repo is not None:
+            price_repo.close()
+    return {"now": now_ms, "trades": rows}
 
 
 def build(cfg: dict, out_dir: str | Path, now_ms: int | None = None) -> Path:

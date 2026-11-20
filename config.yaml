@@ -1097,6 +1097,18 @@ realtime:
   # waits ~10 min for it. Without that process the minute run keeps the funnel at run-4h above.
   funnel_every_min: 15
   funnel_worker_stale_min: 45
+  # 2026-11-20 (Ali: "closer to real time"): open positions of systems 1 and 2 (all four books) and
+  # System 3 in their own long-running process (trade-agent run-positions, systemd
+  # trade-positions.service): systems 1 and 2 lag_s seconds after every 5m close, System 3 every
+  # minute, then live.json for the panel. Same rules (closed 5m candles). While its heartbeat is
+  # fresh the minute run leaves run-15m and System 3 to it; without that process nothing changes.
+  positions:
+    enabled: true
+    lag_s: 10
+    live_json: /var/www/trade-panel/live.json
+  # news in its own process too (trade-agent run-news --worker, systemd trade-news.timer); the minute
+  # run skips news while that process ran within this many minutes, and still backs its file up
+  news_worker_stale_min: 5
 
 live:
   variant: combo_avoid

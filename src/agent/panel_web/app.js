@@ -1957,6 +1957,48 @@
         if (j && j.now && j.now > (s3().now || 0)) { D.system3 = j; s3Fill(); }
       });
   }
+  // ---- the fast lane's live.json (2026-11-20, Ali: "closer to real time"): the server writes it a few seconds after
+  // every 5m close with the open and recently closed trades as booked. Until the next full build the page patches
+  // its trades with it, so a TP, a stop or a fill shows within seconds. Balances follow with the full build.
+  var LIVE_KEYS = ["status", "status_fa", "open", "filled_at", "closed_at", "sl_now", "gross_r", "open_frac", "net_r", "cost_r", "price", "open_r", "events"];
+  var posBusy = false;
+  function applyLivePos(j) {
+    if (!j || !j.trades || !(j.now > (D.now || 0))) return false;
+    var changed = false;
+    j.trades.forEach(function (r) {
+      var t = byId(r.id);
+      if (!t) return;
+      var was = JSON.stringify([t.status, t.filled_at, t.closed_at, t.sl_now, (t.events || []).length]);
+      LIVE_KEYS.forEach(function (k) { if (k in r) t[k] = r[k]; });
+      if (!t.open && t.filled_at && t.net_r != null) {      // closed here: the result at the trade's own risk
+        if (t.risk_usd != null) t.pnl_usd = t.risk_usd * t.net_r;
+        if (t.own_risk_usd != null) t.own_pnl_usd = t.own_risk_usd * t.net_r;
+      }
+      if (JSON.stringify([t.status, t.filled_at, t.closed_at, t.sl_now, (t.events || []).length]) !== was) changed = true;
+    });
+    return changed;
+  }
+  function posPoll() {
+    if (document.hidden || posBusy) return;
+    posBusy = true;
+    fetch("live.json?t=" + Date.now(), {cache: "no-store"}).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
+      .then(function (j) {
+        posBusy = false;
+        if (!j || !j.now || (S.livePos && j.now <= S.livePos.now)) return;
+        S.livePos = j;
+        var prev = snapshot(D), sel = findSel(S.sel), was = sel ? JSON.stringify([sel.status, sel.sl_now, (sel.events || []).length]) : "";
+        if (!applyLivePos(j)) return;
+        notifyChanges(prev, D);
+        redrawAfterData(was);
+      });
+  }
+  function redrawAfterData(was) {            // after new trade data: the chart keeps its zoom, the S3 page its own data
+    if (S.tab === "s3") { status(); s3Fill(); return; }
+    if (S.tab !== "chart") { render(); return; }
+    status(); renderBottom();
+    var t = findSel(S.sel);
+    if (t && JSON.stringify([t.status, t.sl_now, (t.events || []).length]) !== was) tradeView(t);
+  }
   function s3OpenBases() {
     return (s3().trades || []).filter(function (t) { return t.status === "active" || t.status === "pending"; }).map(function (t) { return t.base; });
   }
@@ -1975,12 +2017,9 @@
           var s3prev = D.system3;
           D = j; MK = D.market || {}; candleCache = {};
           if (s3prev && s3prev.now && (!j.system3 || (j.system3.now || 0) < s3prev.now)) D.system3 = s3prev;   // s3.json was newer
-          notifyChanges(prev, j);
-          if (S.tab === "s3") { status(); s3Fill(); return; }   // the chart keeps its zoom
-          if (S.tab !== "chart") { render(); return; }
-          status(); renderBottom();             // the chart keeps its zoom; only a changed trade is redrawn
-          var t = findSel(S.sel);
-          if (t && JSON.stringify([t.status, t.sl_now, (t.events || []).length]) !== was) tradeView(t);
+          applyLivePos(S.livePos);               // live.json was newer than this build
+          notifyChanges(prev, D);
+          redrawAfterData(was);
         });
       }).catch(function () { status(); });
   }
@@ -3443,7 +3482,8 @@
   });
   loadMarks();
   bellUi();
-  setInterval(refresh, 20000);
+  setInterval(refresh, 10000);
+  setInterval(posPoll, 5000);
   setInterval(status, 30000);
   setInterval(liveTick, 5000);
   setInterval(s3Poll, 5000);

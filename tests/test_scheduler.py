@@ -75,3 +75,42 @@ def test_realtime_periods_override():
     assert due_tasks(MON + 4 * 60_000, last, periods) == ["run-15m"]
     assert due_tasks(MON + 6 * 60_000, last, periods) == ["run-15m", "run-1h"]
     assert due_tasks(MON + HOUR + 60_000, last, periods) == ["run-15m", "run-4h", "run-1h"]
+
+
+def test_run_scheduled_leaves_positions_and_news_to_their_own_processes(cfg, monkeypatch):
+    from agent import cli, positions, runs, system2, system3
+    from agent.signals import shadow
+    from agent.store.repository import Repository
+
+    class Storage:
+        pushed = []
+
+        def push(self, msg, extra=None):
+            self.pushed.append(msg)
+
+    repo = Repository()
+    repo.close = lambda: None
+    now = MON + 4 * HOUR + 60_000
+    market = type("Market", (), {"client": None})()
+    monkeypatch.setattr(cli, "open_context", lambda c, s: (Storage(), repo, market, None, now))
+    calls = []
+    monkeypatch.setattr(runs, "manage", lambda *a: calls.append("15m") or [])
+    monkeypatch.setattr(runs, "run_1h", lambda *a: calls.append("1h") or [])
+    monkeypatch.setattr(cli, "news_pass", lambda *a: calls.append("news") or {})
+    monkeypatch.setattr(system3, "run", lambda *a: calls.append("s3"))
+    monkeypatch.setattr(system3, "enabled", lambda c: True)
+    monkeypatch.setattr(shadow, "enabled", lambda c: False)
+    monkeypatch.setattr(system2, "enabled", lambda c: False)
+    monkeypatch.setattr(system3, "settings", lambda c: {"db_path": ":memory:"})
+    last = {"run-daily": now, "run-weekly": now, "run-1h": MON, "run-4h": now}
+    repo.set_state("last_runs", last)
+    repo.set_state(positions.HB, now - 20_000)
+    repo.set_state(cli.NEWS_HB, now - 60_000)
+    assert cli.main(["run-scheduled"]) == 0
+    assert calls == ["1h"]                             # positions, System 3 and news ran elsewhere
+    repo.set_state(positions.HB, now - 10 * 60_000)    # the fast lane stopped: everything runs here again
+    repo.set_state(cli.NEWS_HB, now - 10 * 60_000)
+    repo.set_state("last_runs", last)
+    calls.clear()
+    assert cli.main(["run-scheduled"]) == 0
+    assert calls == ["s3", "15m", "1h", "news"]
