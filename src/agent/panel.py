@@ -327,6 +327,26 @@ def _price_at(path: list[tuple[int, float]] | None, ts: int) -> float | None:
     return path[i][1] if i >= 0 else None
 
 
+def duplicate_pairs(trades: list[dict], now: int) -> list[tuple[dict, dict]]:
+    """2026-11-20 (Ali: "if these positions were in one system only, what would «همه» be?"): a trade of
+    system 1 and one of system 2 on the same coin and side, open at the same time, are one position on a
+    real exchange account. Returns (kept, dropped) pairs: the one filled first is kept (system 1 on a tie)."""
+    filled = sorted((t for t in trades if t["filled_at"]), key=lambda t: (t["filled_at"], t["created"]))
+    s1 = [t for t in filled if t["system"] == "سیستم ۱"]
+    s2 = [t for t in filled if t["system"] != "سیستم ۱"]
+    pairs, used = [], set()
+    for a in s1:
+        a0, a1 = a["filled_at"], a["closed_at"] or now
+        for b in s2:
+            if id(b) in used or b["base"] != a["base"] or b["side"] != a["side"]:
+                continue
+            if a0 < (b["closed_at"] or now) and b["filled_at"] < a1:
+                used.add(id(b))
+                pairs.append((a, b) if (a0, 0) <= (b["filled_at"], 1) else (b, a))
+                break
+    return pairs
+
+
 def simulate(trades: list[dict], balance: float, start: int, now: int, prices=None) -> dict:
     """Book every filled trade on one account: risk = its risk % of the balance at the fill.
     Each partial exit (TP1, TP2) is booked when it happens and the rest at the close, so the
@@ -517,7 +537,12 @@ def collect(cfg: dict, now_ms: int) -> dict:
             s["funnel_dom"] = s["funnel_dom"] or first["funnel_dom"]
             s["funnel"] = s["funnel"] or first["funnel"]
     tr = sorted(out["trades"], key=lambda t: t["created"])
+    pairs = duplicate_pairs(tr, now_ms)
+    dropped = {id(d) for _, d in pairs}
+    for kept, d in pairs:
+        d["dup_of"] = _tid(kept)
     out["accounts"] = {
+        "nodup": simulate([t for t in tr if id(t) not in dropped], bal, start, now_ms, prices),
         "approved": simulate([t for t in tr if t["approved"]], bal, start, now_ms, prices),
         "watch": simulate([t for t in tr if not t["approved"]], bal, start, now_ms, prices),
         "all": simulate(tr, bal, start, now_ms, prices),
@@ -579,10 +604,11 @@ def _trade_rows(data: dict) -> list[dict]:
     for key in ("approved", "watch"):
         for t in acc[key]["rows"]:
             own[_tid(t)] = t
+    nodup = {_tid(t): t for t in acc["nodup"]["rows"]} if "nodup" in acc else {}
     rows = []
     for t in acc["all"]["rows"]:
         tid = _tid(t)
-        mine = own.get(tid, {})
+        mine, nd = own.get(tid, {}), nodup.get(tid, {})
         rows.append({
             "id": tid, "system": t["system"], "approved": t["approved"], "source": t["source"],
             "base": t["base"], "side": 1 if t["side"] in (1, "long", "1") else -1,
@@ -601,6 +627,8 @@ def _trade_rows(data: dict) -> list[dict]:
             "own_risk_usd": _num(mine.get("risk_usd"), 6), "own_pnl_usd": _num(mine.get("pnl_usd"), 6),
             "own_balance_after": _num(mine.get("balance_after"), 8),
             "pulse": t.get("pulse"),
+            "dup_of": t.get("dup_of"),               # the twin in the other system that the «بدون تکرار» account keeps
+            "nd_risk_usd": _num(nd.get("risk_usd"), 6), "nd_pnl_usd": _num(nd.get("pnl_usd"), 6),
         })
     return rows
 
@@ -731,7 +759,8 @@ def payload(cfg: dict, data: dict) -> dict:
     news = sorted((n for s in data["systems"] for n in s["news"]), key=lambda n: -n["seen_at"])[:40]
     return {
         "now": now, "start": data["start"], "balance": (cfg.get("panel") or {}).get("balance_usd", 100),
-        "accounts": {k: _account_summary(data["accounts"][k]) for k in ("approved", "watch", "all")},
+        "accounts": {k: _account_summary(data["accounts"][k]) for k in ("approved", "watch", "all", "nodup")
+                     if k in data["accounts"]},
         "trades": trades, "systems": systems, "compare": _compare(data),
         "regime": data.get("regime") or {},
         "pulse": data.get("pulse") or {},

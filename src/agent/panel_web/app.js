@@ -255,7 +255,8 @@
       if (!t.open || !t.filled_at) return;
       if (key === "approved" && !t.approved) return;
       if (key === "watch" && t.approved) return;
-      var risk = tRisk(t, key === "all"), r = openR(t);
+      if (key === "nodup" && t.dup_of) return;
+      var risk = key === "nodup" ? t.nd_risk_usd : tRisk(t, key === "all"), r = openR(t);
       if (risk != null && r != null) extra += risk * (r - (isPartial(t) ? t.net_r || 0 : 0));
     });
     return {equity: a.balance + extra, unreal: extra};
@@ -275,17 +276,69 @@
         '<div><span class="l">بیشترین افت</span><span class="ltr">' + (a.max_dd || 0).toFixed(1) + "%</span></div>" +
         '<div><span class="l">ضریب سود</span><span class="ltr">' + (a.pf == null ? "—" : a.pf.toFixed(2)) + "</span></div>" +
         '<div><span class="l">کارمزد و هزینه</span>' + usd(-(a.fees || 0)) + "</div>" +
-        '<div><span class="l">باز / در انتظار</span>' + fa(a.open) + " / " + fa(a.pending) + "</div></div></div>";
+        '<div><span class="l">باز / در انتظار</span>' + fa(a.open) + " / " + fa(a.pending) + "</div></div>" +
+        (x[0] === "all" && D.accounts.nodup ? '<a class="ndline" href="#home" data-go="nodup">بدون پوزیشن‌های تکراری: <b class="ltr" id="eqv-nodup">$' +
+          accLive("nodup").equity.toFixed(2) + '</b> <small>(' + fa(dupTrades().length) + " تکرار)</small></a>" : "") + "</div>";
     }).join("");
     var open = openTrades().sort(function (a, b) { return b.created - a.created; });
     var s1 = (D.systems || []);
     app.innerHTML = eventBanner() +
       '<section><h2>حساب‌های شبیه‌سازی‌شده <small>شروع ' + esc(jfmt(D.start, "ymd")) + " با $" + D.balance + '</small></h2><div class="grid g3">' + cards + "</div></section>" + openRiskSection() +
-      equitySection() +
+      equitySection() + nodupSection() +
       '<div class="grid g2"><section><h2>پوزیشن‌های باز <small>' + fa(open.length) + "</small></h2><div id=\"minipos\">" + miniPositions(open) + "</div></section>" +
       "<section><h2>وضعیت بازار</h2>" + s1.map(regimeMini).join("") + "</section></div>" +
       "<section><h2>آخرین اجراها</h2>" + runs() + "</section>";
     equityChart();
+    nodupChart();
+    var nl = app.querySelector(".ndline");
+    if (nl) nl.onclick = function (e) { e.preventDefault(); var t = document.getElementById("nodup"); if (t) t.scrollIntoView({behavior: "smooth"}); };
+  }
+  // ---- «همه بدون تکرار» (2026-11-20, Ali: "a section to see the data without the repeats"): a coin and side open in
+  // system 1 and system 2 at once is one position on a real exchange account. This account keeps the copy filled first.
+  function dupTrades() { return trades().filter(function (t) { return t.dup_of; }); }
+  function nodupSection() {
+    var a = D.accounts.nodup, all = D.accounts.all;
+    if (!a) return "";
+    var la = accLive("nodup"), lall = accLive("all"), dups = dupTrades();
+    var rows = dups.map(function (d) {
+      var k = byId(d.dup_of) || {};
+      var r = function (t) { return t.filled_at ? (t.open ? openR(t) : t.net_r) : null; };
+      var extra = pnlUsd(d, true);
+      return '<tr class="click" data-open="' + esc(k.id || d.id) + '"><td><b>' + esc(d.base) + "</b></td><td>" + side(d.side) + "</td><td>" +
+        esc(sysShort(k.system || "")) + " " + (k.approved ? '<span class="badge ok">تأییدشده</span>' : '<span class="badge watch">Watch</span>') + " <small>" + esc(k.status_fa || "") + "</small></td><td>" +
+        esc(sysShort(d.system)) + " " + (d.approved ? '<span class="badge ok">تأییدشده</span>' : '<span class="badge watch">Watch</span>') + " <small>" + esc(d.status_fa) + "</small></td>" +
+        tsCell(d.filled_at) + "<td>" + R(r(k)) + "</td><td>" + R(r(d)) + '</td><td data-v="' + (extra == null ? "" : extra.toFixed(4)) + '">' + usd(extra) + "</td></tr>";
+    });
+    var tot = sumOf(dups, function (d) { return pnlUsd(d, true); });
+    return '<section id="nodup"><h2>همه بدون تکرار <small>اگر هر کوین و جهتی که هم‌زمان در هر دو سیستم باز بود فقط یک بار گرفته می‌شد</small></h2>' +
+      '<p class="muted">در صرافی، دو سیگنال هم‌جهت روی یک کوین یک پوزیشن با دو برابر حجم می‌شوند. این حساب از هر جفت تکراری فقط نسخه‌ای را نگه می‌دارد که زودتر پر شد (در تساوی سیستم ۱)، با همان ریسک و همان قوانین. فقط برای مقایسه است و به سیگنال‌ها دست نمی‌زند.</p>' +
+      '<div class="grid g4">' +
+      statCard("ارزش حساب بدون تکرار", '<span class="ltr" id="nd-eq">$' + la.equity.toFixed(2) + "</span>", "با تکرارها $" + lall.equity.toFixed(2) + " · فرق " + usd(lall.equity - la.equity)) +
+      statCard("موجودی قطعی", '<span class="ltr">$' + a.balance.toFixed(2) + "</span>", "با تکرارها $" + all.balance.toFixed(2)) +
+      statCard("بیشترین افت", '<span class="ltr">' + (a.max_dd || 0).toFixed(1) + "%</span>", "با تکرارها " + (all.max_dd || 0).toFixed(1) + "٪") +
+      statCard("معاملات", fa(a.done) + " بسته", fa(dups.length) + " معامله‌ی تکراری کنار گذاشته شد · ضریب سود " + (a.pf == null ? "—" : a.pf.toFixed(2))) + "</div>" +
+      '<div class="chartbox eqbox" id="ndeq"></div>' +
+      (rows.length ? '<h3>پوزیشن‌های تکراری <small>' + fa(rows.length) + ' جفت · روی هر ردیف کلیک کنید تا روی نمودار ببینید</small></h3><div class="scroll"><table data-defsort="4:desc"><thead><tr><th>کوین</th><th>جهت</th><th>نگه داشته شد</th><th>کنار گذاشته شد</th><th>زمان ورود</th><th>R نگه‌داشته</th><th>R کنارگذاشته</th><th>سهم کنارگذاشته در حساب «همه»</th></tr></thead><tbody>' +
+        rows.join("") + "</tbody>" + totRow([{span: 7, v: "جمع " + fa(rows.length) + " تکرار"}, usd(tot)]) + "</table></div>"
+        : '<div class="empty">پوزیشن تکراری‌ای نبوده است.</div>') + "</section>";
+  }
+  function nodupChart() {
+    var el = document.getElementById("ndeq");
+    if (!el || !D.accounts.nodup) return;
+    el.innerHTML = "";
+    var c = makeChart(el, {rightPriceScale: {scaleMargins: {top: 0.12, bottom: 0.08}}, grid: {vertLines: {visible: false}, horzLines: {color: cssv("--grid"), style: 1}},
+      crosshair: {mode: 1, vertLine: {labelVisible: false}}, handleScroll: false, handleScale: false});
+    if (!c) return;
+    var fmt = {type: "custom", formatter: function (v) { return "$" + v.toFixed(2); }};
+    [["all", "--acc2", 2, "با تکرار"], ["nodup", "--pos", 3, "بدون تکرار"]].forEach(function (x, i) {
+      var a = D.accounts[x[0]], l = accLive(x[0]), now = tsec(Date.now());
+      var pts = uniq((a.eq_curve && a.eq_curve.length ? a.eq_curve : a.curve || []).map(function (p) { return {time: tsec(p[0]), value: p[1]}; }));
+      if (!pts.length || pts[pts.length - 1].time < now) pts.push({time: now, value: l.equity});
+      var sr = c.addLineSeries({color: cssv(x[1]), lineWidth: x[2], priceFormat: fmt, priceLineVisible: false, lastValueVisible: true, title: x[3]});
+      sr.setData(uniq(pts));
+      if (i === 0) sr.createPriceLine({price: D.balance, color: cssv("--muted"), lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "شروع"});
+    });
+    c.timeScale().fitContent();
   }
   function miniPositions(list) {
     if (!list.length) return '<div class="empty">الان پوزیشن بازی نیست.</div>';
@@ -361,7 +414,7 @@
         var b = e.target.closest("button"); if (!b) return;
         S.eq[id === "eqm" ? "m" : "r"] = b.dataset.v;
         this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
-        clearCharts(); el.innerHTML = ""; equityChart();
+        clearCharts(); el.innerHTML = ""; equityChart(); nodupChart();
       };
     });
     var c = makeChart(el, {rightPriceScale: {scaleMargins: {top: 0.12, bottom: 0.08}},
@@ -2127,6 +2180,8 @@
         if (v) v.textContent = "$" + l.equity.toFixed(2);
         if (r) r.innerHTML = accLine(x[0], l);
       });
+      var nv = document.getElementById("eqv-nodup"), ne = document.getElementById("nd-eq");
+      if (D.accounts.nodup && (nv || ne)) { var ln = "$" + accLive("nodup").equity.toFixed(2); if (nv) nv.textContent = ln; if (ne) ne.textContent = ln; }
       var mp = document.getElementById("minipos");
       if (mp) { mp.innerHTML = miniPositions(openTrades().sort(function (a, b) { return b.created - a.created; })); decorateTips(mp); }
     }
