@@ -251,3 +251,21 @@ def test_restate_risk_scales_older_trades_to_todays_base(cfg):
     assert [r["risk_pct"] for r in rows[:4]] == pytest.approx([1.5, 1.5, 4.0, 4.0])
     assert rows[4]["risk_pct"] == pytest.approx(2.0)          # 0.2% stop x 10x leverage: no room for 4%
     assert rows[0]["risk_pct_opened"] == 0.5 and rows[1]["risk_pct_opened"] == 1.0
+
+
+def test_the_nodup_account_keeps_one_of_two_same_coin_same_side_trades(cfg, tmp_path):
+    from agent.panel import duplicate_pairs
+    c = _cfg(cfg, tmp_path)
+    t1, t2 = START + DAY, START + DAY + 600_000
+    r1, r2 = Repository(c["storage"]["db_path"]), Repository(c["system2"]["db_path"])
+    _add(r1, "DUP", t1, "tp3", _closed(new_signal(_plan(), t1, c), "tp3", 2.0, START + 2 * DAY))
+    _add(r2, "DUP", t2, "tp3", _closed(new_signal(_plan(), t2, c), "tp3", 2.0, START + 2 * DAY))
+    _add(r2, "DUP", START + 3 * DAY, "sl", _closed(new_signal(_plan(), START + 3 * DAY, c), "sl", -1.0, START + 4 * DAY))  # later: not a twin
+    _add(r2, "OTHER", t1, "sl", _closed(new_signal(_plan(), t1, c), "sl", -1.0, START + 2 * DAY))
+    r1.close(); r2.close()
+    d = collect(c, NOW)
+    pairs = duplicate_pairs(d["trades"], NOW)
+    assert [(k["system"], k["created"], x["created"]) for k, x in pairs] == [("سیستم ۱", t1, t2)]   # the first filled stays
+    acc = d["accounts"]
+    assert len(acc["nodup"]["closed"]) == len(acc["all"]["closed"]) - 1
+    assert acc["all"]["balance"] > acc["nodup"]["balance"]                  # the twin won: one win less

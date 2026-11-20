@@ -441,3 +441,7 @@ details.s3gone{margin-top:14px}
 .s3modes .s3mnote{flex:1 1 100%;padding:6px 12px}
 .badge.touch{margin-inline-start:4px;font-size:11px;line-height:18px;animation:tpulse 1.6s ease-in-out 3}
 @keyframes tpulse{50%{opacity:.45}}
+.ndline{display:block;margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);font-size:13px;color:var(--muted);text-decoration:none}
+.ndline b{color:var(--fg)}
+#nodup h3{font-size:14px;margin:14px 0 6px}
+#nodup .eqbox{height:220px;margin-top:10px}
