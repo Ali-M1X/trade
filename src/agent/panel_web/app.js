@@ -5,7 +5,7 @@
   var app = document.getElementById("app");
   var S = {                                   // UI state (kept across data refreshes)
     tab: "home", sel: null, tf: null, hist: {k: "", s: "", side: "", res: "", q: "", sort: "closed", dir: "desc"},
-    cand: {s: ""}, live: {}, liveOk: false, hiddenSeries: {}, pdays: 3
+    cand: {s: ""}, live: {}, touch: {}, liveOk: false, hiddenSeries: {}, pdays: 3
   };
   try { var _pd = +localStorage.getItem("pdays"); if ([1, 3, 7].indexOf(_pd) >= 0) S.pdays = _pd; } catch (e) {}
   try { S.s3mode = localStorage.getItem("s3mode") || "hourly"; } catch (e) {}
@@ -84,6 +84,34 @@
     if (!risk) return t.open_r;
     return t.gross_r + (t.open_frac == null ? 1 : t.open_frac) * t.side * (p - t.entry) / risk;
   }
+  // ---- levels the live price already crossed (2026-11-20, Ali: "TP1 hit but the panel doesn't show it").
+  // The bot books a TP or a stop only once its 5m candle has closed and the next minute run has read it, so
+  // the page marks the touch at once and drops the mark when the booked event arrives. Display only.
+  var TOUCH_FA = {tp1: "TP1 خورد", tp2: "TP2 خورد", sl: "استاپ خورد"};
+  function hasEv(t, k) { return (t.events || []).some(function (e) { return e[0] === k; }); }
+  function touchCheck() {
+    var now = Date.now();
+    openTrades().forEach(function (t) {
+      var L = S.live[t.base];
+      if (!L || !t.filled_at || !isFinite(L.price)) return;
+      var p = L.price, s = t.side > 0 || t.side === "long" ? 1 : -1, m = S.touch[t.id] || {};
+      if (t.tp1 && !hasEv(t, "tp1") && !m.tp1 && s * (p - t.tp1) >= 0) m.tp1 = now;
+      if (t.tp2 && !hasEv(t, "tp2") && !m.tp2 && s * (p - t.tp2) >= 0) m.tp2 = now;
+      if (t.sl_now && !m.sl && s * (p - t.sl_now) <= 0) m.sl = now;
+      S.touch[t.id] = m;
+    });
+  }
+  function touchBadge(t) {
+    var m = t && t.open && S.touch[t.id];
+    if (!m) return "";
+    return ["tp1", "tp2", "sl"].filter(function (k) { return m[k] && (k === "sl" || !hasEv(t, k)) && Date.now() - m[k] < 30 * 60000; })
+      .sort(function (a, b) { return m[a] - m[b]; }).map(function (k) {
+        return ' <span class="badge ' + (k === "sl" ? "neg" : "pos") + ' touch" title="قیمت زنده ساعت ' + esc(jfmt(m[k], "time")) +
+          " به این سطح رسید. ربات آن را بعد از بسته شدن کندل ۵ دقیقه و اجرای بعدی ثبت می‌کند (معمولاً چند دقیقه)؛ تا آن موقع عددهای سود/زیان همان حالت قبلی است." + '">' +
+          TOUCH_FA[k] + " · در انتظار ثبت</span>";
+      }).join("");
+  }
+  function touchSpan(t) { return '<span class="xtouch" data-id="' + esc(t.id) + '">' + touchBadge(t) + "</span>"; }
   function plural(n, w) { return fa(n) + " " + w; }
 
   // ------------------------------------------------------------------ status bar & theme
@@ -264,7 +292,7 @@
     return '<div class="scroll"><table data-defsort="7:desc"><thead><tr><th>کوین</th><th>جهت</th><th>سیستم</th><th>نوع</th><th>اهرم</th><th>قیمت</th><th>سود/زیان</th><th>سود٪</th></tr></thead><tbody>' +
       list.map(function (t) {
         return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + "</b></td><td>" + side(t.side) + "</td><td>" + esc(sysShort(t.system)) +
-          "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(livePrice(t)) + "</td><td>" + RU(openR(t), pnlUsd(t)) + splitNote(t) + "</td>" + pctCell(t) + "</tr>";
+          "</td><td>" + kind(t) + "</td>" + levCell(t) + '<td class="num">' + px(livePrice(t)) + "</td><td>" + RU(openR(t), pnlUsd(t)) + splitNote(t) + touchSpan(t) + "</td>" + pctCell(t) + "</tr>";
       }).join("") + "</tbody>" + totRow([{span: 6, v: "جمع " + fa(list.length) + " پوزیشن"}, posTot(list), ""]) + "</table></div>";
   }
   var BIAS = {long: "فقط لانگ", short: "فقط شورت", both: "هر دو طرف"};
@@ -594,7 +622,7 @@
       rows = open.map(function (t) {
         return rowOpen(t) + "<td>" + sym(t) + "</td><td>" + side(t.side) + "</td><td>" + kind(t) +
           "</td>" + levCell(t) + '<td class="num">' + px(t.entry) + '</td><td class="num xp">' + px(livePrice(t)) + '</td><td class="num"><span class="neg">' + px(t.sl_now) +
-          '</span> / <span class="pos">' + px(t.tp1) + "</span></td><td>" + usd(tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac), false) + "</td>" +
+          '</span> / <span class="pos">' + px(t.tp1) + "</span>" + touchSpan(t) + "</td><td>" + usd(tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac), false) + "</td>" +
           usdCell(marginUsd(t)) + usdCell(outUsd(t), "xo") + '<td class="xu">' + pnlCell(t) + "</td>" + pctCell(t, true) + tsCell(t.filled_at) + "</tr>";
       });
       foot = totRow([{span: 7, v: "جمع " + fa(open.length) + " پوزیشن"}, usd(sumOf(open, function (t) { return tSize(t) == null ? null : tSize(t) * (t.open_frac == null ? 1 : t.open_frac); }), false),
@@ -649,7 +677,7 @@
       cell("بیشترین ۲۴ ساعت", '<span class="ltr">' + px(x.high) + "</span>", "tv-hi") + cell("کمترین ۲۴ ساعت", '<span class="ltr">' + px(x.low) + "</span>", "tv-lo") +
       cell("حجم ۲۴ ساعت", musd(x.vol_usd), "tv-vol") + cell("فاندینگ", fpct(x.funding != null ? x.funding * 100 : null, 4), "tv-fund") +
       (x.oi_usd ? cell("اوپن‌اینترست", musd(x.oi_usd) + " " + fpct(x.oi_change, 1)) : "") + "</div>" +
-      '<div class="xbadges">' + side(t.side) + (t.cand ? '<span class="badge gray">کاندید</span>' : kind(t) + '<span class="badge gray">' + esc(t.status_fa) + "</span>") +
+      '<div class="xbadges">' + side(t.side) + (t.cand ? '<span class="badge gray">کاندید</span>' : kind(t) + '<span class="badge gray">' + esc(t.status_fa) + "</span>" + touchSpan(t)) +
       ' <small>' + esc(t.system) + " · رده " + esc(t.grade || "—") + ' · امتیاز <span class="ltr">' + (t.score || 0).toFixed(1) + "</span></small>" +
       '<span class="xpnl" id="tv-pnl">' + headPnl(t) + "</span></div>";
   }
@@ -1998,7 +2026,12 @@
       S.liveOk = ok;
       if (ok) liveFails = 0; else { liveFails++; liveSkip = Math.min(8, liveFails * 2); }
       status();
+      touchCheck();
       updateLive();
+      document.querySelectorAll(".xtouch[data-id]").forEach(function (el) {
+        var h = touchBadge(byId(el.getAttribute("data-id")));
+        if (el.innerHTML !== h) el.innerHTML = h;
+      });
     });
   }
   function freshTick() {                     // the chart's candles from the exchange, once a minute
@@ -2940,7 +2973,7 @@
       open.concat(pend).map(function (t) {
         var a = aiRow(t.id);
         return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + "</b> <small class=\"muted\">" + esc(sysShort(t.system)) + "</small></td><td>" + side(t.side) + "</td><td>" + kind(t) +
-          "</td>" + levCell(t) + "<td>" + esc(t.status_fa) + "</td><td>" + (t.filled_at ? RU(openR(t), pnlUsd(t)) + splitNote(t) : "—") + "</td>" + pctCell(t) + '<td data-v="' + (a && a.consensus != null ? a.consensus : "") + '">' + (a ? aiPill(a.consensus) : "—") + "</td></tr>";
+          "</td>" + levCell(t) + "<td>" + esc(t.status_fa) + touchSpan(t) + "</td><td>" + (t.filled_at ? RU(openR(t), pnlUsd(t)) + splitNote(t) : "—") + "</td>" + pctCell(t) + '<td data-v="' + (a && a.consensus != null ? a.consensus : "") + '">' + (a ? aiPill(a.consensus) : "—") + "</td></tr>";
       }).join("") + "</tbody>" + totRow([{span: 5, v: "جمع " + fa(open.length) + " پوزیشن + " + fa(pend.length) + " سفارش"}, posTot(open), "", ""]) + "</table></div>" : '<div class="empty">الان پوزیشن یا سفارشی باز نیست.</div>';
     var revs = ((D.ai || {}).reviewers || []).filter(function (r) { return r.key !== "base" && r.n; }).sort(function (a, b) { return (b.trust || 0) - (a.trust || 0); });
     var aiLine = revs.length ? "معتبرترین داور: <b>" + esc(revs[0].name) + "</b> با اعتبار " + fa(revs[0].trust || 0) + " از ۱۰۰ (" + esc((AIV[revs[0].verdict] || AIV.few)[0]) + ")" : "داوران هنوز داده‌ی کافی ندارند.";

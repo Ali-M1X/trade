@@ -439,3 +439,5 @@ details.s3gone{margin-top:14px}
 .xview h2.s3head{font-size:16px;padding:0 14px}
 .s3modes{margin:0 0 12px;padding:0}
 .s3modes .s3mnote{flex:1 1 100%;padding:6px 12px}
+.badge.touch{margin-inline-start:4px;font-size:11px;line-height:18px;animation:tpulse 1.6s ease-in-out 3}
+@keyframes tpulse{50%{opacity:.45}}
