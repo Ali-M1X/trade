@@ -109,13 +109,19 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
     tasks = args.only.split(",") if args.only else due_tasks(now, last, (cfg.get("realtime") or {}).get("periods_min"))
     if not args.only and "run-4h" in tasks and funnel_worker_alive(cfg, repo, now):
         tasks.remove("run-4h")                  # the funnel runs in its own process (run-funnel)
-    print(f"due: {', '.join(tasks)}")
+    from . import positions
+    fast_lane = not args.only and positions.alive(cfg, repo, now)
+    if fast_lane and "run-15m" in tasks:      # open positions run in the fast lane (run-positions)
+        tasks.remove("run-15m")
+    news_lane = news_worker_alive(cfg, repo, now)
+    print(f"due: {', '.join(tasks)}" + (" (positions and system 3 in the fast lane)" if fast_lane else "")
+          + (" (news in its own process)" if news_lane else ""))
     failed = []
     # system 3 first (2026-11-19, Ali: its signals as early as possible): a few seconds, its own database,
     # and it never blocks systems 1 and 2
     from . import system3
     from .store.repository import Repository
-    if system3.enabled(cfg):
+    if system3.enabled(cfg) and not fast_lane:
         repo3 = Repository(system3.settings(cfg)["db_path"])
         try:
             system3.run(cfg, repo3, market.client, cg, notifier, now)
@@ -172,7 +178,11 @@ def cmd_run_scheduled(args, cfg, secrets) -> int:
     except Exception:
         logging.getLogger(__name__).exception("rules fingerprint failed")
     extra = {}
-    if cfg.get("news", {}).get("enabled"):
+    if news_lane:                               # run-news --worker wrote it; the backup carries it
+        ctx = Path(cfg["storage"]["db_path"]).parent / cfg["news"]["context_file"]
+        if ctx.exists():
+            extra = {cfg["news"]["context_file"]: ctx.read_bytes()}
+    elif cfg.get("news", {}).get("enabled"):
         try:
             extra = news_pass(cfg, repo, market, cg, notifier, now)
         except Exception:                       # experimental: never blocks or fails the signal runs
@@ -251,9 +261,35 @@ def news_pass(cfg, repo, market, cg, notifier, now) -> dict[str, bytes]:
     return {cfg["news"]["context_file"]: json.dumps(res["context"], ensure_ascii=False).encode()}
 
 
+def cmd_run_positions(args, cfg, secrets) -> int:
+    """The fast lane (positions.py): systems 1 and 2's open positions after every 5m close, System 3
+    every minute, live.json for the panel. Runs for a few minutes, then systemd restarts it."""
+    from .positions import serve
+    return serve(cfg, secrets, max_minutes=args.max_minutes, once=args.once)
+
+
+NEWS_HB = "news_worker"
+
+
+def news_worker_alive(cfg: dict, repo, now: int) -> bool:
+    """True while `run-news --worker` (its own systemd timer) runs the news, so the minute run leaves
+    it out (2026-11-20: news no longer delays positions and signals)."""
+    stale = (cfg.get("realtime") or {}).get("news_worker_stale_min")
+    hb = repo.get_state(NEWS_HB) or 0
+    return bool(stale) and now - hb < float(stale) * 60_000
+
+
 def cmd_run_news(args, cfg, secrets) -> int:
     from .notify.telegram import Notifier
     storage, repo, market, cg, now = open_context(cfg, secrets)
+    if args.worker:                  # the server's own news process: the minute run backs up
+        repo.set_state(NEWS_HB, now)
+        extra = news_pass(cfg, repo, market, cg, Notifier(cfg, secrets), now)
+        for name, data in extra.items():
+            (Path(cfg["storage"]["db_path"]).parent / name).write_bytes(data)
+        repo.set_state(NEWS_HB, int(time.time() * 1000))
+        repo.close()
+        return 0
     if args.preview:                 # alert today's headlines too, exchange ones included
         cfg = {**cfg, "news": {**cfg["news"], "fast_path": "none"}}
         if repo.get_state("news_seeded") is None:
@@ -432,6 +468,7 @@ COMMANDS = {
     "run-scheduled": cmd_run_scheduled,
     "run-funnel": cmd_run_funnel,
     "run-news": cmd_run_news,
+    "run-positions": cmd_run_positions,
     "backtest": cmd_backtest,
     "backtest-compare": cmd_backtest_compare,
     "backtest-robust": cmd_backtest_robust,
@@ -473,7 +510,12 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--no-cg-charts", action="store_true",
                            help="with --fetch: no CoinGecko daily charts; coin history from "
                            "daily candles, dominance seeded beforehand (scripts/seed_backtest_db.py)")
+        if name == "run-positions":
+            p.add_argument("--once", action="store_true", help="one pass, then exit")
+            p.add_argument("--max-minutes", type=float, help="exit after this long (systemd restarts it)")
         if name == "run-news":
+            p.add_argument("--worker", action="store_true",
+                           help="the server's news process: no backup push (the minute run does it)")
             p.add_argument("--preview", action="store_true",
                            help="also alert headlines already out and exchange news (testing)")
         if name == "panel":
