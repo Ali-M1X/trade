@@ -921,6 +921,9 @@ def insights(cfg: dict, pl: dict) -> None:
     repo = _open(cfg["storage"]["db_path"])
     try:
         pi.excursions(repo, pl["trades"], now)
+        tc = cfg.get("trade") or {}
+        pi.stop_at_tp1(repo, pl["trades"], now,
+                       max(0.0, 1 - (tc.get("tp1_close_pct", 50) + tc.get("tp2_close_pct", 30)) / 100))
         live = sorted({t["base"] for t in pl["trades"] if t["open"] or t["status"] == "pending"})
         pl["beta"] = pi.beta_btc(repo, live, now)
         pl["health"] = pi.health(cfg, repo, now)

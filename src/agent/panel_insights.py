@@ -74,6 +74,40 @@ def excursions(repo, trades: list[dict], now: int) -> None:
             break
 
 
+def stop_at_tp1(repo, trades: list[dict], now: int, rest: float) -> None:
+    """A what-if, display only (2026-11-21, Ali: "if after TP2 the stop moved to TP1 instead of staying at entry,
+    how much would it change our result?"). For every trade past TP2, the first stored candle after TP2 that
+    reached TP1 again, before the real exit: there the remaining `rest` of the position would have closed at
+    TP1. Adds t["tp1stop"] = {"hit": candle open time or None, "tf": candles used, "rest": fraction, "tp2": ts}.
+    The rules do not change: the bot keeps the stop at entry."""
+    if repo is None:
+        return
+    for t in trades:
+        ev = {k: ts for k, ts, _ in t.get("events") or []}
+        if "tp2" not in ev or not (t.get("entry") and t.get("tp1")):
+            continue
+        tp2, end = ev["tp2"], t.get("closed_at") or now
+        out = {"hit": None, "tf": None, "rest": rest, "tp2": tp2}
+        cond = "low<=?" if t["side"] > 0 else "high>=?"
+        # a stop exit is stamped with its candle's open time (that candle counts); a trail exit with the 4H close
+        upto = "ts<=?" if t.get("status") in ("breakeven", "sl") else "ts<?"
+        for tf, step in TF_MS.items():                  # 5m is kept only ~1.5 days: older parts come from 1h/4h
+            frm = tp2 // step * step + step             # from the candle after the one that hit TP2
+            row = repo.conn.execute(
+                rf"SELECT MIN(CASE WHEN {cond} THEN ts END), COUNT(*) FROM candles WHERE symbol LIKE ? ESCAPE '\' "
+                f"AND timeframe=? AND ts>=? AND {upto}", (t["tp1"], _sym(t["base"]), tf, frm, end)).fetchone()
+            if not row or not row[1]:
+                continue
+            if out["tf"] is None:
+                out["tf"] = tf                          # the finest candles seen in the window
+            if row[0] is not None and (out["hit"] is None or row[0] < out["hit"]):
+                out["hit"], out["hit_tf"] = row[0], tf  # the earliest touch any timeframe shows
+        last = (t.get("events") or [[None, None, None]])[-1]
+        if out["hit"] is None and not t.get("open") and last[2] is not None and (last[2] - t["tp1"]) * t["side"] < 0:
+            out["hit"], out["hit_tf"] = t.get("closed_at"), "exit"   # it closed beyond TP1, so it passed TP1 on the way
+        t["tp1stop"] = out
+
+
 def _closes(repo, base: str, since: int, tf: str = "1h") -> dict[int, float]:
     rows = repo.conn.execute(
         r"SELECT ts, close FROM candles WHERE symbol LIKE ? ESCAPE '\' AND timeframe=? AND ts>=? "
