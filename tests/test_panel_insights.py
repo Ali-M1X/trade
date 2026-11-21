@@ -263,3 +263,19 @@ def test_panel_lists_refused_signals_of_both_systems(cfg, tmp_path):
                                                          "grade": "B", "score": 66, "reason": "correlated"}])
     s = skipped_signals(c)
     assert [(x["base"], x["system"]) for x in s] == [("ADA", "سیستم ۲"), ("SOL", "سیستم ۱")]
+
+
+def test_the_tp1_stop_what_if_finds_the_first_return_to_tp1_after_tp2(tmp_path):
+    repo = Repository(tmp_path / "s.db")
+    # long, entry 100, stop 95: TP1 110, TP2 115. After TP2 (candle 1) it dips to 109.9 (candle 3), then runs on
+    _candles(repo, "RUN", "5m", 300_000, [112, 115, 113, 111, 120, 125], NOW)
+    base = {"base": "RUN", "side": 1, "entry": 100.0, "sl": 95.0, "tp1": 110.0, "tp2": 115.0, "filled_at": NOW - HOUR}
+    t = {**base, "status": "tp2", "open": True, "closed_at": None, "events": [["tp1", NOW, 110.0], ["tp2", NOW + 300_000, 115.0]]}
+    held = {**base, "base": "HELD", "status": "tp2", "open": True, "closed_at": None, "events": [["tp2", NOW + 300_000, 115.0]]}
+    _candles(repo, "HELD", "5m", 300_000, [115, 116, 118, 120], NOW)
+    gone = {**base, "base": "GONE", "status": "breakeven", "open": False, "closed_at": NOW + 2 * HOUR,
+            "events": [["tp2", NOW + 300_000, 115.0], ["breakeven", NOW + 2 * HOUR, 100.0]]}     # no candles stored
+    pi.stop_at_tp1(repo, [t, held, gone], NOW + 10 * HOUR, 0.2)
+    assert t["tp1stop"] == {"hit": NOW + 3 * 300_000, "hit_tf": "5m", "tf": "5m", "rest": 0.2, "tp2": NOW + 300_000}
+    assert held["tp1stop"]["hit"] is None and held["tp1stop"]["tf"] == "5m"
+    assert gone["tp1stop"]["hit"] == NOW + 2 * HOUR and gone["tp1stop"]["hit_tf"] == "exit"   # closed under TP1

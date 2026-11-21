@@ -2869,13 +2869,55 @@
         : '<div class="empty">برای این معامله‌ها کندل کافی ذخیره نشده است.</div>') + "</section>" +
       '<section><h2>امتیاز در برابر نتیجه <small>آبی: تأییدشده · زرد: Watch</small></h2>' +
       (scPts.length ? svgScatter(scPts, {xl: "امتیاز سیستم", yl: "نتیجه (R)", vlines: [[55, "Watch"], [65, "B"], [75, "A"]], hlines: [[0, "0"]]}) : '<div class="empty">—</div>') + "</section></div>" +
-      mine;
+      mine + tp1StopSection();
     app.querySelectorAll(".seg").forEach(function (sg) {
       sg.addEventListener("click", function (e) {
         var b = e.target.closest("button"); if (!b) return;
         f[sg.dataset.g] = b.dataset.v; perf(); decorateTips();
       });
     });
+  }
+  // ---- what-if (2026-11-21, Ali: "a test, without changing the rule"): after TP2 the stop of the rest moved to TP1
+  // instead of staying at entry. Display only; the bot keeps the stop at entry.
+  function tp1StopRows() {
+    return trades().filter(function (t) { return t.tp1stop && t.filled_at; }).map(function (t) {
+      var x = t.tp1stop, risk = Math.abs(t.entry - t.sl), sd = t.side > 0 ? 1 : -1;
+      if (!risk) return null;
+      var tp1r = sd * (t.tp1 - t.entry) / risk, last = (t.events || []).slice(-1)[0], act;
+      if (!t.open) act = last && last[2] != null ? sd * (last[2] - t.entry) / risk : null;
+      else { var p = livePrice(t); act = p != null ? sd * (p - t.entry) / risk : null; }
+      var hyp = x.hit ? tp1r : act, d = act == null || hyp == null ? null : x.rest * (hyp - act);
+      return {t: t, x: x, act: act, hyp: hyp, d: d, usd: d == null || tRisk(t) == null ? null : tRisk(t) * d,
+        usdAll: d == null || tRisk(t, true) == null ? null : tRisk(t, true) * d};
+    }).filter(Boolean).sort(function (a, b) { return b.x.tp2 - a.x.tp2; });
+  }
+  function tp1StopSection() {
+    var rows = tp1StopRows();
+    var head = '<section id="tp1stop"><h2>تست فرضی: استاپ روی TP1 بعد از TP2 <small>قانون عوض نشده؛ ربات استاپ را روی نقطه‌ی ورود نگه می‌دارد</small></h2>' +
+      '<p class="muted">بعد از TP2، ' + fa(Math.round((rows[0] ? rows[0].x.rest : 0.2) * 100)) + "٪ پوزیشن باز می‌ماند و استاپش روی نقطه‌ی ورود است. اینجا حساب شده که اگر آن استاپ روی TP1 می‌رفت، چه می‌شد: " +
+      "اولین کندل بعد از TP2 که به TP1 برگشته، آن باقی‌مانده را روی TP1 می‌بست؛ اگر چنین کندلی نبوده، نتیجه همان است. پوزیشن‌های باز با قیمت لحظه‌ای حساب می‌شوند. هزینه‌ی خروج در هر دو حالت یکی فرض شده.</p>";
+    if (!rows.length) return head + '<div class="empty">هنوز معامله‌ای به TP2 نرسیده است.</div></section>';
+    var hit = rows.filter(function (r) { return r.x.hit; });
+    function sumBy(f, key) { return sumOf(rows.filter(f), function (r) { return r[key]; }); }
+    var sumR = sumBy(function () { return true; }, "d");
+    var cards = '<div class="grid g4">' +
+      statCard("معامله‌های رسیده به TP2", fa(rows.length), fa(rows.filter(function (r) { return !r.t.open; }).length) + " بسته · " + fa(rows.filter(function (r) { return r.t.open; }).length) + " باز") +
+      statCard("استاپ TP1 می‌خورد", fa(hit.length), "بقیه: نتیجه همان است") +
+      statCard("اثر روی نتیجه", R(sumR), "جمع R همه‌ی این معامله‌ها") +
+      statCard("اثر دلاری", usd(sumBy(function (r) { return r.t.approved; }, "usd")) + ' <small class="muted">تأییدشده</small>',
+        "Watch " + usd(sumBy(function (r) { return !r.t.approved; }, "usd")) + " · همه با هم " + usd(sumBy(function () { return true; }, "usdAll"))) + "</div>";
+    var body = rows.map(function (r) {
+      var t = r.t, x = r.x;
+      return '<tr class="click" data-open="' + esc(t.id) + '"><td><b>' + esc(t.base) + '</b> <small class="muted">' + esc(sysShort(t.system)) + "</small></td><td>" + side(t.side) + "</td><td>" + kind(t) +
+        "</td><td>" + esc(t.status_fa) + "</td>" + tsCell(x.tp2) +
+        '<td data-v="' + (x.hit || "") + '">' + (x.hit ? '<span class="badge warn">بله</span> <small>' + esc(jfmt(x.hit)) + "</small>" : x.tf ? '<span class="badge gray">نه</span>' : '<span class="muted">کندل ذخیره نیست</span>') +
+        (x.hit_tf === "exit" ? ' <small class="muted">(خروج زیر TP1 بود)</small>' : (x.hit ? x.hit_tf : x.tf) && (x.hit ? x.hit_tf : x.tf) !== "5m" ? ' <small class="muted">(کندل ' + esc(x.hit ? x.hit_tf : x.tf) + ")</small>" : "") + "</td><td>" + R(r.act) + (t.open ? ' <small class="muted">الان</small>' : "") + "</td><td>" + R(r.hyp) +
+        '</td><td data-v="' + (r.d == null ? "" : r.d.toFixed(4)) + '">' + R(r.d) + '</td><td data-v="' + (r.usd == null ? "" : r.usd.toFixed(4)) + '">' + usd(r.usd) + "</td></tr>";
+    }).join("");
+    return head + cards + '<div class="scroll"><table data-defsort="4:desc"><thead><tr><th>کوین</th><th>جهت</th><th>نوع</th><th>وضعیت</th><th>زمان TP2</th><th>به TP1 برگشت؟</th>' +
+      "<th>باقی‌مانده: واقعی</th><th>باقی‌مانده: با استاپ TP1</th><th>اثر روی معامله</th><th>اثر دلاری</th></tr></thead><tbody>" + body + "</tbody>" +
+      totRow([{span: 8, v: "جمع " + fa(rows.length) + " معامله"}, R(sumR), usd(sumOf(rows, function (r) { return r.usd; }))]) + "</table></div>" +
+      '<p class="muted">ستون‌های «باقی‌مانده» قیمتی است که بخشِ بازمانده بعد از TP2 با آن بسته شد یا الان هست، به R. «اثر روی معامله» = سهم باقی‌مانده × فرق این دو. اثر دلاری به حساب خود معامله (تأییدشده یا Watch) است.</p></section>';
   }
   function statCard(label, v, sub) { return '<div class="stat"><span class="l">' + label + '</span><span class="v">' + v + "</span>" + (sub ? "<small>" + sub + "</small>" : "") + "</div>"; }
   function perfMine() {
